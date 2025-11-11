@@ -1,10 +1,10 @@
-import { Pool } from 'pg';
-import dotenv from 'dotenv';
+import { Pool } from "pg";
+import dotenv from "dotenv";
 
 dotenv.config();
 
 if (!process.env.DATABASE_URL) {
-  throw new Error('DATABASE_URL is not set in .env');
+  throw new Error("DATABASE_URL is not set in .env");
 }
 
 export const pool = new Pool({
@@ -15,8 +15,8 @@ export const pool = new Pool({
 export async function testDbConnection() {
   const client = await pool.connect();
   try {
-    const result = await client.query('SELECT NOW()');
-    console.log('📦 DB connected. Time:', result.rows[0].now);
+    const result = await client.query("SELECT NOW()");
+    console.log("📦 DB connected. Time:", result.rows[0].now);
   } finally {
     client.release();
   }

@@ -2,7 +2,7 @@ import { Request, Response } from "express";
 import { pool } from "../config/database";
 
 // GET /api/loads
-export async function getLoads(req: Request, res: Response) {
+export async function getLoads(_req: Request, res: Response) {
   try {
     const result = await pool.query(
       `

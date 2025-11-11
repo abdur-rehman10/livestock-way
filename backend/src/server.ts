@@ -9,8 +9,6 @@ dotenv.config();
 const app = express();
 app.use(cors());
 app.use(express.json());
-// Routes
-app.use("/api/loads", loadRoutes);
 
 app.get("/", (_req, res) => {
   res.send("LivestockWay backend is up");
@@ -36,6 +34,8 @@ app.get("/db-test", async (_req, res) => {
     res.status(500).json({ status: "ERROR", message: "Database connection failed" });
   }
 });
+
+app.use("/api/loads", loadRoutes);
 
 const PORT = process.env.PORT || 5000;
 app.listen(PORT, () => {
