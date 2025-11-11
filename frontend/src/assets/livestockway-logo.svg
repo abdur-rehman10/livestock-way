@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 160 48">
+  <rect width="160" height="48" rx="12" fill="#172039"/>
+  <path d="M34 12h-6l-6 12 6 12h6l-6-12 6-12z" fill="#29CA8D"/>
+  <path d="M40 24c0-6.627 5.373-12 12-12h16a4 4 0 0 1 4 4v16a4 4 0 0 1-4 4H52c-6.627 0-12-5.373-12-12z" fill="#29CA8D" opacity="0.2"/>
+  <text x="74" y="28" fill="#FFFFFF" font-family="Arial, sans-serif" font-size="18" font-weight="bold">LivestockWay</text>
+</svg>
