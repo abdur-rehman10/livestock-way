@@ -1,4 +1,6 @@
-import { useState, useEffect } from 'react';
+import React, { useState, useEffect } from "react";
+import { fetchLoads } from "../lib/api";
+import type { Load as ApiLoad } from "../lib/api";
 import { Button } from '../components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/card';
 import { Badge } from '../components/ui/badge';
@@ -44,63 +46,7 @@ interface Load {
   bids?: number;
 }
 
-const mockLoads: Load[] = [
-  {
-    id: 'L101',
-    species: 'Cattle',
-    quantity: '50 head',
-    origin: 'Austin, TX',
-    destination: 'Dallas, TX',
-    distance: '195 miles',
-    postedBy: 'Green Acres Ranch',
-    postedDate: 'Oct 28, 2025',
-    pickupDate: 'Oct 30, 2025',
-    price: '$850',
-    status: 'open',
-    bids: 3,
-  },
-  {
-    id: 'L102',
-    species: 'Sheep',
-    quantity: '120 head',
-    origin: 'San Antonio, TX',
-    destination: 'Houston, TX',
-    distance: '197 miles',
-    postedBy: 'Hill Country Livestock',
-    postedDate: 'Oct 28, 2025',
-    pickupDate: 'Oct 31, 2025',
-    price: '$920',
-    status: 'open',
-    bids: 5,
-  },
-  {
-    id: 'L103',
-    species: 'Pigs',
-    quantity: '80 head',
-    origin: 'Waco, TX',
-    destination: 'Fort Worth, TX',
-    distance: '95 miles',
-    postedBy: 'Central TX Farms',
-    postedDate: 'Oct 27, 2025',
-    pickupDate: 'Oct 29, 2025',
-    price: '$520',
-    status: 'open',
-    bids: 2,
-  },
-  {
-    id: 'L104',
-    species: 'Cattle',
-    quantity: '30 head',
-    origin: 'Lubbock, TX',
-    destination: 'Amarillo, TX',
-    distance: '124 miles',
-    postedBy: 'West Texas Ranch',
-    postedDate: 'Oct 28, 2025',
-    pickupDate: 'Nov 1, 2025',
-    price: '$680',
-    status: 'assigned',
-  },
-];
+// const mockLoads: Load[] = [ ... ];
 
 const recommendedCarriers = [
   {
@@ -142,7 +88,9 @@ export function Loadboard() {
   const [isAutoMatchOpen, setIsAutoMatchOpen] = useState(false);
   const [selectedLoad, setSelectedLoad] = useState<Load | null>(null);
   const [bidAmount, setBidAmount] = useState('');
-  const [isLoading, setIsLoading] = useState(false);
+  const [loads, setLoads] = useState<ApiLoad[]>([]);
+  const [isLoading, setIsLoading] = useState<boolean>(true);
+  const [error, setError] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [saveFilterName, setSaveFilterName] = useState('');
   
@@ -190,8 +138,66 @@ export function Loadboard() {
     toast.info(`Viewing ${load.bids || 0} bids for Load #${load.id}`);
   };
 
+  useEffect(() => {
+    let isMounted = true;
+
+    async function loadData() {
+      try {
+        setIsLoading(true);
+        setError(null);
+
+        const data = await fetchLoads();
+
+        if (isMounted) {
+          setLoads(data);
+        }
+      } catch (err: any) {
+        console.error("Failed to fetch loads:", err);
+        if (isMounted) {
+          setError("Failed to load loads. Please try again.");
+        }
+      } finally {
+        if (isMounted) {
+          setIsLoading(false);
+        }
+      }
+    }
+
+    loadData();
+
+    return () => {
+      isMounted = false;
+    };
+  }, []);
+
+  const transformedLoads: Load[] = loads.map((load) => {
+    const normalizedStatus: Load['status'] =
+      load.status === 'assigned'
+        ? 'assigned'
+        : load.status === 'in-transit'
+          ? 'in-transit'
+          : 'open';
+
+    return {
+      id: `L${load.id}`,
+      species: load.species,
+      quantity: `${load.quantity} head`,
+      origin: load.pickup_location,
+      destination: load.dropoff_location,
+      distance: '0 miles',
+      postedBy: load.created_by ?? 'Unknown shipper',
+      postedDate: new Date(load.created_at).toLocaleDateString(),
+      pickupDate: new Date(load.pickup_date).toLocaleDateString(),
+      price: load.offer_price
+        ? `$${Number(load.offer_price).toFixed(0)}`
+        : '$0',
+      status: normalizedStatus,
+      bids: undefined,
+    };
+  });
+
   // Apply real filtering
-  const filteredLoads = filterLoads(mockLoads, {
+  const filteredLoads = filterLoads(transformedLoads, {
     species: filters.species || undefined,
     origin: filters.origin || undefined,
     destination: filters.destination || undefined,
@@ -357,13 +363,13 @@ export function Loadboard() {
       {/* View Modes */}
       {viewMode === 'list' ? (
         <div className="space-y-3">
-          {isLoading ? (
-            <>
-              <LoadCardSkeleton />
-              <LoadCardSkeleton />
-              <LoadCardSkeleton />
-            </>
-          ) : filteredLoads.length === 0 ? (
+          {isLoading && (
+            <div className="p-4 text-gray-500">Loading loads...</div>
+          )}
+          {error && (
+            <div className="p-4 text-red-500 text-sm">{error}</div>
+          )}
+          {!isLoading && !error && filteredLoads.length === 0 && (
             <Card>
               <CardContent className="p-12 text-center">
                 <Filter className="w-12 h-12 mx-auto mb-3 text-gray-400" />
@@ -380,7 +386,8 @@ export function Loadboard() {
                 )}
               </CardContent>
             </Card>
-          ) : (
+          )}
+          {!isLoading && !error && filteredLoads.length > 0 && (
             <>
               {filteredLoads.map((load) => (
             <Card key={load.id} className="hover:shadow-md transition-shadow">
