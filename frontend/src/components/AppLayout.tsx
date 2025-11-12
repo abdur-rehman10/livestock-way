@@ -24,6 +24,7 @@ import {
   BarChart3,
   Wrench,
   ShoppingCart,
+  ClipboardList,
 } from "lucide-react";
 import { ThemeToggle } from "./ThemeToggle";
 import { NotificationsCenter } from "./NotificationsCenter";
@@ -49,6 +50,7 @@ export function AppLayout({ children, userRole, onLogout }: AppLayoutProps) {
       routes: [
         { path: '/hauler/dashboard', icon: LayoutDashboard, label: 'Dashboard' },
         { path: '/hauler/loadboard', icon: Package, label: 'Loadboard' },
+        { path: '/hauler/my-loads', icon: ClipboardList, label: 'My Loads' },
         { path: '/hauler/fleet', icon: Truck, label: 'Fleet' },
         { path: '/hauler/trips', icon: MapPin, label: 'Trips' },
         { path: '/hauler/earnings', icon: DollarSign, label: 'Earnings' },

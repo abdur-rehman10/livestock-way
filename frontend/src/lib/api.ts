@@ -16,6 +16,8 @@ export interface Load {
   status: string;
   created_by: string | null;
   created_at: string;
+  assigned_to: string | null;
+  assigned_at: string | null;
 }
 
 export interface CreateLoadPayload {
@@ -106,4 +108,18 @@ export async function assignLoad(
   const json = await response.json();
 
   return json.data as Load;
+}
+
+export async function fetchLoadsByAssigned(haulerId: string): Promise<Load[]> {
+  const url = new URL(`${API_BASE_URL}/api/loads`);
+  url.searchParams.set("assigned_to", haulerId);
+
+  const res = await fetch(url.toString());
+
+  if (!res.ok) {
+    throw new Error(`Failed to fetch assigned loads (${res.status})`);
+  }
+
+  const json = await res.json();
+  return json.data as Load[];
 }
