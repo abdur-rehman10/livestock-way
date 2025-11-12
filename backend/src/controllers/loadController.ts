@@ -2,10 +2,11 @@ import { Request, Response } from "express";
 import { pool } from "../config/database";
 
 // GET /api/loads
-export async function getLoads(_req: Request, res: Response) {
+export async function getLoads(req: Request, res: Response) {
   try {
-    const result = await pool.query(
-      `
+    const createdBy = req.query.created_by as string | undefined;
+
+    let query = `
       SELECT
         id,
         title,
@@ -17,11 +18,23 @@ export async function getLoads(_req: Request, res: Response) {
         offer_price,
         status,
         created_by,
-        created_at
+        created_at,
+        assigned_to,
+        assigned_at
       FROM loads
-      ORDER BY pickup_date ASC
-      `
-    );
+    `;
+    const values: Array<string> = [];
+
+    if (createdBy) {
+      query += ` WHERE created_by = $1`;
+      values.push(createdBy);
+    } else {
+      query += ` WHERE status = 'open'`;
+    }
+
+    query += ` ORDER BY pickup_date ASC`;
+
+    const result = await pool.query(query, values);
 
     return res.status(200).json({
       status: "OK",
@@ -112,5 +125,71 @@ export async function createLoad(req: Request, res: Response) {
     return res
       .status(500)
       .json({ status: "ERROR", message: "Failed to create load" });
+  }
+}
+
+// POST /api/loads/:id/assign
+export async function assignLoad(req: Request, res: Response) {
+  try {
+    const { id } = req.params;
+    const { assigned_to } = req.body;
+
+    if (!id) {
+      return res.status(400).json({
+        status: "ERROR",
+        message: "Load ID is required",
+      });
+    }
+
+    if (!assigned_to) {
+      return res.status(400).json({
+        status: "ERROR",
+        message: "assigned_to is required",
+      });
+    }
+
+    const updateQuery = `
+      UPDATE loads
+      SET
+        assigned_to = $1,
+        assigned_at = NOW(),
+        status = 'assigned'
+      WHERE id = $2 AND status = 'open'
+      RETURNING
+        id,
+        title,
+        species,
+        quantity,
+        pickup_location,
+        dropoff_location,
+        pickup_date,
+        offer_price,
+        status,
+        created_by,
+        created_at,
+        assigned_to,
+        assigned_at
+    `;
+
+    const values = [assigned_to, id];
+    const result = await pool.query(updateQuery, values);
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({
+        status: "ERROR",
+        message: "Load not found or not open",
+      });
+    }
+
+    return res.status(200).json({
+      status: "OK",
+      data: result.rows[0],
+    });
+  } catch (error) {
+    console.error("Error assigning load:", error);
+    return res.status(500).json({
+      status: "ERROR",
+      message: "Failed to assign load",
+    });
   }
 }
