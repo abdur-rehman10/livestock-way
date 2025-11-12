@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import React, { useEffect, useState } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/card';
 import { Badge } from '../components/ui/badge';
 import { Button } from '../components/ui/button';
@@ -6,8 +6,9 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '../components/ui/tabs'
 import { PostLoadDialog } from './PostLoadDialog';
 import { MapPin, Clock, Truck, DollarSign, Edit, Copy, X, Eye } from 'lucide-react';
 import { toast } from 'sonner';
+import { fetchMyLoads, Load as ApiLoad } from "../lib/api";
 
-interface Load {
+interface MyLoad {
   id: string;
   species: string;
   quantity: string;
@@ -20,67 +21,71 @@ interface Load {
   postedDate: string;
 }
 
-const mockLoads: Load[] = [
-  {
-    id: 'L001',
-    species: 'Cattle',
-    quantity: '50 head',
-    pickup: 'Austin, TX',
-    dropoff: 'Dallas, TX',
-    pickupDate: 'Today, 8:00 AM',
-    price: '$850',
-    status: 'active',
-    driver: 'John Smith',
-    postedDate: 'Oct 27, 2025',
-  },
-  {
-    id: 'L002',
-    species: 'Sheep',
-    quantity: '120 head',
-    pickup: 'San Antonio, TX',
-    dropoff: 'Houston, TX',
-    pickupDate: 'Tomorrow, 6:00 AM',
-    price: '$920',
-    status: 'active',
-    driver: 'Maria Garcia',
-    postedDate: 'Oct 27, 2025',
-  },
-  {
-    id: 'L003',
-    species: 'Pigs',
-    quantity: '80 head',
-    pickup: 'Waco, TX',
-    dropoff: 'Fort Worth, TX',
-    pickupDate: 'Oct 30, 2025',
-    price: '$520',
-    status: 'pending',
-    postedDate: 'Oct 28, 2025',
-  },
-];
-
-const completedLoads: Load[] = [
-  {
-    id: 'L004',
-    species: 'Cattle',
-    quantity: '40 head',
-    pickup: 'Houston, TX',
-    dropoff: 'Austin, TX',
-    pickupDate: 'Oct 25, 2025',
-    price: '$720',
-    status: 'completed',
-    driver: 'Robert Johnson',
-    postedDate: 'Oct 24, 2025',
-  },
-];
-
 interface MyLoadsTabProps {
-  onTrackLoad?: (load: Load) => void;
+  onTrackLoad?: (load: MyLoad) => void;
 }
 
 export function MyLoadsTab({ onTrackLoad }: MyLoadsTabProps) {
   const [activeTab, setActiveTab] = useState<'pending' | 'active' | 'completed' | 'cancelled'>('active');
   const [isEditOpen, setIsEditOpen] = useState(false);
-  const [selectedLoad, setSelectedLoad] = useState<Load | null>(null);
+  const [selectedLoad, setSelectedLoad] = useState<MyLoad | null>(null);
+  const [myLoads, setMyLoads] = useState<MyLoad[]>([]);
+  const [isLoading, setIsLoading] = useState<boolean>(true);
+  const [error, setError] = useState<string | null>(null);
+  const CURRENT_SHIPPER_ID = "demo_shipper_1";
+
+  useEffect(() => {
+    let isMounted = true;
+
+    async function loadMyLoads() {
+      try {
+        setIsLoading(true);
+        setError(null);
+
+        const data = await fetchMyLoads(CURRENT_SHIPPER_ID);
+
+        if (isMounted) {
+          const transformed: MyLoad[] = data.map((load: ApiLoad) => ({
+            id: `L${load.id}`,
+            species: load.species,
+            quantity: `${load.quantity} head`,
+            pickup: load.pickup_location,
+            dropoff: load.dropoff_location,
+            pickupDate: new Date(load.pickup_date).toLocaleString(),
+            price: load.offer_price
+              ? `$${Number(load.offer_price).toFixed(0)}`
+              : "$0",
+            status:
+              load.status === "assigned"
+                ? "active"
+                : load.status === "completed"
+                  ? "completed"
+                  : load.status === "cancelled"
+                    ? "cancelled"
+                    : "pending",
+            postedDate: new Date(load.created_at).toLocaleDateString(),
+            driver: undefined,
+          }));
+
+          setMyLoads(transformed);
+        }
+      } catch (err: any) {
+        console.error('Failed to load loads:', err);
+        setError(err?.message || 'Failed to load loads');
+        toast.error('Failed to load your loads');
+      } finally {
+        if (isMounted) {
+          setIsLoading(false);
+        }
+      }
+    }
+
+    loadMyLoads();
+
+    return () => {
+      isMounted = false;
+    };
+  }, []);
 
   const handleEdit = (load: Load) => {
     if (load.status !== 'pending') {
@@ -106,8 +111,25 @@ export function MyLoadsTab({ onTrackLoad }: MyLoadsTabProps) {
     toast.success('Load cancelled');
   };
 
-  const pendingLoads = mockLoads.filter(l => l.status === 'pending');
-  const activeLoads = mockLoads.filter(l => l.status === 'active');
+  const pendingLoads = myLoads.filter(l => l.status === 'pending');
+  const activeLoads = myLoads.filter(l => l.status === 'active');
+  const completedLoads = myLoads.filter(l => l.status === 'completed');
+
+  if (isLoading) {
+    return (
+      <div className="p-6">
+        <p className="text-sm text-gray-500">Loading your loads...</p>
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="p-6">
+        <p className="text-sm text-red-500">{error}</p>
+      </div>
+    );
+  }
 
   const renderLoadCard = (load: Load) => {
     const isPending = load.status === 'pending';
@@ -226,50 +248,47 @@ export function MyLoadsTab({ onTrackLoad }: MyLoadsTabProps) {
 
   return (
     <div className="p-4 space-y-4">
-      <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as any)} className="w-full">
-        <TabsList className="w-full grid grid-cols-4">
-          <TabsTrigger value="pending">
-            Pending
-            {pendingLoads.length > 0 && (
-              <Badge variant="secondary" className="ml-1">
-                {pendingLoads.length}
-              </Badge>
-            )}
-          </TabsTrigger>
-          <TabsTrigger value="active">
-            Active
-            {activeLoads.length > 0 && (
-              <Badge variant="secondary" className="ml-1">
-                {activeLoads.length}
-              </Badge>
-            )}
-          </TabsTrigger>
-          <TabsTrigger value="completed">Completed</TabsTrigger>
-          <TabsTrigger value="cancelled">Cancelled</TabsTrigger>
-        </TabsList>
+      {isLoading && (
+        <div className="p-4 text-sm text-gray-500">
+          Loading your loads...
+        </div>
+      )}
 
-        <TabsContent value="pending" className="space-y-3 mt-4">
-          {pendingLoads.length === 0
-            ? renderEmptyState('pending')
-            : pendingLoads.map(renderLoadCard)}
-        </TabsContent>
+      {error && (
+        <div className="p-4 text-sm text-red-500">{error}</div>
+      )}
 
-        <TabsContent value="active" className="space-y-3 mt-4">
-          {activeLoads.length === 0
-            ? renderEmptyState('active')
-            : activeLoads.map(renderLoadCard)}
-        </TabsContent>
+      {!isLoading && !error && myLoads.length === 0 && (
+        <div className="p-4 text-sm text-gray-500">
+          You haven't posted any loads yet.
+        </div>
+      )}
 
-        <TabsContent value="completed" className="space-y-3 mt-4">
-          {completedLoads.length === 0
-            ? renderEmptyState('completed')
-            : completedLoads.map(renderLoadCard)}
-        </TabsContent>
-
-        <TabsContent value="cancelled" className="space-y-3 mt-4">
-          {renderEmptyState('cancelled')}
-        </TabsContent>
-      </Tabs>
+      {!isLoading && !error && myLoads.length > 0 && (
+        <div className="space-y-4">
+          {myLoads.map((load) => (
+            <Card key={load.id}>
+              <CardContent className="p-4 space-y-2">
+                <div className="font-semibold">{load.species}</div>
+                <div className="text-sm text-gray-500">
+                  {load.quantity} • {load.pickup} → {load.dropoff}
+                </div>
+                <div className="text-sm text-gray-600">
+                  Pickup: {load.pickupDate}
+                </div>
+                {load.price && (
+                  <div className="text-sm font-medium">
+                    Offer: {load.price}
+                  </div>
+                )}
+                <div className="text-xs text-gray-400">
+                  Status: {load.status}
+                </div>
+              </CardContent>
+            </Card>
+          ))}
+        </div>
+      )}
 
       {/* Edit/Duplicate Load Dialog */}
       <PostLoadDialog
