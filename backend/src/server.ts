@@ -1,7 +1,7 @@
 import express from "express";
 import cors from "cors";
 import dotenv from "dotenv";
-import { pool, testDbConnection } from "./config/database";
+import { testDbConnection, pool } from "./config/database";
 import loadRoutes from "./routes/loadRoutes";
 
 dotenv.config();
@@ -14,21 +14,21 @@ app.get("/", (_req, res) => {
   res.send("LivestockWay backend is up");
 });
 
+// Health route
 app.get("/health", (_req, res) => {
   res
     .status(200)
     .json({ status: "OK", message: "LivestockWay backend is running 🚀" });
 });
 
+// DB test route
 app.get("/db-test", async (_req, res) => {
   try {
     await testDbConnection();
     const result = await pool.query("SELECT NOW() AS now");
-    res.status(200).json({
-      status: "OK",
-      message: "Database reachable",
-      time: result.rows[0].now,
-    });
+    res
+      .status(200)
+      .json({ status: "OK", message: "Database reachable", time: result.rows[0].now });
   } catch (err) {
     console.error("Database test failed:", err);
     res.status(500).json({ status: "ERROR", message: "Database connection failed" });
