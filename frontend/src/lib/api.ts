@@ -18,6 +18,17 @@ export interface Load {
   created_at: string;
 }
 
+export interface CreateLoadPayload {
+  title: string;
+  species: string;
+  quantity: number;
+  pickup_location: string;
+  dropoff_location: string;
+  pickup_date: string; // ISO string
+  offer_price?: number | null;
+  created_by?: string | null;
+}
+
 /**
  * Fetch all loads for the public loadboard.
  */
@@ -32,4 +43,25 @@ export async function fetchLoads(): Promise<Load[]> {
 
   // Backend returns { status: "OK", data: [...] }
   return json.data as Load[];
+}
+
+export async function createLoad(payload: CreateLoadPayload): Promise<Load> {
+  const response = await fetch(`${API_BASE_URL}/api/loads`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(payload),
+  });
+
+  if (!response.ok) {
+    const errorText = await response.text().catch(() => "");
+    throw new Error(
+      `Failed to create load (status ${response.status}): ${errorText}`
+    );
+  }
+
+  const json = await response.json();
+
+  return json.data as Load;
 }
