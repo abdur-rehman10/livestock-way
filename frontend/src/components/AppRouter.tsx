@@ -8,6 +8,7 @@ import { ForgotPassword } from '../pages/ForgotPassword';
 import { ShipperDashboard } from '../pages/ShipperDashboard';
 import { DriverDashboard } from '../pages/DriverDashboard';
 import { HaulerDashboard } from '../pages/HaulerDashboard';
+import HaulerMyLoads from '../pages/HaulerMyLoads';
 import StakeholderDashboard from '../pages/StakeholderDashboard';
 import { SuperAdminDashboard } from '../pages/SuperAdminDashboard';
 import { AppLayout } from './AppLayout';
@@ -223,7 +224,8 @@ export function AppRouter({ showKeyboardShortcuts, onKeyboardShortcutsToggle }: 
             {userRole === 'hauler' ? (
               <AppLayout userRole="hauler" onLogout={handleLogout}>
                 <Routes>
-                  <Route path="dashboard" element={<HaulerDashboard onLogout={handleLogout} />} />
+                <Route path="dashboard" element={<HaulerDashboard onLogout={handleLogout} />} />
+                <Route path="my-loads" element={<HaulerMyLoads />} />
                   <Route path="loadboard" element={<Loadboard />} />
                   <Route path="fleet" element={<FleetManagement />} />
                   <Route path="trips" element={<TripsTab onViewTrip={() => toast.info('Trip view coming soon')} />} />

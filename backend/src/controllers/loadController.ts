@@ -5,6 +5,7 @@ import { pool } from "../config/database";
 export async function getLoads(req: Request, res: Response) {
   try {
     const createdBy = req.query.created_by as string | undefined;
+    const assignedTo = req.query.assigned_to as string | undefined;
 
     let query = `
       SELECT
@@ -23,11 +24,22 @@ export async function getLoads(req: Request, res: Response) {
         assigned_at
       FROM loads
     `;
+
+    const clauses: string[] = [];
     const values: Array<string> = [];
 
     if (createdBy) {
-      query += ` WHERE created_by = $1`;
+      clauses.push(`created_by = $${values.length + 1}`);
       values.push(createdBy);
+    }
+
+    if (assignedTo) {
+      clauses.push(`assigned_to = $${values.length + 1}`);
+      values.push(assignedTo);
+    }
+
+    if (clauses.length) {
+      query += ` WHERE ` + clauses.join(" AND ");
     } else {
       query += ` WHERE status = 'open'`;
     }
