@@ -188,10 +188,10 @@ export function Loadboard() {
   }, []);
 
   const transformedLoads: Load[] = loads.map((load) => {
-    const normalizedStatus: Load['status'] =
+    const normalizedStatus: "open" | "assigned" | "in-transit" =
       load.status === 'assigned'
         ? 'assigned'
-        : load.status === 'in-transit'
+        : load.status === 'in_transit'
           ? 'in-transit'
           : 'open';
 

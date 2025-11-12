@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Link, useNavigate, useLocation } from "react-router-dom";
+import { Link, NavLink, useNavigate, useLocation } from "react-router-dom";
 import { Button } from "./ui/button";
 import { Avatar, AvatarFallback } from "./ui/avatar";
 import { Separator } from "./ui/separator";
@@ -24,6 +24,7 @@ import {
   BarChart3,
   Wrench,
   ShoppingCart,
+  ClipboardList,
 } from "lucide-react";
 import { ThemeToggle } from "./ThemeToggle";
 import { NotificationsCenter } from "./NotificationsCenter";
@@ -49,6 +50,7 @@ export function AppLayout({ children, userRole, onLogout }: AppLayoutProps) {
       routes: [
         { path: '/hauler/dashboard', icon: LayoutDashboard, label: 'Dashboard' },
         { path: '/hauler/loadboard', icon: Package, label: 'Loadboard' },
+        { path: '/hauler/my-loads', icon: ClipboardList, label: 'My Loads' },
         { path: '/hauler/fleet', icon: Truck, label: 'Fleet' },
         { path: '/hauler/trips', icon: MapPin, label: 'Trips' },
         { path: '/hauler/earnings', icon: DollarSign, label: 'Earnings' },
@@ -181,24 +183,24 @@ export function AppLayout({ children, userRole, onLogout }: AppLayoutProps) {
             <div className="space-y-1">
               {config.routes.map((route) => {
                 const Icon = route.icon;
-                const isActive = isActiveRoute(route.path);
-                
                 return (
-                  <Link
+                  <NavLink
                     key={route.path}
                     to={route.path}
-                    className={`
-                      flex items-center gap-3 px-3 py-2.5 rounded-lg transition-colors
-                      ${isActive 
-                        ? 'bg-gray-100 dark:bg-gray-800 text-gray-900 dark:text-gray-100' 
-                        : 'text-gray-600 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-800'
-                      }
-                      ${!isSidebarOpen && 'justify-center'}
-                    `}
+                    className={({ isActive }) =>
+                      [
+                        "flex items-center gap-3 px-3 py-2.5 rounded-lg transition-colors",
+                        isActive
+                          ? "bg-emerald-50 text-emerald-700"
+                          : "text-gray-600 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-800",
+                        !isSidebarOpen && "justify-center",
+                      ].join(" ")
+                    }
+                    data-testid={`nav-${route.path.replace(/[\\/]/g, "-")}`}
                   >
                     <Icon className="w-5 h-5 flex-shrink-0" />
                     {isSidebarOpen && <span>{route.label}</span>}
-                  </Link>
+                  </NavLink>
                 );
               })}
             </div>

@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { Button } from '../components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/card';
 import { Badge } from '../components/ui/badge';
@@ -140,6 +141,7 @@ const drivers = [
 export function HaulerDashboard({ onLogout }: HaulerDashboardProps) {
   const [activeTab, setActiveTab] = useState('dashboard');
   const [isPostTruckOpen, setIsPostTruckOpen] = useState(false);
+  const navigate = useNavigate();
 
   return (
     <div className="min-h-screen bg-gray-50">
@@ -198,6 +200,13 @@ export function HaulerDashboard({ onLogout }: HaulerDashboardProps) {
                 className="data-[state=active]:border-b-2 data-[state=active]:border-[#29CA8D] rounded-none"
               >
                 Compliance
+              </TabsTrigger>
+              <TabsTrigger
+                value="my-loads"
+                className="data-[state=active]:border-b-2 data-[state=active]:border-[#29CA8D] rounded-none"
+                onClick={() => navigate('/hauler/my-loads')}
+              >
+                My Loads
               </TabsTrigger>
             </TabsList>
           </Tabs>

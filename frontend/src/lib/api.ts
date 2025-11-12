@@ -1,7 +1,4 @@
-// frontend/src/lib/api.ts
-
-// You can later move this to an env variable (Vite style).
-const API_BASE_URL =
+export const API_BASE_URL =
   import.meta.env.VITE_API_URL || "http://localhost:4000";
 
 export interface Load {
@@ -11,11 +8,16 @@ export interface Load {
   quantity: number;
   pickup_location: string;
   dropoff_location: string;
-  pickup_date: string; // comes as ISO string from backend
+  pickup_date: string;
   offer_price: string | null;
-  status: string;
+  status: "open" | "assigned" | "in_transit" | "delivered";
   created_by: string | null;
   created_at: string;
+  assigned_to?: string | null;
+  assigned_at?: string | null;
+  started_at?: string | null;
+  completed_at?: string | null;
+  epod_url?: string | null;
 }
 
 export interface CreateLoadPayload {
@@ -24,63 +26,55 @@ export interface CreateLoadPayload {
   quantity: number;
   pickup_location: string;
   dropoff_location: string;
-  pickup_date: string; // ISO string
+  pickup_date: string;
   offer_price?: number | null;
   created_by?: string | null;
 }
 
-/**
- * Fetch all loads for the public loadboard.
- */
 export async function fetchLoads(): Promise<Load[]> {
   const response = await fetch(`${API_BASE_URL}/api/loads`);
-
   if (!response.ok) {
     throw new Error(`Failed to fetch loads (status ${response.status})`);
   }
-
   const json = await response.json();
-
-  // Backend returns { status: "OK", data: [...] }
   return json.data as Load[];
 }
 
 export async function createLoad(payload: CreateLoadPayload): Promise<Load> {
   const response = await fetch(`${API_BASE_URL}/api/loads`, {
     method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-    },
+    headers: { "Content-Type": "application/json" },
     body: JSON.stringify(payload),
   });
-
   if (!response.ok) {
     const errorText = await response.text().catch(() => "");
     throw new Error(
       `Failed to create load (status ${response.status}): ${errorText}`
     );
   }
-
   const json = await response.json();
-
   return json.data as Load;
 }
 
 export async function fetchMyLoads(createdBy: string): Promise<Load[]> {
   const url = new URL(`${API_BASE_URL}/api/loads`);
-
-  if (createdBy) {
-    url.searchParams.set("created_by", createdBy);
-  }
-
+  url.searchParams.set("created_by", createdBy);
   const response = await fetch(url.toString());
-
   if (!response.ok) {
     throw new Error(`Failed to fetch my loads (status ${response.status})`);
   }
-
   const json = await response.json();
+  return json.data as Load[];
+}
 
+export async function fetchLoadsByAssigned(assignedTo: string): Promise<Load[]> {
+  const url = new URL(`${API_BASE_URL}/api/loads`);
+  url.searchParams.set("assigned_to", assignedTo);
+  const response = await fetch(url.toString());
+  if (!response.ok) {
+    throw new Error(`Failed to fetch assigned loads (${response.status})`);
+  }
+  const json = await response.json();
   return json.data as Load[];
 }
 
@@ -90,20 +84,56 @@ export async function assignLoad(
 ): Promise<Load> {
   const response = await fetch(`${API_BASE_URL}/api/loads/${loadId}/assign`, {
     method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-    },
+    headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ assigned_to: haulerId }),
   });
-
   if (!response.ok) {
     const errorText = await response.text().catch(() => "");
     throw new Error(
       `Failed to assign load (status ${response.status}): ${errorText}`
     );
   }
-
   const json = await response.json();
-
   return json.data as Load;
+}
+
+export async function startLoad(loadId: number): Promise<Load> {
+  const response = await fetch(`${API_BASE_URL}/api/loads/${loadId}/start`, {
+    method: "POST",
+  });
+  if (!response.ok) {
+    throw new Error(`Failed to start load (${response.status})`);
+  }
+  const json = await response.json();
+  return json.data as Load;
+}
+
+export async function completeLoad(
+  loadId: number,
+  epodUrl?: string
+): Promise<Load> {
+  const response = await fetch(`${API_BASE_URL}/api/loads/${loadId}/complete`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ epod_url: epodUrl ?? null }),
+  });
+  if (!response.ok) {
+    throw new Error(`Failed to complete load (${response.status})`);
+  }
+  const json = await response.json();
+  return json.data as Load;
+}
+
+export async function uploadEpod(file: File): Promise<string> {
+  const form = new FormData();
+  form.append("file", file);
+  const response = await fetch(`${API_BASE_URL}/api/uploads/epod`, {
+    method: "POST",
+    body: form,
+  });
+  if (!response.ok) {
+    throw new Error(`Failed to upload ePOD (${response.status})`);
+  }
+  const json = await response.json();
+  return json.url as string;
 }

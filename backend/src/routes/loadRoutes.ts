@@ -1,5 +1,11 @@
 import { Router } from "express";
-import { getLoads, createLoad, assignLoad } from "../controllers/loadController";
+import {
+  getLoads,
+  createLoad,
+  assignLoad,
+  startLoad,
+  completeLoad,
+} from "../controllers/loadController";
 
 const router = Router();
 
@@ -11,5 +17,11 @@ router.post("/", createLoad);
 
 // POST /api/loads/:id/assign
 router.post("/:id/assign", assignLoad);
+
+// POST /api/loads/:id/start
+router.post("/:id/start", startLoad);
+
+// POST /api/loads/:id/complete
+router.post("/:id/complete", completeLoad);
 
 export default router;
