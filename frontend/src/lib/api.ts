@@ -65,3 +65,21 @@ export async function createLoad(payload: CreateLoadPayload): Promise<Load> {
 
   return json.data as Load;
 }
+
+export async function fetchMyLoads(createdBy: string): Promise<Load[]> {
+  const url = new URL(`${API_BASE_URL}/api/loads`);
+
+  if (createdBy) {
+    url.searchParams.set("created_by", createdBy);
+  }
+
+  const response = await fetch(url.toString());
+
+  if (!response.ok) {
+    throw new Error(`Failed to fetch my loads (status ${response.status})`);
+  }
+
+  const json = await response.json();
+
+  return json.data as Load[];
+}
