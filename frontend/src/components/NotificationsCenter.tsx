@@ -84,10 +84,11 @@ const mockNotifications: Notification[] = [
 ];
 
 interface NotificationsCenterProps {
-  onBack: () => void;
+  onClose: () => void;
+  userRole?: 'hauler' | 'shipper' | 'stakeholder' | 'driver' | 'super-admin';
 }
 
-export function NotificationsCenter({ onBack }: NotificationsCenterProps) {
+export function NotificationsCenter({ onClose }: NotificationsCenterProps) {
   const [notifications, setNotifications] = useState(mockNotifications);
   const [activeTab, setActiveTab] = useState<'all' | 'unread'>('all');
 
@@ -154,7 +155,7 @@ export function NotificationsCenter({ onBack }: NotificationsCenterProps) {
       <div className="bg-white border-b sticky top-0 z-50">
         <div className="px-4 py-3 flex items-center justify-between">
           <div className="flex items-center gap-3">
-            <Button variant="ghost" size="icon" onClick={onBack}>
+            <Button variant="ghost" size="icon" onClick={onClose}>
               <ArrowLeft className="w-5 h-5" />
             </Button>
             <div>

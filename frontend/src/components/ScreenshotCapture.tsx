@@ -40,7 +40,7 @@ export function ScreenshotCapture({ enabled = false }: ScreenshotCaptureProps) {
       });
 
       // Convert to blob
-      canvas.toBlob((blob) => {
+      canvas.toBlob((blob: Blob | null) => {
         if (blob) {
           // Create download link
           const url = URL.createObjectURL(blob);

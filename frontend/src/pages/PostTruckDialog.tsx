@@ -100,7 +100,7 @@ export function PostTruckDialog({ open = false, onOpenChange }: PostTruckDialogP
       notes: '',
     });
     setAvailableDate(undefined);
-    onOpenChange(false);
+    onOpenChange?.(false);
   };
 
   const renderStepContent = () => {

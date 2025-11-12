@@ -2,16 +2,17 @@ import { useState, useRef, useEffect } from 'react';
 import { Button } from '../components/ui/button';
 import { Input } from '../components/ui/input';
 import { Badge } from '../components/ui/badge';
-import { 
-  Send, 
-  Paperclip, 
+import {
+  Send,
+  Paperclip,
   X,
   Image as ImageIcon,
   File,
   Download,
   Check,
-  CheckCheck
-} from 'lucide-react';
+  CheckCheck,
+  Clock,
+} from "lucide-react";
 import { toast } from 'sonner';
 
 interface Message {

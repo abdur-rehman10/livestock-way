@@ -1,12 +1,12 @@
-import { useState } from 'react';
-import { Link, useNavigate, useLocation } from 'react-router-dom';
-import { Button } from './ui/button';
-import { Avatar, AvatarFallback } from './ui/avatar';
-import { Separator } from './ui/separator';
-import { 
+import { useState } from "react";
+import { Link, useNavigate, useLocation } from "react-router-dom";
+import { Button } from "./ui/button";
+import { Avatar, AvatarFallback } from "./ui/avatar";
+import { Separator } from "./ui/separator";
+import {
   Menu,
   X,
-  Home,
+  ChevronLeft,
   Truck,
   MapPin,
   DollarSign,
@@ -15,22 +15,20 @@ import {
   Settings,
   HelpCircle,
   LogOut,
-  ChevronLeft,
   Bell,
   Search,
   LayoutDashboard,
   Package,
   Calendar,
-  Briefcase,
   Shield,
   BarChart3,
   Wrench,
-  ShoppingCart
-} from 'lucide-react';
-import { ThemeToggle } from './ThemeToggle';
-import { NotificationsCenter } from './NotificationsCenter';
-import logo from '../assets/livestockway-logo.svg';
-import { storage, STORAGE_KEYS } from '../lib/storage';
+  ShoppingCart,
+} from "lucide-react";
+import { ThemeToggle } from "./ThemeToggle";
+import { NotificationsCenter } from "./NotificationsCenter";
+import logo from "../assets/livestockway-logo.svg";
+import { storage, STORAGE_KEYS } from "../lib/storage";
 
 interface AppLayoutProps {
   children: React.ReactNode;
@@ -110,8 +108,9 @@ export function AppLayout({ children, userRole, onLogout }: AppLayoutProps) {
   };
 
   const config = roleConfig[userRole];
-  const userName = storage.get(STORAGE_KEYS.USER_NAME) || 'User';
-  const userEmail = storage.get(STORAGE_KEYS.USER_EMAIL) || storage.get(STORAGE_KEYS.USER_PHONE) || '';
+  const userName = storage.get(STORAGE_KEYS.USER_NAME, 'User');
+  const userEmail =
+    storage.get(STORAGE_KEYS.USER_EMAIL, storage.get(STORAGE_KEYS.USER_PHONE, ''));
 
   const getInitials = (name: string) => {
     return name

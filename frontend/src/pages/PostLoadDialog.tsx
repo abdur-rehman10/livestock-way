@@ -1,17 +1,19 @@
-import { useState } from 'react';
-import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '../components/ui/dialog';
-import { Button } from '../components/ui/button';
-import { Input } from '../components/ui/input';
-import { Label } from '../components/ui/label';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../components/ui/select';
-import { Textarea } from '../components/ui/textarea';
-import { Calendar } from '../components/ui/calendar';
-import { Popover, PopoverContent, PopoverTrigger } from '../components/ui/popover';
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '../components/ui/tabs';
-import { Badge } from '../components/ui/badge';
-import { Checkbox } from '../components/ui/checkbox';
-import { CalendarIcon, MapPin, Lock, Globe, Users, X } from 'lucide-react';
-import { toast } from 'sonner';
+import { useState } from "react";
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "../components/ui/dialog";
+import { Button } from "../components/ui/button";
+import { Input } from "../components/ui/input";
+import { Label } from "../components/ui/label";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../components/ui/select";
+import { Textarea } from "../components/ui/textarea";
+import { Calendar } from "../components/ui/calendar";
+import { Popover, PopoverContent, PopoverTrigger } from "../components/ui/popover";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "../components/ui/tabs";
+import { Badge } from "../components/ui/badge";
+import { Checkbox } from "../components/ui/checkbox";
+import { CalendarIcon, MapPin, Lock, Globe, Users, X } from "lucide-react";
+import { toast } from "sonner";
+import { createLoad } from "../lib/api";
+import type { CreateLoadPayload } from "../lib/api";
 
 interface PostLoadDialogProps {
   open?: boolean;
@@ -45,37 +47,78 @@ export function PostLoadDialog({ open = false, onOpenChange, initialData }: Post
   });
   const [invitedCarriers, setInvitedCarriers] = useState<string[]>([]);
   const [carrierSearch, setCarrierSearch] = useState('');
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [successMessage, setSuccessMessage] = useState<string | null>(null);
 
   const estimatedPrice = formData.species && formData.quantity ? '$850 - $950' : '--';
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    setErrorMessage(null);
+    setSuccessMessage(null);
     
     if (formData.visibility === 'private' && invitedCarriers.length === 0) {
       toast.error('Please invite at least one carrier for private loads');
       return;
     }
+    if (!date) {
+      toast.error('Please select a pickup date');
+      return;
+    }
+
+    const quantityNumber = Number(formData.quantity);
+    if (Number.isNaN(quantityNumber) || quantityNumber <= 0) {
+      toast.error('Please enter a valid quantity');
+      return;
+    }
+
+    const payload: CreateLoadPayload = {
+      title: `${formData.species || 'Livestock'} load`,
+      species: formData.species,
+      quantity: quantityNumber,
+      pickup_location: formData.pickup,
+      dropoff_location: formData.dropoff,
+      pickup_date: date.toISOString(),
+      offer_price: null,
+      created_by: 'demo_shipper_ui',
+    };
+
+    try {
+      setIsSubmitting(true);
+
+      await createLoad(payload);
+
+      const message =
+        formData.visibility === 'private'
+          ? `Private load posted! Invitations sent to ${invitedCarriers.length} carrier(s).`
+          : 'Load posted successfully! Matching with nearby carriers...';
+
+      toast.success(message);
+      setSuccessMessage(message);
+      onOpenChange?.(false);
+
+      setFormData({
+        species: '',
+        quantity: '',
+        weight: '',
+        pickup: '',
+        dropoff: '',
+        specialRequirements: '',
+        visibility: 'public',
+      });
+      setDate(undefined);
+      setInvitedCarriers([]);
+      setCarrierSearch('');
+    } catch (err: any) {
+      console.error('Failed to create load:', err);
+      const friendlyMessage = err?.message || 'Failed to post load';
+      setErrorMessage(friendlyMessage);
+      toast.error(friendlyMessage);
+    } finally {
+      setIsSubmitting(false);
+    }
     
-    const message = formData.visibility === 'private' 
-      ? `Private load posted! Invitations sent to ${invitedCarriers.length} carrier(s).`
-      : 'Load posted successfully! Matching with nearby carriers...';
-    
-    toast.success(message);
-    onOpenChange(false);
-    
-    // Reset form
-    setFormData({
-      species: '',
-      quantity: '',
-      weight: '',
-      pickup: '',
-      dropoff: '',
-      specialRequirements: '',
-      visibility: 'public',
-    });
-    setDate(undefined);
-    setInvitedCarriers([]);
-    setCarrierSearch('');
   };
 
   const handleInviteCarrier = (carrierId: string) => {
@@ -316,21 +359,29 @@ export function PostLoadDialog({ open = false, onOpenChange, initialData }: Post
             </div>
           </div>
 
+          {errorMessage && (
+            <div className="text-sm text-red-500">{errorMessage}</div>
+          )}
+          {successMessage && (
+            <div className="text-sm text-green-600">{successMessage}</div>
+          )}
+
           {/* Actions */}
           <div className="flex gap-3 pt-4">
             <Button
               type="button"
               variant="outline"
               className="flex-1"
-              onClick={() => onOpenChange(false)}
+              onClick={() => onOpenChange?.(false)}
             >
               Cancel
             </Button>
             <Button
               type="submit"
               className="flex-1 bg-[#F97316] hover:bg-[#ea580c]"
+              disabled={isSubmitting}
             >
-              Post Load
+              {isSubmitting ? 'Posting...' : 'Post Load'}
             </Button>
           </div>
         </form>

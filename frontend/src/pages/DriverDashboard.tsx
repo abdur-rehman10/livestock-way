@@ -206,7 +206,9 @@ export function DriverDashboard({ onLogout, onRoleSwitch }: DriverDashboardProps
   }
 
   if (showNotifications) {
-    return <NotificationsCenter onBack={() => setShowNotifications(false)} />;
+    return (
+      <NotificationsCenter onClose={() => setShowNotifications(false)} />
+    );
   }
 
   return (
