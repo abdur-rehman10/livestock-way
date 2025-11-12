@@ -2,10 +2,11 @@ import { Request, Response } from "express";
 import { pool } from "../config/database";
 
 // GET /api/loads
-export async function getLoads(_req: Request, res: Response) {
+export async function getLoads(req: Request, res: Response) {
   try {
-    const result = await pool.query(
-      `
+    const createdBy = req.query.created_by as string | undefined;
+
+    let query = `
       SELECT
         id,
         title,
@@ -19,9 +20,17 @@ export async function getLoads(_req: Request, res: Response) {
         created_by,
         created_at
       FROM loads
-      ORDER BY pickup_date ASC
-      `
-    );
+    `;
+    const values: Array<string> = [];
+
+    if (createdBy) {
+      query += ` WHERE created_by = $1`;
+      values.push(createdBy);
+    }
+
+    query += ` ORDER BY pickup_date ASC`;
+
+    const result = await pool.query(query, values);
 
     return res.status(200).json({
       status: "OK",
