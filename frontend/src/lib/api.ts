@@ -83,3 +83,27 @@ export async function fetchMyLoads(createdBy: string): Promise<Load[]> {
 
   return json.data as Load[];
 }
+
+export async function assignLoad(
+  loadId: number,
+  haulerId: string
+): Promise<Load> {
+  const response = await fetch(`${API_BASE_URL}/api/loads/${loadId}/assign`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({ assigned_to: haulerId }),
+  });
+
+  if (!response.ok) {
+    const errorText = await response.text().catch(() => "");
+    throw new Error(
+      `Failed to assign load (status ${response.status}): ${errorText}`
+    );
+  }
+
+  const json = await response.json();
+
+  return json.data as Load;
+}

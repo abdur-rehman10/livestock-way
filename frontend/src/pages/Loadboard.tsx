@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from "react";
-import { fetchLoads } from "../lib/api";
+import { fetchLoads, assignLoad } from "../lib/api";
 import type { Load as ApiLoad } from "../lib/api";
 import { Button } from '../components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/card';
@@ -33,6 +33,7 @@ import { undoManager } from '../lib/undo-manager';
 
 interface Load {
   id: string;
+  rawId: number;
   species: string;
   quantity: string;
   origin: string;
@@ -93,6 +94,8 @@ export function Loadboard() {
   const [error, setError] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [saveFilterName, setSaveFilterName] = useState('');
+  const [isAssigning, setIsAssigning] = useState<number | null>(null);
+  const CURRENT_HAULER_ID = "demo_hauler_1";
   
   // Filters with persistence
   const [filters, setFilters] = useState(() => {
@@ -138,6 +141,20 @@ export function Loadboard() {
     toast.info(`Viewing ${load.bids || 0} bids for Load #${load.id}`);
   };
 
+  const handleAcceptLoad = async (loadId: number) => {
+    try {
+      setIsAssigning(loadId);
+      await assignLoad(loadId, CURRENT_HAULER_ID);
+      toast.success(`Load #${loadId} accepted`);
+      setLoads((prev) => prev.filter((load) => load.id !== loadId));
+    } catch (err: any) {
+      console.error("Failed to assign load:", err);
+      toast.error("Failed to accept load. Please try again.");
+    } finally {
+      setIsAssigning(null);
+    }
+  };
+
   useEffect(() => {
     let isMounted = true;
 
@@ -180,17 +197,18 @@ export function Loadboard() {
 
     return {
       id: `L${load.id}`,
+      rawId: load.id,
       species: load.species,
       quantity: `${load.quantity} head`,
       origin: load.pickup_location,
       destination: load.dropoff_location,
-      distance: '0 miles',
-      postedBy: load.created_by ?? 'Unknown shipper',
+      distance: "0 miles",
+      postedBy: load.created_by ?? "Unknown shipper",
       postedDate: new Date(load.created_at).toLocaleDateString(),
-      pickupDate: new Date(load.pickup_date).toLocaleDateString(),
+      pickupDate: new Date(load.pickup_date).toLocaleString(),
       price: load.offer_price
         ? `$${Number(load.offer_price).toFixed(0)}`
-        : '$0',
+        : "$0",
       status: normalizedStatus,
       bids: undefined,
     };
@@ -390,82 +408,39 @@ export function Loadboard() {
           {!isLoading && !error && filteredLoads.length > 0 && (
             <>
               {filteredLoads.map((load) => (
-            <Card key={load.id} className="hover:shadow-md transition-shadow">
-              <CardContent className="p-4">
-                <div className="flex items-start justify-between">
-                  <div className="flex-1">
-                    <div className="flex items-center gap-3 mb-3">
-                      <h3 className="text-lg text-gray-900">Load #{load.id}</h3>
-                      <Badge variant={load.status === 'open' ? 'default' : 'secondary'}>
-                        {load.status === 'open' ? 'Open' : load.status === 'assigned' ? 'Assigned' : 'In Transit'}
-                      </Badge>
-                      {load.bids && load.bids > 0 && (
-                        <Badge variant="outline" className="text-[#F97316] border-[#F97316]">
-                          {load.bids} Bids
-                        </Badge>
-                      )}
-                    </div>
-
-                    <div className="grid grid-cols-2 gap-4 mb-3">
+                <Card key={load.id} className="hover:shadow-md transition-shadow">
+                  <CardContent className="p-4 space-y-3">
+                    <div className="flex items-center justify-between">
                       <div>
-                        <div className="text-sm text-gray-600 mb-1">Livestock</div>
-                        <div className="text-base text-gray-900">{load.species} - {load.quantity}</div>
+                        <h3 className="text-lg text-gray-900">Load #{load.id}</h3>
+                        <p className="text-sm text-gray-500">
+                          {load.species} • {load.quantity}
+                        </p>
+                        <p className="text-sm text-gray-600">
+                          {load.origin} → {load.destination}
+                        </p>
+                        <p className="text-xs text-gray-400">
+                          Pickup: {load.pickupDate}
+                        </p>
                       </div>
-                      <div>
-                        <div className="text-sm text-gray-600 mb-1">Posted By</div>
-                        <div className="text-base text-gray-900">{load.postedBy}</div>
-                      </div>
-                    </div>
-
-                    <div className="flex items-center gap-6 text-sm text-gray-600 mb-3">
-                      <div className="flex items-center gap-1">
-                        <MapPin className="w-4 h-4" />
-                        {load.origin} → {load.destination}
-                      </div>
-                      <div>{load.distance}</div>
-                      <div className="flex items-center gap-1">
-                        <Calendar className="w-4 h-4" />
-                        Pickup: {load.pickupDate}
-                      </div>
-                    </div>
-                  </div>
-
-                  <div className="text-right ml-6">
-                    <div className="text-2xl text-[#29CA8D] mb-3">{load.price}</div>
-                    <div className="flex gap-2">
-                      {load.status === 'open' && (
-                        <>
-                          <Button
-                            size="sm"
-                            onClick={() => {
-                              setSelectedLoad(load);
-                              setIsBidOpen(true);
-                            }}
-                            className="bg-[#29CA8D] hover:bg-[#24b67d]"
-                          >
-                            Place Bid
-                          </Button>
-                          {load.bids && load.bids > 0 && (
-                            <Button
-                              size="sm"
-                              variant="outline"
-                              onClick={() => handleViewBids(load)}
-                            >
-                              View Bids
-                            </Button>
-                          )}
-                        </>
-                      )}
-                      {load.status === 'assigned' && (
-                        <Button size="sm" variant="outline">
-                          View Details
+                      <div className="text-right">
+                        {load.price && (
+                          <div className="text-xl text-[#29CA8D] mb-2">
+                            {load.price}
+                          </div>
+                        )}
+                        <Button
+                          className="bg-[#29CA8D] hover:bg-[#24b67d]"
+                          size="sm"
+                          disabled={isAssigning === load.rawId}
+                          onClick={() => handleAcceptLoad(load.rawId)}
+                        >
+                          {isAssigning === load.rawId ? "Accepting..." : "Accept Load"}
                         </Button>
-                      )}
+                      </div>
                     </div>
-                  </div>
-                </div>
-              </CardContent>
-            </Card>
+                  </CardContent>
+                </Card>
               ))}
             </>
           )}
