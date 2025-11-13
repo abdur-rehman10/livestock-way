@@ -1,3 +1,5 @@
+import type { Payment } from "./types";
+
 export const API_BASE_URL =
   import.meta.env.VITE_API_URL || "http://localhost:4000";
 
@@ -178,4 +180,19 @@ export async function fetchLoadById(id: number): Promise<LoadDetail> {
   }
   const json = await response.json();
   return json.data as LoadDetail;
+}
+
+export async function fetchPaymentsForUser(
+  userId: string,
+  role: "shipper" | "hauler" | "driver" | "stakeholder"
+): Promise<Payment[]> {
+  const url = new URL(`${API_BASE_URL}/api/payments`);
+  url.searchParams.set("user_id", userId);
+  url.searchParams.set("role", role);
+
+  const response = await fetch(url.toString());
+  if (!response.ok) {
+    throw new Error(`Failed to fetch payments (${response.status})`);
+  }
+  return (await response.json()) as Payment[];
 }

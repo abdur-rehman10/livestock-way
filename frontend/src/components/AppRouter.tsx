@@ -15,7 +15,7 @@ import { AppLayout } from './AppLayout';
 import { Loadboard } from '../pages/Loadboard';
 import { FleetManagement } from '../pages/FleetManagement';
 import { TeamManagement } from './TeamManagement';
-import { WalletTab } from '../pages/WalletTab';
+import WalletTab from '../pages/WalletTab';
 import { DocumentsTab } from '../pages/DocumentsTab';
 import { MarketplaceTab } from '../pages/MarketplaceTab';
 import MyLoadsTab from '../pages/MyLoadsTab';

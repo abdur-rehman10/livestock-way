@@ -284,7 +284,29 @@ async function completeLoad(req, res) {
                 message: "Load not found or not in 'in_transit' status",
             });
         }
-        return res.status(200).json({ status: "OK", data: result.rows[0] });
+        const load = result.rows[0];
+        const payerId = load.created_by || DEFAULT_SHIPPER_ID;
+        const payerRole = load.created_role || DEFAULT_SHIPPER_ROLE;
+        const payeeId = load.assigned_to || "demo_hauler_1";
+        const payeeRole = "hauler";
+        const amount = typeof load.offer_price === "number"
+            ? load.offer_price
+            : Number(load.offer_price) || 100;
+        await database_1.pool.query(`
+      INSERT INTO payments (
+        load_id,
+        payer_id,
+        payer_role,
+        payee_id,
+        payee_role,
+        amount,
+        currency,
+        status,
+        created_at,
+        released_at
+      ) VALUES ($1,$2,$3,$4,$5,$6,'USD','released',NOW(),NOW())
+      `, [load.id, payerId, payerRole, payeeId, payeeRole, amount]);
+        return res.status(200).json({ status: "OK", data: load });
     }
     catch (error) {
         console.error("Error completing load:", error);
