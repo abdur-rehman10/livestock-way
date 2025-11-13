@@ -11,6 +11,7 @@ import type { Load as ApiLoad } from "../lib/api";
 
 interface MyLoad {
   id: string;
+  rawId: number;
   species: string;
   quantity: string;
   pickup: string;

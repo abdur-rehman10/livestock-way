@@ -22,7 +22,8 @@ import {
   MapPin,
   Clock,
   AlertCircle,
-  Plus
+  Plus,
+  ClipboardList
 } from 'lucide-react';
 import logo from '../assets/livestockway-logo.svg';
 
