@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { Link } from "react-router-dom";
 import type { Load } from "../lib/api";
 import {
   API_BASE_URL,
@@ -352,6 +353,13 @@ export default function HaulerMyLoads() {
                   )}
 
                   <div className="flex flex-col gap-2">
+                    <Button
+                      variant="outline"
+                      className="w-full rounded-full text-sm font-semibold"
+                      asChild
+                    >
+                      <Link to={`/hauler/trips/${load.id}`}>View Trip</Link>
+                    </Button>
                     {status === "assigned" && (
                       <Button
                         className="w-full rounded-full bg-[#29CA8D] px-5 py-3 text-sm font-semibold text-white shadow-[0_10px_30px_rgba(41,202,141,0.45)] hover:bg-[#24b67d]"

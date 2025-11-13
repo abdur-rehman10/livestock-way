@@ -20,6 +20,8 @@ import { DocumentsTab } from '../pages/DocumentsTab';
 import { MarketplaceTab } from '../pages/MarketplaceTab';
 import { MyLoadsTab } from '../pages/MyLoadsTab';
 import { TripsTab } from '../pages/TripsTab';
+import TripDetail from '../pages/TripDetail';
+import TripTracking from '../pages/TripTracking';
 import { ExpensesTab } from '../pages/ExpensesTab';
 import { SupportTab } from '../pages/SupportTab';
 import { ProfileSettings } from '../pages/ProfileSettings';
@@ -229,6 +231,8 @@ export function AppRouter({ showKeyboardShortcuts, onKeyboardShortcutsToggle }: 
                   <Route path="loadboard" element={<Loadboard />} />
                   <Route path="fleet" element={<FleetManagement />} />
                   <Route path="trips" element={<TripsTab onViewTrip={() => toast.info('Trip view coming soon')} />} />
+                  <Route path="trips/:id" element={<TripDetail />} />
+                  <Route path="trips/:id/tracking" element={<TripTracking />} />
                   <Route path="earnings" element={<WalletTab />} />
                   <Route path="team" element={<TeamManagement />} />
                   <Route path="marketplace" element={<MarketplaceTab userRole="hauler" />} />

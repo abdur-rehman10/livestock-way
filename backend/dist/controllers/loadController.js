@@ -3,13 +3,15 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.getLoads = getLoads;
 exports.createLoad = createLoad;
 exports.assignLoad = assignLoad;
+exports.startLoad = startLoad;
+exports.completeLoad = completeLoad;
+exports.getLoadById = getLoadById;
 const database_1 = require("../config/database");
 // GET /api/loads
 async function getLoads(req, res) {
     try {
-        const createdBy = req.query.created_by;
-        const assignedTo = req.query.assigned_to;
-        let query = `
+        const { status, assigned_to, created_by } = req.query;
+        let sql = `
       SELECT
         id,
         title,
@@ -28,26 +30,24 @@ async function getLoads(req, res) {
         completed_at,
         epod_url
       FROM loads
+      WHERE 1=1
     `;
-        const clauses = [];
-        const values = [];
-        if (createdBy) {
-            clauses.push(`created_by = $${values.length + 1}`);
-            values.push(createdBy);
+        const params = [];
+        let i = 1;
+        if (status) {
+            sql += ` AND status = $${i++}`;
+            params.push(status);
         }
-        if (assignedTo) {
-            clauses.push(`assigned_to = $${values.length + 1}`);
-            values.push(assignedTo);
+        if (assigned_to) {
+            sql += ` AND assigned_to = $${i++}`;
+            params.push(assigned_to);
         }
-        if (clauses.length) {
-            query += ` WHERE ${clauses.join(" AND ")}`;
+        if (created_by) {
+            sql += ` AND created_by = $${i++}`;
+            params.push(created_by);
         }
-        else {
-            query += ` WHERE status = 'open'`;
-        }
-        query += ` ORDER BY pickup_date ASC`;
-        console.debug("GET_LOADS SQL:", query, "VALUES:", values);
-        const result = await database_1.pool.query(query, values);
+        sql += ` ORDER BY created_at DESC`;
+        const result = await database_1.pool.query(sql, params);
         return res.status(200).json({
             status: "OK",
             data: result.rows,
@@ -184,6 +184,124 @@ async function assignLoad(req, res) {
             status: "ERROR",
             message: "Failed to assign load",
         });
+    }
+}
+// POST /api/loads/:id/start
+async function startLoad(req, res) {
+    try {
+        const { id } = req.params;
+        if (!id) {
+            return res.status(400).json({
+                status: "ERROR",
+                message: "Load ID is required",
+            });
+        }
+        const result = await database_1.pool.query(`
+      UPDATE loads
+      SET status = 'in_transit',
+          started_at = NOW()
+      WHERE id = $1 AND status = 'assigned'
+      RETURNING
+        id,
+        title,
+        species,
+        quantity,
+        pickup_location,
+        dropoff_location,
+        pickup_date,
+        offer_price,
+        status,
+        created_by,
+        created_at,
+        assigned_to,
+        assigned_at,
+        started_at,
+        completed_at,
+        epod_url
+      `, [id]);
+        if (result.rows.length === 0) {
+            return res.status(409).json({
+                status: "ERROR",
+                message: "Load not found or not in 'assigned' status",
+            });
+        }
+        return res.status(200).json({ status: "OK", data: result.rows[0] });
+    }
+    catch (error) {
+        console.error("Error starting load:", error);
+        return res.status(500).json({
+            status: "ERROR",
+            message: "Failed to start load",
+        });
+    }
+}
+// POST /api/loads/:id/complete
+async function completeLoad(req, res) {
+    try {
+        const { id } = req.params;
+        const { epod_url } = req.body;
+        if (!id) {
+            return res.status(400).json({
+                status: "ERROR",
+                message: "Load ID is required",
+            });
+        }
+        const result = await database_1.pool.query(`
+      UPDATE loads
+      SET status = 'delivered',
+          completed_at = NOW(),
+          epod_url = COALESCE($2, epod_url)
+      WHERE id = $1 AND status = 'in_transit'
+      RETURNING
+        id,
+        title,
+        species,
+        quantity,
+        pickup_location,
+        dropoff_location,
+        pickup_date,
+        offer_price,
+        status,
+        created_by,
+        created_at,
+        assigned_to,
+        assigned_at,
+        started_at,
+        completed_at,
+        epod_url
+      `, [id, epod_url ?? null]);
+        if (result.rows.length === 0) {
+            return res.status(409).json({
+                status: "ERROR",
+                message: "Load not found or not in 'in_transit' status",
+            });
+        }
+        return res.status(200).json({ status: "OK", data: result.rows[0] });
+    }
+    catch (error) {
+        console.error("Error completing load:", error);
+        return res.status(500).json({
+            status: "ERROR",
+            message: "Failed to complete load",
+        });
+    }
+}
+// GET /api/loads/:id
+async function getLoadById(req, res) {
+    const id = Number(req.params.id);
+    if (Number.isNaN(id)) {
+        return res.status(400).json({ error: "Invalid ID" });
+    }
+    try {
+        const { rows } = await database_1.pool.query("SELECT * FROM loads WHERE id = $1", [id]);
+        if (rows.length === 0) {
+            return res.status(404).json({ error: "Load not found" });
+        }
+        return res.json({ data: rows[0] });
+    }
+    catch (error) {
+        console.error("Error fetching load by ID:", error);
+        return res.status(500).json({ error: "Server error" });
     }
 }
 //# sourceMappingURL=loadController.js.map

@@ -150,3 +150,14 @@ export async function uploadEpod(file: File): Promise<string> {
   const json = await response.json();
   return json.url as string;
 }
+
+export type LoadDetail = Load;
+
+export async function fetchLoadById(id: number): Promise<LoadDetail> {
+  const response = await fetch(`${API_BASE_URL}/api/loads/${id}`);
+  if (!response.ok) {
+    throw new Error(`Failed to fetch load ${id} (${response.status})`);
+  }
+  const json = await response.json();
+  return json.data as LoadDetail;
+}
