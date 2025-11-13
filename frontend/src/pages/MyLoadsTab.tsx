@@ -1,13 +1,24 @@
 import React, { useEffect, useState } from "react";
-import { Link } from "react-router-dom";
-import { fetchLoadsForShipper, type LoadSummary } from "../lib/api";
+import { Link, useNavigate } from "react-router-dom";
+import { fetchLoadsForShipper, type LoadSummary, API_BASE_URL } from "../lib/api";
+import { Button } from "../components/ui/button";
+import { Badge } from "../components/ui/badge";
 
 const DEMO_SHIPPER_ID = "demo_shipper_1";
+
+function resolveEpodUrl(url?: string | null) {
+  if (!url) return null;
+  if (/^https?:\/\//i.test(url)) {
+    return url;
+  }
+  return `${API_BASE_URL}${url}`;
+}
 
 export default function MyLoadsTab() {
   const [loads, setLoads] = useState<LoadSummary[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const navigate = useNavigate();
 
   useEffect(() => {
     let cancelled = false;
@@ -88,7 +99,7 @@ export default function MyLoadsTab() {
               <th className="px-4 py-2">Status</th>
               <th className="px-4 py-2">Assigned to</th>
               <th className="px-4 py-2">Created</th>
-              <th className="px-4 py-2" />
+              <th className="px-4 py-2">Actions</th>
             </tr>
           </thead>
           <tbody>
@@ -101,8 +112,10 @@ export default function MyLoadsTab() {
                 <td className="px-4 py-2 text-gray-700">
                   {load.species ?? "Livestock"} · {load.quantity ?? "?"} head
                 </td>
-                <td className="px-4 py-2 capitalize text-gray-700">
-                  {load.status?.replace(/_/g, " ") ?? "open"}
+                <td className="px-4 py-2">
+                  <Badge className="capitalize">
+                    {load.status?.replace(/_/g, " ") ?? "open"}
+                  </Badge>
                 </td>
                 <td className="px-4 py-2 text-gray-700">
                   {load.assigned_to || "—"}
@@ -110,13 +123,30 @@ export default function MyLoadsTab() {
                 <td className="px-4 py-2 text-gray-500">
                   {load.created_at ? new Date(load.created_at).toLocaleString() : "—"}
                 </td>
-                <td className="px-4 py-2 text-right">
-                  <Link
-                    to={`/shipper/trips/${load.id}`}
-                    className="text-[11px] font-medium text-emerald-700 hover:underline"
-                  >
-                    View trip
-                  </Link>
+                <td className="px-4 py-2">
+                  <div className="flex flex-wrap gap-2 justify-end">
+                    <Button size="sm" variant="outline" className="text-xs" asChild>
+                      <Link to={`/shipper/trips/${load.id}`}>View Trip</Link>
+                    </Button>
+                    <Button
+                      size="sm"
+                      className="bg-[#F97316] hover:bg-[#ea580c] text-white text-xs"
+                      onClick={() => navigate(`/shipper/trips/${load.id}/tracking`)}
+                    >
+                      Track
+                    </Button>
+                    {resolveEpodUrl(load.epod_url) && (
+                      <Button size="sm" variant="outline" className="text-xs" asChild>
+                        <a
+                          href={resolveEpodUrl(load.epod_url) ?? "#"}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                        >
+                          View ePOD
+                        </a>
+                      </Button>
+                    )}
+                  </div>
                 </td>
               </tr>
             ))}
