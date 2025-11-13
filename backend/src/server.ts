@@ -6,6 +6,7 @@ import { testDbConnection, pool } from "./config/database";
 import loadRoutes from "./routes/loadRoutes";
 import uploadRoutes from "./routes/uploadRoutes";
 import paymentRoutes from "./routes/paymentRoutes";
+import supportRoutes from "./routes/supportRoutes";
 
 dotenv.config();
 
@@ -45,6 +46,7 @@ app.get("/db-test", async (_req, res) => {
 app.use("/api/loads", loadRoutes);
 app.use("/api/uploads", uploadRoutes);
 app.use("/api/payments", paymentRoutes);
+app.use("/api/support", supportRoutes);
 
 const PORT = process.env.PORT || 5000;
 app.listen(PORT, () => {

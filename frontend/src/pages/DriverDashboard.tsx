@@ -9,7 +9,7 @@ import { TripsTab } from './TripsTab';
 import WalletTab from './WalletTab';
 import { ExpensesTab } from './ExpensesTab';
 import { DocumentsTab } from './DocumentsTab';
-import { SupportTab } from './SupportTab';
+import SupportTab from './SupportTab';
 import { TripDetail } from './TripDetail';
 import { ProfileSettings } from './ProfileSettings';
 import { NotificationsCenter } from '../components/NotificationsCenter';

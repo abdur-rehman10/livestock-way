@@ -11,6 +11,7 @@ const database_1 = require("./config/database");
 const loadRoutes_1 = __importDefault(require("./routes/loadRoutes"));
 const uploadRoutes_1 = __importDefault(require("./routes/uploadRoutes"));
 const paymentRoutes_1 = __importDefault(require("./routes/paymentRoutes"));
+const supportRoutes_1 = __importDefault(require("./routes/supportRoutes"));
 dotenv_1.default.config();
 const app = (0, express_1.default)();
 app.use((0, cors_1.default)());
@@ -42,6 +43,7 @@ app.get("/db-test", async (_req, res) => {
 app.use("/api/loads", loadRoutes_1.default);
 app.use("/api/uploads", uploadRoutes_1.default);
 app.use("/api/payments", paymentRoutes_1.default);
+app.use("/api/support", supportRoutes_1.default);
 const PORT = process.env.PORT || 5000;
 app.listen(PORT, () => {
     console.log(`✅ Server running on http://localhost:${PORT}`);

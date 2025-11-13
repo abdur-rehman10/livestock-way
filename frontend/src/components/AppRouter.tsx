@@ -23,7 +23,7 @@ import TripDetail from '../pages/TripDetail';
 import { TripsTab } from '../pages/TripsTab';
 import TripTracking from '../pages/TripTracking';
 import { ExpensesTab } from '../pages/ExpensesTab';
-import { SupportTab } from '../pages/SupportTab';
+import SupportTab from '../pages/SupportTab';
 import { ProfileSettings } from '../pages/ProfileSettings';
 import { KeyboardShortcutsDialog } from '../pages/KeyboardShortcutsDialog';
 import { OfflineIndicator } from './OfflineIndicator';

@@ -1,297 +1,280 @@
-import { useState } from 'react';
-import { Button } from '../components/ui/button';
-import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/card';
-import { Input } from '../components/ui/input';
-import { Label } from '../components/ui/label';
-import { Textarea } from '../components/ui/textarea';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../components/ui/select';
-import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '../components/ui/dialog';
-import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from '../components/ui/accordion';
-import { Badge } from '../components/ui/badge';
-import { Search, MessageCircle, HelpCircle, FileQuestion, DollarSign, Truck as TruckIcon, AlertCircle } from 'lucide-react';
-import { toast } from 'sonner';
+import React, { useEffect, useMemo, useState } from "react";
+import { useLocation } from "react-router-dom";
+import {
+  fetchSupportTicketsForUser,
+  createSupportTicket,
+} from "../lib/api";
+import type { SupportTicket } from "../lib/types";
+import { Button } from "../components/ui/button";
 
-const faqs = [
-  {
-    category: 'Payments',
-    icon: DollarSign,
-    questions: [
-      {
-        q: 'When will I receive my payment?',
-        a: 'Payments are released 24-48 hours after trip completion and ePOD submission. Funds will be available in your wallet immediately and can be withdrawn to your bank account.',
-      },
-      {
-        q: 'Why is my payment still in escrow?',
-        a: 'Payments remain in escrow until the shipper confirms delivery. This typically happens within 24 hours of trip completion. If delayed, contact support.',
-      },
-      {
-        q: 'How do I add my bank account?',
-        a: 'Go to Wallet > Withdraw > Add Bank Details. Enter your account number, routing number, and account holder name. We use secure encryption to protect your information.',
-      },
-    ],
-  },
-  {
-    category: 'Trips',
-    icon: TruckIcon,
-    questions: [
-      {
-        q: 'How do I start a trip?',
-        a: 'Accept a load from the Home screen, complete the pre-trip checklist (including vehicle inspection and livestock check), then tap "Start Trip" to begin navigation.',
-      },
-      {
-        q: 'What if I encounter an issue during the trip?',
-        a: 'Use the "Report Issue" button in the trip controls panel. This will create a support ticket and notify the operations team immediately.',
-      },
-      {
-        q: 'Can I cancel a trip after accepting?',
-        a: 'Yes, but cancellations may affect your rating. Go to the trip details and tap "Cancel Trip". You\'ll be asked to provide a reason.',
-      },
-    ],
-  },
-  {
-    category: 'App Issues',
-    icon: AlertCircle,
-    questions: [
-      {
-        q: 'The app is not loading',
-        a: 'Check your internet connection. If the issue persists, try closing and reopening the app. You can also enable offline mode for limited functionality.',
-      },
-      {
-        q: 'I can\'t upload photos',
-        a: 'Ensure the app has camera and storage permissions. Go to your device Settings > Apps > LivestockWay > Permissions and enable Camera and Storage.',
-      },
-    ],
-  },
+type UserRole = "shipper" | "hauler" | "driver" | "stakeholder";
+
+function detectRoleFromPath(pathname: string): UserRole {
+  if (pathname.startsWith("/hauler")) return "hauler";
+  if (pathname.startsWith("/shipper")) return "shipper";
+  if (pathname.startsWith("/driver")) return "driver";
+  return "stakeholder";
+}
+
+function getDemoUserId(role: UserRole): string {
+  switch (role) {
+    case "shipper":
+      return "demo_shipper_1";
+    case "hauler":
+      return "demo_hauler_1";
+    case "driver":
+      return "demo_driver_1";
+    case "stakeholder":
+    default:
+      return "demo_stakeholder_1";
+  }
+}
+
+const PRIORITY_OPTIONS: Array<"low" | "normal" | "high" | "urgent"> = [
+  "low",
+  "normal",
+  "high",
+  "urgent",
 ];
 
-const tickets = [
-  {
-    id: 'TKT001',
-    title: 'Payment not received for Trip #T004',
-    status: 'open',
-    priority: 'high',
-    date: 'Oct 28, 2025',
-    response: null,
-  },
-  {
-    id: 'TKT002',
-    title: 'GPS not working during trip',
-    status: 'resolved',
-    priority: 'medium',
-    date: 'Oct 25, 2025',
-    response: 'Issue resolved. Please update to the latest app version.',
-  },
-];
+const ROLE_BUTTON_CLASSES: Record<UserRole, string> = {
+  hauler: "bg-[#29CA8D] hover:bg-[#24b67d] text-white",
+  shipper: "bg-[#F97316] hover:bg-[#ea580c] text-white",
+  driver: "bg-[#0ea5e9] hover:bg-[#0284c7] text-white",
+  stakeholder: "bg-[#475569] hover:bg-[#334155] text-white",
+};
 
-export function SupportTab() {
-  const [isTicketOpen, setIsTicketOpen] = useState(false);
-  const [searchQuery, setSearchQuery] = useState('');
-  const [ticketType, setTicketType] = useState('');
-  const [ticketPriority, setTicketPriority] = useState('medium');
-  const [ticketDescription, setTicketDescription] = useState('');
+export default function SupportTab() {
+  const location = useLocation();
+  const role = useMemo(
+    () => detectRoleFromPath(location.pathname),
+    [location.pathname]
+  );
+  const userId = useMemo(() => getDemoUserId(role), [role]);
 
-  const handleSubmitTicket = (e: React.FormEvent) => {
+  const [tickets, setTickets] = useState<SupportTicket[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  const [subject, setSubject] = useState("");
+  const [message, setMessage] = useState("");
+  const [priority, setPriority] =
+    useState<"low" | "normal" | "high" | "urgent">("normal");
+  const [submitting, setSubmitting] = useState(false);
+  const [submitError, setSubmitError] = useState<string | null>(null);
+  const submitButtonClass = ROLE_BUTTON_CLASSES[role] ?? "bg-gray-900 text-white hover:bg-gray-800";
+
+  useEffect(() => {
+    async function load() {
+      try {
+        setLoading(true);
+        setError(null);
+        const data = await fetchSupportTicketsForUser(userId, role);
+        setTickets(data);
+      } catch (err: any) {
+        console.error("Error loading tickets", err);
+        setError(err?.message || "Failed to load support tickets.");
+      } finally {
+        setLoading(false);
+      }
+    }
+    load();
+  }, [userId, role]);
+
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    
-    if (!ticketType || !ticketDescription) {
-      toast.error('Please fill in all required fields');
+    if (!subject.trim() || !message.trim()) {
+      setSubmitError("Please fill subject and message.");
       return;
     }
 
-    const ticketId = 'TKT' + String(Date.now()).slice(-3);
-    toast.success(`Ticket ${ticketId} created! We'll respond within 24 hours.`);
-    setIsTicketOpen(false);
-    
-    // Reset form
-    setTicketType('');
-    setTicketDescription('');
-    setTicketPriority('medium');
+    try {
+      setSubmitting(true);
+      setSubmitError(null);
+
+      const newTicket = await createSupportTicket({
+        user_id: userId,
+        role,
+        subject: subject.trim(),
+        message: message.trim(),
+        priority,
+      });
+
+      setTickets((prev) => [newTicket, ...prev]);
+      setSubject("");
+      setMessage("");
+      setPriority("normal");
+    } catch (err: any) {
+      console.error("Error creating support ticket", err);
+      setSubmitError(
+        err?.message || "Failed to submit support ticket. Please try again."
+      );
+    } finally {
+      setSubmitting(false);
+    }
   };
 
-  const filteredFaqs = faqs.map(category => ({
-    ...category,
-    questions: category.questions.filter(q =>
-      searchQuery === '' ||
-      q.q.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      q.a.toLowerCase().includes(searchQuery.toLowerCase())
-    ),
-  })).filter(category => category.questions.length > 0);
+  if (loading) {
+    return (
+      <div className="p-4 text-xs text-gray-600">Loading support…</div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="p-4 space-y-3">
+        <div className="text-xs text-red-600">{error}</div>
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          onClick={() => window.location.reload()}
+          className="px-3 py-1.5 text-xs"
+        >
+          Retry
+        </Button>
+      </div>
+    );
+  }
 
   return (
-    <div className="p-4 space-y-4">
-      {/* Search */}
-      <div className="relative">
-        <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
-        <Input
-          placeholder="Search help articles..."
-          value={searchQuery}
-          onChange={(e) => setSearchQuery(e.target.value)}
-          className="pl-10"
-        />
+    <div className="p-4 space-y-6">
+      <div>
+        <h1 className="text-lg font-semibold text-gray-900">
+          Support & Help Center
+        </h1>
+        <p className="text-[11px] text-gray-500">
+          Role: <span className="font-medium capitalize">{role}</span> · User ID:{" "}
+          <span className="font-mono text-gray-700">{userId}</span>
+        </p>
       </div>
 
-      {/* Quick Actions */}
-      <div className="grid grid-cols-2 gap-3">
-        <Button
-          onClick={() => setIsTicketOpen(true)}
-          className="h-20 flex-col gap-2 bg-[#29CA8D] hover:bg-[#24b67d]"
-        >
-          <FileQuestion className="w-6 h-6" />
-          <span className="text-sm">Submit Ticket</span>
-        </Button>
-        <Button variant="outline" className="h-20 flex-col gap-2">
-          <MessageCircle className="w-6 h-6" />
-          <span className="text-sm">Live Chat</span>
-          <Badge variant="secondary" className="text-xs">Coming Soon</Badge>
-        </Button>
+      <div className="rounded-lg border border-gray-200 bg-white p-4 space-y-3">
+        <h2 className="text-sm font-semibold text-gray-900">
+          Submit a new ticket
+        </h2>
+
+        <form onSubmit={handleSubmit} className="space-y-3">
+          <div className="space-y-1">
+            <label className="text-[11px] font-medium text-gray-700">
+              Subject
+            </label>
+            <input
+              type="text"
+              value={subject}
+              onChange={(e) => setSubject(e.target.value)}
+              className="block w-full rounded-md border border-gray-300 px-3 py-1.5 text-xs text-gray-900 placeholder:text-gray-400 focus:border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-500"
+              placeholder="E.g. Issue with posting loads"
+            />
+          </div>
+
+          <div className="space-y-1">
+            <label className="text-[11px] font-medium text-gray-700">
+              Message
+            </label>
+            <textarea
+              value={message}
+              onChange={(e) => setMessage(e.target.value)}
+              rows={4}
+              className="block w-full rounded-md border border-gray-300 px-3 py-1.5 text-xs text-gray-900 placeholder:text-gray-400 focus:border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-500"
+              placeholder="Describe the problem, steps to reproduce, any screenshots or trip IDs."
+            />
+          </div>
+
+          <div className="space-y-1">
+            <label className="text-[11px] font-medium text-gray-700">
+              Priority
+            </label>
+            <select
+              value={priority}
+              onChange={(e) =>
+                setPriority(e.target.value as "low" | "normal" | "high" | "urgent")
+              }
+              className="block w-full rounded-md border border-gray-300 px-3 py-1.5 text-xs text-gray-900 focus:border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-500"
+            >
+              {PRIORITY_OPTIONS.map((p) => (
+                <option key={p} value={p}>
+                  {p.charAt(0).toUpperCase() + p.slice(1)}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          {submitError && (
+            <div className="text-[11px] text-red-600">{submitError}</div>
+          )}
+
+          <div className="flex justify-end">
+            <Button
+              type="submit"
+              disabled={submitting}
+              className={`px-4 py-1.5 text-xs font-medium disabled:opacity-60 ${submitButtonClass}`}
+            >
+              {submitting ? "Sending…" : "Submit ticket"}
+            </Button>
+          </div>
+        </form>
       </div>
 
-      {/* My Tickets */}
-      {tickets.length > 0 && (
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-base">My Tickets</CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-3">
-            {tickets.map((ticket) => (
-              <div key={ticket.id} className="p-3 bg-gray-50 rounded-lg">
-                <div className="flex items-start justify-between mb-2">
+      <div className="rounded-lg border border-gray-200 bg-white overflow-hidden">
+        <div className="border-b border-gray-100 px-4 py-2 text-[11px] font-semibold text-gray-600">
+          Your tickets
+        </div>
+
+        {tickets.length === 0 ? (
+          <div className="p-4 text-[11px] text-gray-500">
+            You have not submitted any support tickets yet.
+          </div>
+        ) : (
+          <div className="divide-y divide-gray-100">
+            {tickets.map((t) => (
+              <div key={t.id} className="px-4 py-3 text-[11px]">
+                <div className="flex items-start justify-between gap-2">
                   <div>
-                    <div className="text-sm text-gray-600">#{ticket.id}</div>
-                    <div className="text-base text-gray-900">{ticket.title}</div>
+                    <div className="font-semibold text-gray-900">
+                      {t.subject}
+                    </div>
+                    <div className="mt-1 text-gray-700 whitespace-pre-line">
+                      {t.message}
+                    </div>
                   </div>
-                  <Badge 
-                    variant={ticket.status === 'resolved' ? 'default' : 'secondary'}
-                    className={ticket.status === 'resolved' ? 'bg-green-500' : 'bg-orange-500 text-white'}
-                  >
-                    {ticket.status.charAt(0).toUpperCase() + ticket.status.slice(1)}
-                  </Badge>
+                  <div className="flex flex-col items-end gap-1">
+                    <span
+                      className={`inline-flex rounded-full px-2 py-0.5 text-[10px] font-medium ${
+                        t.status === "open"
+                          ? "bg-orange-50 text-orange-700 border border-orange-200"
+                          : t.status === "resolved"
+                          ? "bg-emerald-50 text-emerald-700 border border-emerald-200"
+                          : "bg-gray-50 text-gray-600 border border-gray-200"
+                      }`}
+                    >
+                      {t.status}
+                    </span>
+                    <span
+                      className={`inline-flex rounded-full px-2 py-0.5 text-[10px] font-medium ${
+                        t.priority === "high" || t.priority === "urgent"
+                          ? "bg-rose-50 text-rose-700 border border-rose-200"
+                          : "bg-gray-50 text-gray-600 border border-gray-200"
+                      }`}
+                    >
+                      {t.priority}
+                    </span>
+                  </div>
                 </div>
-                <div className="text-xs text-gray-500">{ticket.date}</div>
-                {ticket.response && (
-                  <div className="mt-2 p-2 bg-blue-50 rounded text-xs text-blue-900">
-                    <strong>Support:</strong> {ticket.response}
-                  </div>
-                )}
+                <div className="mt-1 text-[10px] text-gray-400">
+                  Created: {new Date(t.created_at).toLocaleString()}
+                </div>
               </div>
             ))}
-          </CardContent>
-        </Card>
-      )}
+          </div>
+        )}
+      </div>
 
-      {/* FAQs */}
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-base flex items-center gap-2">
-            <HelpCircle className="w-5 h-5" />
-            Frequently Asked Questions
-          </CardTitle>
-        </CardHeader>
-        <CardContent>
-          {filteredFaqs.length === 0 ? (
-            <div className="text-center py-8 text-gray-500">
-              No results found for "{searchQuery}"
-            </div>
-          ) : (
-            <Accordion type="single" collapsible className="w-full">
-              {filteredFaqs.map((category) => {
-                const Icon = category.icon;
-                return (
-                  <div key={category.category} className="mb-4">
-                    <div className="flex items-center gap-2 mb-2 text-sm text-gray-600">
-                      <Icon className="w-4 h-4" />
-                      {category.category}
-                    </div>
-                    {category.questions.map((faq, idx) => (
-                      <AccordionItem key={idx} value={`${category.category}-${idx}`}>
-                        <AccordionTrigger className="text-left text-sm">
-                          {faq.q}
-                        </AccordionTrigger>
-                        <AccordionContent className="text-sm text-gray-600">
-                          {faq.a}
-                        </AccordionContent>
-                      </AccordionItem>
-                    ))}
-                  </div>
-                );
-              })}
-            </Accordion>
-          )}
-        </CardContent>
-      </Card>
-
-      {/* Submit Ticket Dialog */}
-      <Dialog open={isTicketOpen} onOpenChange={setIsTicketOpen}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>Submit a Support Ticket</DialogTitle>
-            <DialogDescription>
-              Describe your issue and we'll get back to you within 24 hours
-            </DialogDescription>
-          </DialogHeader>
-
-          <form onSubmit={handleSubmitTicket} className="space-y-4">
-            <div className="space-y-2">
-              <Label htmlFor="type">Issue Type</Label>
-              <Select value={ticketType} onValueChange={setTicketType} required>
-                <SelectTrigger>
-                  <SelectValue placeholder="Select issue type" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="payment">Payment Issue</SelectItem>
-                  <SelectItem value="trip">Trip Problem</SelectItem>
-                  <SelectItem value="app">App Technical Issue</SelectItem>
-                  <SelectItem value="account">Account & Profile</SelectItem>
-                  <SelectItem value="other">Other</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-
-            <div className="space-y-2">
-              <Label htmlFor="priority">Priority</Label>
-              <Select value={ticketPriority} onValueChange={setTicketPriority}>
-                <SelectTrigger>
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="low">Low</SelectItem>
-                  <SelectItem value="medium">Medium</SelectItem>
-                  <SelectItem value="high">High - Urgent</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-
-            <div className="space-y-2">
-              <Label htmlFor="description">Description</Label>
-              <Textarea
-                id="description"
-                placeholder="Describe your issue in detail..."
-                value={ticketDescription}
-                onChange={(e) => setTicketDescription(e.target.value)}
-                rows={4}
-                required
-              />
-            </div>
-
-            <div className="flex gap-3">
-              <Button
-                type="button"
-                variant="outline"
-                onClick={() => setIsTicketOpen(false)}
-                className="flex-1"
-              >
-                Cancel
-              </Button>
-              <Button
-                type="submit"
-                className="flex-1 bg-[#29CA8D] hover:bg-[#24b67d]"
-              >
-                Submit Ticket
-              </Button>
-            </div>
-          </form>
-        </DialogContent>
-      </Dialog>
+      <p className="text-[10px] text-gray-400">
+        Phase 1 note: Tickets are visible to the Livestock Way support team in
+        the Super Admin console. In later phases they can be escalated,
+        assigned, and resolved with full audit trails.
+      </p>
     </div>
   );
 }

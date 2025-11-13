@@ -1,4 +1,4 @@
-import type { Payment } from "./types";
+import type { Payment, SupportTicket } from "./types";
 
 export const API_BASE_URL =
   import.meta.env.VITE_API_URL || "http://localhost:4000";
@@ -195,4 +195,44 @@ export async function fetchPaymentsForUser(
     throw new Error(`Failed to fetch payments (${response.status})`);
   }
   return (await response.json()) as Payment[];
+}
+
+export async function fetchSupportTicketsForUser(
+  userId: string,
+  role: "shipper" | "hauler" | "driver" | "stakeholder"
+): Promise<SupportTicket[]> {
+  const url = new URL(`${API_BASE_URL}/api/support`);
+  url.searchParams.set("user_id", userId);
+  url.searchParams.set("role", role);
+
+  const response = await fetch(url.toString());
+  if (!response.ok) {
+    throw new Error(`Failed to fetch support tickets (${response.status})`);
+  }
+  return (await response.json()) as SupportTicket[];
+}
+
+interface CreateSupportTicketPayload {
+  user_id: string;
+  role: "shipper" | "hauler" | "driver" | "stakeholder";
+  subject: string;
+  message: string;
+  priority?: "low" | "normal" | "high" | "urgent";
+}
+
+export async function createSupportTicket(
+  payload: CreateSupportTicketPayload
+): Promise<SupportTicket> {
+  const response = await fetch(`${API_BASE_URL}/api/support`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  if (!response.ok) {
+    const text = await response.text();
+    throw new Error(
+      `Failed to create support ticket (${response.status}): ${text || ""}`
+    );
+  }
+  return (await response.json()) as SupportTicket;
 }
