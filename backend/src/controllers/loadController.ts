@@ -325,3 +325,47 @@ export async function completeLoad(req: Request, res: Response) {
     });
   }
 }
+
+// GET /api/loads/:id
+export async function getLoadById(req: Request, res: Response) {
+  try {
+    const { id } = req.params;
+
+    if (!id) {
+      return res.status(400).json({ error: "Load ID is required" });
+    }
+
+    const sql = `
+      SELECT
+        id,
+        title,
+        species,
+        quantity,
+        pickup_location,
+        dropoff_location,
+        pickup_date,
+        offer_price,
+        status,
+        created_by,
+        created_at,
+        assigned_to,
+        assigned_at,
+        started_at,
+        completed_at,
+        epod_url
+      FROM loads
+      WHERE id = $1
+    `;
+
+    const result = await pool.query(sql, [id]);
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: "Load not found" });
+    }
+
+    return res.json({ data: result.rows[0] });
+  } catch (err) {
+    console.error("Error in getLoadById", err);
+    return res.status(500).json({ error: "Failed to fetch load" });
+  }
+}

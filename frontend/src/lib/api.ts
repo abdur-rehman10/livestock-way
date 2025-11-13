@@ -56,17 +56,6 @@ export async function createLoad(payload: CreateLoadPayload): Promise<Load> {
   return json.data as Load;
 }
 
-export async function fetchMyLoads(createdBy: string): Promise<Load[]> {
-  const url = new URL(`${API_BASE_URL}/api/loads`);
-  url.searchParams.set("created_by", createdBy);
-  const response = await fetch(url.toString());
-  if (!response.ok) {
-    throw new Error(`Failed to fetch my loads (status ${response.status})`);
-  }
-  const json = await response.json();
-  return json.data as Load[];
-}
-
 export async function fetchLoadsByAssigned(assignedTo: string): Promise<Load[]> {
   const url = new URL(`${API_BASE_URL}/api/loads`);
   url.searchParams.set("assigned_to", assignedTo);
@@ -149,4 +138,26 @@ export async function uploadEpod(file: File): Promise<string> {
   }
   const json = await response.json();
   return json.url as string;
+}
+
+export async function fetchLoadsByCreator(creatorId: string): Promise<Load[]> {
+  const url = new URL(`${API_BASE_URL}/api/loads`);
+  url.searchParams.set("created_by", creatorId);
+  const response = await fetch(url.toString());
+  if (!response.ok) {
+    throw new Error(`Failed to fetch loads for shipper (${response.status})`);
+  }
+  const json = await response.json();
+  return json.data as Load[];
+}
+
+export type LoadDetail = Load;
+
+export async function fetchLoadById(id: number): Promise<LoadDetail> {
+  const response = await fetch(`${API_BASE_URL}/api/loads/${id}`);
+  if (!response.ok) {
+    throw new Error(`Failed to fetch load ${id} (${response.status})`);
+  }
+  const json = await response.json();
+  return json.data as LoadDetail;
 }

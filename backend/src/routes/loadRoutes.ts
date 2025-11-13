@@ -1,6 +1,7 @@
 import { Router } from "express";
 import {
   getLoads,
+  getLoadById,
   createLoad,
   assignLoad,
   startLoad,
@@ -11,6 +12,7 @@ const router = Router();
 
 // GET /api/loads
 router.get("/", getLoads);
+router.get("/:id", getLoadById);
 
 // POST /api/loads
 router.post("/", createLoad);
