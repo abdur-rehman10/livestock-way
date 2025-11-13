@@ -141,6 +141,35 @@ export async function uploadEpod(file: File): Promise<string> {
 }
 
 export type LoadDetail = Load;
+export type LoadSummary = Load;
+
+export async function fetchLoadsForHauler(
+  haulerId: string
+): Promise<LoadSummary[]> {
+  const url = new URL(`${API_BASE_URL}/api/loads`);
+  url.searchParams.set("assigned_to", haulerId);
+  const response = await fetch(url.toString());
+  if (!response.ok) {
+    throw new Error(`Failed to fetch loads for hauler (${response.status})`);
+  }
+  const json = await response.json();
+  return json.data as LoadSummary[];
+}
+
+export async function fetchLoadsForShipper(
+  shipperId: string
+): Promise<LoadSummary[]> {
+  const url = new URL(`${API_BASE_URL}/api/loads`);
+  url.searchParams.set("created_by", shipperId);
+  const response = await fetch(url.toString());
+  if (!response.ok) {
+    throw new Error(
+      `Failed to fetch loads for shipper ${shipperId} (${response.status})`
+    );
+  }
+  const json = await response.json();
+  return json.data as LoadSummary[];
+}
 
 export async function fetchLoadById(id: number): Promise<LoadDetail> {
   const response = await fetch(`${API_BASE_URL}/api/loads/${id}`);

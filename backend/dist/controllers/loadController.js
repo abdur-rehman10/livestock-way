@@ -7,6 +7,8 @@ exports.startLoad = startLoad;
 exports.completeLoad = completeLoad;
 exports.getLoadById = getLoadById;
 const database_1 = require("../config/database");
+const DEFAULT_SHIPPER_ID = "demo_shipper_1";
+const DEFAULT_SHIPPER_ROLE = "shipper";
 // GET /api/loads
 async function getLoads(req, res) {
     try {
@@ -23,6 +25,7 @@ async function getLoads(req, res) {
         offer_price,
         status,
         created_by,
+        created_role,
         created_at,
         assigned_to,
         assigned_at,
@@ -64,7 +67,7 @@ async function getLoads(req, res) {
 // POST /api/loads
 async function createLoad(req, res) {
     try {
-        const { title, species, quantity, pickup_location, dropoff_location, pickup_date, offer_price, created_by, } = req.body;
+        const { title, species, quantity, pickup_location, dropoff_location, pickup_date, offer_price, created_by, created_role, } = req.body;
         if (!title ||
             !species ||
             !quantity ||
@@ -75,6 +78,8 @@ async function createLoad(req, res) {
                 .status(400)
                 .json({ status: "ERROR", message: "Missing required fields" });
         }
+        const shipperId = created_by || DEFAULT_SHIPPER_ID;
+        const shipperRole = created_role || DEFAULT_SHIPPER_ROLE;
         const insertQuery = `
       INSERT INTO loads (
         title,
@@ -85,9 +90,10 @@ async function createLoad(req, res) {
         pickup_date,
         offer_price,
         status,
-        created_by
+        created_by,
+        created_role
       )
-      VALUES ($1, $2, $3, $4, $5, $6, $7, 'open', $8)
+      VALUES ($1, $2, $3, $4, $5, $6, $7, 'open', $8, $9)
       RETURNING
         id,
         title,
@@ -99,6 +105,7 @@ async function createLoad(req, res) {
         offer_price,
         status,
         created_by,
+        created_role,
         created_at
     `;
         const values = [
@@ -109,7 +116,8 @@ async function createLoad(req, res) {
             dropoff_location,
             pickup_date,
             offer_price ?? null,
-            created_by ?? null,
+            shipperId,
+            shipperRole,
         ];
         const result = await database_1.pool.query(insertQuery, values);
         return res.status(201).json({

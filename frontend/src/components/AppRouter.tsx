@@ -18,10 +18,9 @@ import { TeamManagement } from './TeamManagement';
 import { WalletTab } from '../pages/WalletTab';
 import { DocumentsTab } from '../pages/DocumentsTab';
 import { MarketplaceTab } from '../pages/MarketplaceTab';
-import { MyLoadsTab } from '../pages/MyLoadsTab';
+import MyLoadsTab from '../pages/MyLoadsTab';
 import TripDetail from '../pages/TripDetail';
 import { TripsTab } from '../pages/TripsTab';
-import TripDetail from '../pages/TripDetail';
 import TripTracking from '../pages/TripTracking';
 import { ExpensesTab } from '../pages/ExpensesTab';
 import { SupportTab } from '../pages/SupportTab';
@@ -256,9 +255,11 @@ export function AppRouter({ showKeyboardShortcuts, onKeyboardShortcutsToggle }: 
               <AppLayout userRole="shipper" onLogout={handleLogout}>
                 <Routes>
                   <Route path="dashboard" element={<ShipperDashboard onLogout={handleLogout} onRoleSwitch={handleRoleSwitch} />} />
-                  <Route path="loads" element={<MyLoadsTab onTrackLoad={() => toast.info('Tracking coming soon')} />} />
+                  <Route path="my-loads" element={<MyLoadsTab />} />
                   <Route path="loadboard" element={<Loadboard />} />
                   <Route path="trips" element={<TripsTab onViewTrip={() => toast.info('Trip view coming soon')} />} />
+                  <Route path="trips/:id" element={<TripDetail />} />
+                  <Route path="trips/:id/tracking" element={<TripTracking />} />
                   <Route path="payments" element={<WalletTab />} />
                   <Route path="documents" element={<DocumentsTab />} />
                   <Route path="marketplace" element={<MarketplaceTab userRole="shipper" />} />

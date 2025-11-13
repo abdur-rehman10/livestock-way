@@ -1,6 +1,9 @@
 import { Request, Response } from "express";
 import { pool } from "../config/database";
 
+const DEFAULT_SHIPPER_ID = "demo_shipper_1";
+const DEFAULT_SHIPPER_ROLE = "shipper";
+
 // GET /api/loads
 export async function getLoads(req: Request, res: Response) {
   try {
@@ -18,6 +21,7 @@ export async function getLoads(req: Request, res: Response) {
         offer_price,
         status,
         created_by,
+        created_role,
         created_at,
         assigned_to,
         assigned_at,
@@ -75,6 +79,7 @@ export async function createLoad(req: Request, res: Response) {
       pickup_date,
       offer_price,
       created_by,
+      created_role,
     } = req.body;
 
     if (
@@ -90,6 +95,9 @@ export async function createLoad(req: Request, res: Response) {
         .json({ status: "ERROR", message: "Missing required fields" });
     }
 
+    const shipperId = created_by || DEFAULT_SHIPPER_ID;
+    const shipperRole = created_role || DEFAULT_SHIPPER_ROLE;
+
     const insertQuery = `
       INSERT INTO loads (
         title,
@@ -100,9 +108,10 @@ export async function createLoad(req: Request, res: Response) {
         pickup_date,
         offer_price,
         status,
-        created_by
+        created_by,
+        created_role
       )
-      VALUES ($1, $2, $3, $4, $5, $6, $7, 'open', $8)
+      VALUES ($1, $2, $3, $4, $5, $6, $7, 'open', $8, $9)
       RETURNING
         id,
         title,
@@ -114,6 +123,7 @@ export async function createLoad(req: Request, res: Response) {
         offer_price,
         status,
         created_by,
+        created_role,
         created_at
     `;
 
@@ -125,7 +135,8 @@ export async function createLoad(req: Request, res: Response) {
       dropoff_location,
       pickup_date,
       offer_price ?? null,
-      created_by ?? null,
+      shipperId,
+      shipperRole,
     ];
 
     const result = await pool.query(insertQuery, values);
