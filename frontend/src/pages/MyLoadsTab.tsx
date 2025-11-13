@@ -6,7 +6,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '../components/ui/tabs'
 import { PostLoadDialog } from './PostLoadDialog';
 import { MapPin, Clock, Truck, DollarSign, Edit, Copy, X, Eye } from 'lucide-react';
 import { toast } from 'sonner';
-import { fetchMyLoads } from "../lib/api";
+import { fetchMyLoads, API_BASE_URL } from "../lib/api";
 import type { Load as ApiLoad } from "../lib/api";
 
 interface MyLoad {
@@ -18,10 +18,21 @@ interface MyLoad {
   dropoff: string;
   pickupDate: string;
   price: string;
-  status: 'pending' | 'active' | 'completed' | 'cancelled';
+  status: ApiLoad["status"];
+  uiStatus: 'pending' | 'active' | 'completed';
+  driver?: string;
   postedDate: string;
   assigned_to?: string | null;
   assigned_at?: string | null;
+  started_at?: string | null;
+  completed_at?: string | null;
+  epod_url?: string | null;
+}
+
+function resolveEpodUrl(url?: string | null) {
+  if (!url) return null;
+  if (/^https?:\/\//i.test(url)) return url;
+  return `${API_BASE_URL}${url}`;
 }
 
 interface MyLoadsTabProps {
@@ -29,7 +40,7 @@ interface MyLoadsTabProps {
 }
 
 export function MyLoadsTab({ onTrackLoad }: MyLoadsTabProps) {
-  const [activeTab, setActiveTab] = useState<'pending' | 'active' | 'completed' | 'cancelled'>('active');
+  const [activeTab, setActiveTab] = useState<'pending' | 'active' | 'completed'>('active');
   const [isEditOpen, setIsEditOpen] = useState(false);
   const [selectedLoad, setSelectedLoad] = useState<MyLoad | null>(null);
   const [myLoads, setMyLoads] = useState<MyLoad[]>([]);
@@ -48,29 +59,35 @@ export function MyLoadsTab({ onTrackLoad }: MyLoadsTabProps) {
         const data = await fetchMyLoads(CURRENT_SHIPPER_ID);
 
         if (isMounted) {
-          const transformed: MyLoad[] = data.map((load: ApiLoad) => ({
-            id: `L${load.id}`,
-            rawId: load.id,
-            species: load.species,
-            quantity: `${load.quantity} head`,
-            pickup: load.pickup_location,
-            dropoff: load.dropoff_location,
-            pickupDate: new Date(load.pickup_date).toLocaleString(),
-            price: load.offer_price
-              ? `$${Number(load.offer_price).toFixed(0)}`
-              : "$0",
-            status:
-              load.status === "assigned"
+          const transformed: MyLoad[] = data.map((load: ApiLoad) => {
+            const uiStatus =
+              load.status === "assigned" || load.status === "in_transit"
                 ? "active"
-                : load.status === "completed"
+                : load.status === "delivered"
                   ? "completed"
-                  : load.status === "cancelled"
-                    ? "cancelled"
-                    : "pending",
-            postedDate: new Date(load.created_at).toLocaleDateString(),
-            assigned_to: load.assigned_to ?? null,
-            assigned_at: load.assigned_at ?? null,
-          }));
+                  : "pending";
+
+            return {
+              id: `L${load.id}`,
+              species: load.species,
+              quantity: `${load.quantity} head`,
+              pickup: load.pickup_location,
+              dropoff: load.dropoff_location,
+              pickupDate: new Date(load.pickup_date).toLocaleString(),
+              price: load.offer_price
+                ? `$${Number(load.offer_price).toFixed(0)}`
+                : "$0",
+              status: load.status,
+              uiStatus,
+              postedDate: new Date(load.created_at).toLocaleDateString(),
+              driver: undefined,
+              assigned_to: load.assigned_to,
+              assigned_at: load.assigned_at,
+              started_at: load.started_at,
+              completed_at: load.completed_at,
+              epod_url: load.epod_url,
+            };
+          });
 
           setMyLoads(transformed);
         }
@@ -93,7 +110,7 @@ export function MyLoadsTab({ onTrackLoad }: MyLoadsTabProps) {
   }, []);
 
   const handleEdit = (load: MyLoad) => {
-    if (load.status !== 'pending') {
+    if (load.uiStatus !== 'pending') {
       toast.error('Only pending loads can be edited');
       return;
     }
@@ -108,17 +125,13 @@ export function MyLoadsTab({ onTrackLoad }: MyLoadsTabProps) {
   };
 
   const handleCancel = (load: MyLoad) => {
-    if (load.status === 'active') {
+    if (load.uiStatus === 'active') {
       if (!confirm('Cancelling an active trip may incur fees. Continue?')) {
         return;
       }
     }
     toast.success('Load cancelled');
   };
-
-  const pendingLoads = myLoads.filter(l => l.status === 'pending');
-  const activeLoads = myLoads.filter(l => l.status === 'active');
-  const completedLoads = myLoads.filter(l => l.status === 'completed');
 
   if (isLoading) {
     return (
@@ -135,6 +148,115 @@ export function MyLoadsTab({ onTrackLoad }: MyLoadsTabProps) {
       </div>
     );
   }
+
+  const renderLoadCard = (load: MyLoad) => {
+    const isPending = load.uiStatus === 'pending';
+    const isActive = load.uiStatus === 'active';
+    const isCompleted = load.uiStatus === 'completed';
+
+    return (
+      <Card key={load.id}>
+        <CardHeader className="pb-3">
+          <div className="flex items-start justify-between">
+            <div>
+              <div className="text-sm text-gray-600 mb-1">Load #{load.id}</div>
+              <h3 className="text-base text-gray-900">{load.species} - {load.quantity}</h3>
+            </div>
+            <Badge 
+              variant={isActive ? 'default' : isPending ? 'secondary' : isCompleted ? 'outline' : 'destructive'}
+              className={isActive ? 'bg-[#F97316]' : isPending ? 'bg-gray-500' : isCompleted ? 'bg-green-500 text-white' : ''}
+            >
+              {load.uiStatus.charAt(0).toUpperCase() + load.uiStatus.slice(1)}
+            </Badge>
+          </div>
+        </CardHeader>
+        <CardContent className="space-y-3">
+          <div className="flex items-start gap-2 text-sm">
+            <MapPin className="w-4 h-4 text-[#F97316] mt-0.5 flex-shrink-0" />
+            <div className="flex-1">
+              <div className="text-gray-900">{load.pickup}</div>
+              <div className="text-gray-600">{load.dropoff}</div>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-4 text-sm text-gray-600">
+            <div className="flex items-center gap-1">
+              <Clock className="w-4 h-4" />
+              {load.pickupDate}
+            </div>
+          </div>
+
+          {load.driver && (
+            <div className="flex items-center gap-2 text-sm p-2 bg-gray-50 rounded">
+              <Truck className="w-4 h-4 text-gray-600" />
+              <span className="text-gray-900">Driver: {load.driver}</span>
+            </div>
+          )}
+
+          <div className="flex items-center justify-between pt-3 border-t">
+            <div className="flex items-center gap-1 text-[#F97316]">
+              <DollarSign className="w-4 h-4" />
+              <span className="text-lg">{load.price}</span>
+            </div>
+
+            <div className="flex gap-2">
+              {isPending && (
+                <>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => handleEdit(load)}
+                  >
+                    <Edit className="w-4 h-4" />
+                  </Button>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => handleDuplicate(load)}
+                  >
+                    <Copy className="w-4 h-4" />
+                  </Button>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => handleCancel(load)}
+                  >
+                    <X className="w-4 h-4 text-red-600" />
+                  </Button>
+                </>
+              )}
+              {isActive && (
+                <Button
+                  onClick={() => onTrackLoad?.(load)}
+                  className="bg-[#F97316] hover:bg-[#ea580c]"
+                  size="sm"
+                >
+                  <Eye className="w-4 h-4 mr-2" />
+                  Track
+                </Button>
+              )}
+              {isCompleted && (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => {
+                    const epodUrl = resolveEpodUrl(load.epod_url);
+                    if (epodUrl) {
+                      window.open(epodUrl, "_blank");
+                    } else {
+                      toast.info("No ePOD available yet.");
+                    }
+                  }}
+                >
+                  View ePOD
+                </Button>
+              )}
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+    );
+  };
 
   const renderEmptyState = (type: string) => (
     <div className="text-center py-12">
@@ -184,20 +306,32 @@ export function MyLoadsTab({ onTrackLoad }: MyLoadsTabProps) {
                     Offer: {load.price}
                   </div>
                 )}
-                {load.assigned_to ? (
-                  <div className="text-xs mt-1">
-                    Assigned to: <span className="font-medium">{load.assigned_to}</span>{" "}
-                    {load.assigned_at
-                      ? `at ${new Date(
-                          load.assigned_at as unknown as string
-                        ).toLocaleString()}`
-                      : ""}
-                  </div>
-                ) : (
-                  <div className="text-xs mt-1 text-amber-600">Not yet assigned</div>
-                )}
-                <div className="text-xs text-gray-400">
-                  Status: {load.status}
+                <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-gray-600">
+                  <span>Status:</span>
+                  <span className="font-medium">{load.status}</span>
+                  {load.started_at && (
+                    <span>
+                      • Started {new Date(load.started_at).toLocaleString()}
+                    </span>
+                  )}
+                  {load.completed_at && (
+                    <span>
+                      • Delivered {new Date(load.completed_at).toLocaleString()}
+                    </span>
+                  )}
+                  {resolveEpodUrl(load.epod_url) && (
+                    <>
+                      <span>•</span>
+                      <a
+                        href={resolveEpodUrl(load.epod_url) ?? "#"}
+                        className="text-emerald-700 underline"
+                        target="_blank"
+                        rel="noreferrer"
+                      >
+                        View ePOD
+                      </a>
+                    </>
+                  )}
                 </div>
               </CardContent>
             </Card>

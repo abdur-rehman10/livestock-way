@@ -204,10 +204,9 @@ export function HaulerDashboard({ onLogout }: HaulerDashboardProps) {
               </TabsTrigger>
               <TabsTrigger
                 value="my-loads"
-                className="data-[state=active]:border-b-2 data-[state=active]:border-[#29CA8D] rounded-none flex items-center gap-1"
+                className="data-[state=active]:border-b-2 data-[state=active]:border-[#29CA8D] rounded-none"
                 onClick={() => navigate('/hauler/my-loads')}
               >
-                <ClipboardList className="w-4 h-4" />
                 My Loads
               </TabsTrigger>
             </TabsList>

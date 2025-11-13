@@ -224,8 +224,8 @@ export function AppRouter({ showKeyboardShortcuts, onKeyboardShortcutsToggle }: 
             {userRole === 'hauler' ? (
               <AppLayout userRole="hauler" onLogout={handleLogout}>
                 <Routes>
-                <Route path="dashboard" element={<HaulerDashboard onLogout={handleLogout} />} />
-                <Route path="my-loads" element={<HaulerMyLoads />} />
+                  <Route path="dashboard" element={<HaulerDashboard onLogout={handleLogout} />} />
+                  <Route path="my-loads" element={<HaulerMyLoads />} />
                   <Route path="loadboard" element={<Loadboard />} />
                   <Route path="fleet" element={<FleetManagement />} />
                   <Route path="trips" element={<TripsTab onViewTrip={() => toast.info('Trip view coming soon')} />} />
