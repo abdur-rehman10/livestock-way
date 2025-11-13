@@ -64,7 +64,7 @@ export function AppLayout({ children, userRole, onLogout }: AppLayoutProps) {
       label: 'Shipper',
       routes: [
         { path: '/shipper/dashboard', icon: LayoutDashboard, label: 'Dashboard' },
-        { path: '/shipper/loads', icon: Package, label: 'My Loads' },
+        { path: '/shipper/my-loads', icon: Package, label: 'My Loads' },
         { path: '/shipper/loadboard', icon: Search, label: 'Find Carriers' },
         { path: '/shipper/trips', icon: MapPin, label: 'Track Shipments' },
         { path: '/shipper/payments', icon: DollarSign, label: 'Payments' },

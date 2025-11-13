@@ -4,8 +4,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../co
 import { Badge } from '../components/ui/badge';
 import { RoleSwitcher } from './RoleSwitcher';
 import { PostLoadDialog } from './PostLoadDialog';
-import { MyLoadsTab } from './MyLoadsTab';
-import { TripTracking } from './TripTracking';
+import MyLoadsTab from './MyLoadsTab';
 import { WalletTab } from './WalletTab';
 import { SupportTab } from './SupportTab';
 import { 
@@ -88,20 +87,6 @@ const availableCarriers = [
 export function ShipperDashboard({ onLogout, onRoleSwitch }: ShipperDashboardProps) {
   const [activeTab, setActiveTab] = useState('home');
   const [isPostLoadOpen, setIsPostLoadOpen] = useState(false);
-  const [selectedLoad, setSelectedLoad] = useState<any>(null);
-
-  const handleTrackLoad = (load: any) => {
-    setSelectedLoad(load);
-  };
-
-  if (selectedLoad) {
-    return (
-      <TripTracking
-        load={selectedLoad}
-        onBack={() => setSelectedLoad(null)}
-      />
-    );
-  }
 
   return (
     <div className="min-h-screen bg-gray-50">
@@ -329,7 +314,7 @@ export function ShipperDashboard({ onLogout, onRoleSwitch }: ShipperDashboardPro
           </div>
         )}
 
-        {activeTab === 'loads' && <MyLoadsTab onTrackLoad={handleTrackLoad} />}
+        {activeTab === 'loads' && <MyLoadsTab />}
         {activeTab === 'wallet' && <WalletTab />}
         {activeTab === 'support' && <SupportTab />}
       </main>

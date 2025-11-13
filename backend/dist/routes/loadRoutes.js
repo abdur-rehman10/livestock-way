@@ -5,6 +5,7 @@ const loadController_1 = require("../controllers/loadController");
 const router = (0, express_1.Router)();
 // GET /api/loads
 router.get("/", loadController_1.getLoads);
+router.get("/:id", loadController_1.getLoadById);
 // GET /api/loads/:id
 router.get("/:id", loadController_1.getLoadById);
 // POST /api/loads

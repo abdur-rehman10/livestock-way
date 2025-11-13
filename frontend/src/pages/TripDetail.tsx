@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from "react";
-import { useParams, useNavigate } from "react-router-dom";
+import { useParams, useNavigate, useLocation } from "react-router-dom";
 import { fetchLoadById, type LoadDetail, API_BASE_URL } from "../lib/api";
 
 const formatDateTime = (value?: string | null) => {
@@ -32,6 +32,7 @@ const resolveEpodUrl = (url?: string | null) => {
 export function TripDetail() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
+  const location = useLocation();
 
   const [load, setLoad] = useState<LoadDetail | null>(null);
   const [loading, setLoading] = useState(true);
@@ -104,6 +105,11 @@ export function TripDetail() {
   const statusKey = (load.status || "open").toLowerCase();
   const badgeLabel = statusLabel[statusKey] ?? load.status ?? "Unknown";
   const badgeClass = statusColor[statusKey] ?? "bg-gray-100 text-gray-700";
+  const roleSegment = location.pathname.split("/").filter(Boolean)[0] ?? "hauler";
+  const trackingBase =
+    roleSegment === "shipper" || roleSegment === "hauler"
+      ? `/${roleSegment}`
+      : "/hauler";
 
   return (
     <div className="p-4 space-y-4">
@@ -218,7 +224,7 @@ export function TripDetail() {
           </div>
           <button
             type="button"
-            onClick={() => navigate(`/hauler/trips/${load.id}/tracking`)}
+            onClick={() => navigate(`${trackingBase}/trips/${load.id}/tracking`)}
             className="inline-flex items-center rounded-md border border-emerald-200 px-3 py-1.5 text-[11px] font-medium text-emerald-800 hover:bg-emerald-50"
           >
             View tracking
