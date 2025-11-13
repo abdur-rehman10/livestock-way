@@ -27,3 +27,15 @@ export interface SupportTicket {
   created_at: string;
   updated_at: string;
 }
+
+export interface TripExpense {
+  id: number;
+  load_id: number;
+  user_id: string;
+  user_role: string;
+  type: string;
+  amount: number;
+  currency: string;
+  note: string | null;
+  created_at: string;
+}

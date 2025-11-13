@@ -1,6 +1,17 @@
 import React, { useEffect, useState } from "react";
 import { useParams, useNavigate, useLocation } from "react-router-dom";
-import { fetchLoadById, type LoadDetail, API_BASE_URL } from "../lib/api";
+import {
+  fetchLoadById,
+  type LoadDetail,
+  API_BASE_URL,
+  fetchTripExpenses,
+  createTripExpense,
+  updateTripExpense,
+  deleteTripExpense,
+} from "../lib/api";
+import type { TripExpense } from "../lib/types";
+import { Button } from "../components/ui/button";
+
 
 const formatDateTime = (value?: string | null) => {
   if (!value) return "—";
@@ -29,6 +40,20 @@ const resolveEpodUrl = (url?: string | null) => {
   return `${API_BASE_URL}${url}`;
 };
 
+const EXPENSE_TYPES: Array<
+  "fuel" | "toll" | "washout" | "feed" | "repair" | "other"
+> = ["fuel", "toll", "washout", "feed", "repair", "other"];
+
+const normalizeExpenseType = (
+  value?: string
+): (typeof EXPENSE_TYPES)[number] => {
+  if (!value) return "other";
+  const lower = value.toLowerCase();
+  return (EXPENSE_TYPES as string[]).includes(lower)
+    ? (lower as (typeof EXPENSE_TYPES)[number])
+    : "other";
+};
+
 export function TripDetail() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
@@ -37,6 +62,31 @@ export function TripDetail() {
   const [load, setLoad] = useState<LoadDetail | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [expenses, setExpenses] = useState<TripExpense[]>([]);
+  const [expensesLoading, setExpensesLoading] = useState(true);
+  const [expensesError, setExpensesError] = useState<string | null>(null);
+  const [expenseType, setExpenseType] = useState<
+    "fuel" | "toll" | "washout" | "feed" | "repair" | "other"
+  >("fuel");
+  const [expenseAmount, setExpenseAmount] = useState("");
+  const [expenseNote, setExpenseNote] = useState("");
+  const [expenseSubmitting, setExpenseSubmitting] = useState(false);
+  const [expenseSubmitError, setExpenseSubmitError] = useState<string | null>(null);
+  const [editingExpenseId, setEditingExpenseId] = useState<number | null>(null);
+  const [editingExpenseFields, setEditingExpenseFields] = useState<{
+    type: "fuel" | "toll" | "washout" | "feed" | "repair" | "other";
+    amount: string;
+    note: string;
+    currency: string;
+  }>({
+    type: "fuel",
+    amount: "",
+    note: "",
+    currency: "USD",
+  });
+  const [editSubmitting, setEditSubmitting] = useState(false);
+  const [editError, setEditError] = useState<string | null>(null);
+  const [deletingExpenseId, setDeletingExpenseId] = useState<number | null>(null);
 
   useEffect(() => {
     if (!id) {
@@ -71,7 +121,142 @@ export function TripDetail() {
     loadTrip();
   }, [id]);
 
+  useEffect(() => {
+    if (!load?.id) return;
+
+    async function loadExpenses() {
+      try {
+        setExpensesLoading(true);
+        setExpensesError(null);
+        const data = await fetchTripExpenses(load.id);
+        setExpenses(data);
+      } catch (err: any) {
+        console.error("Error loading trip expenses", err);
+        setExpensesError(
+          err?.message || "Failed to load expenses for this trip."
+        );
+      } finally {
+        setExpensesLoading(false);
+      }
+    }
+
+    loadExpenses();
+  }, [load?.id]);
+
+  const handleAddExpense = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!load?.id) return;
+
+    const amountNumber = Number(expenseAmount);
+    if (Number.isNaN(amountNumber) || amountNumber <= 0) {
+      setExpenseSubmitError("Please enter a valid positive amount.");
+      return;
+    }
+
+    try {
+      setExpenseSubmitting(true);
+      setExpenseSubmitError(null);
+
+      const newExpense = await createTripExpense(load.id, {
+        user_id: "demo_hauler_1",
+        user_role: "hauler",
+        type: expenseType,
+        amount: amountNumber,
+        currency: "USD",
+        note: expenseNote || undefined,
+      });
+
+      setExpenses((prev) => [newExpense, ...prev]);
+      setExpenseAmount("");
+      setExpenseNote("");
+      setExpenseType("fuel");
+    } catch (err: any) {
+      console.error("Error creating expense", err);
+      setExpenseSubmitError(
+        err?.message || "Failed to save expense. Please try again."
+      );
+    } finally {
+      setExpenseSubmitting(false);
+    }
+  };
+
+  const startEditingExpense = (expense: TripExpense) => {
+    setEditingExpenseId(expense.id);
+    setEditingExpenseFields({
+      type: normalizeExpenseType(expense.type),
+      amount: Number(expense.amount ?? 0).toString(),
+      note: expense.note ?? "",
+      currency: expense.currency ?? "USD",
+    });
+    setEditError(null);
+  };
+
+  const cancelEditingExpense = () => {
+    setEditingExpenseId(null);
+    setEditingExpenseFields({
+      type: "fuel",
+      amount: "",
+      note: "",
+      currency: "USD",
+    });
+    setEditError(null);
+  };
+
+  const handleSaveExpenseEdit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!load?.id || editingExpenseId == null) return;
+
+    const amountNumber = Number(editingExpenseFields.amount);
+    if (Number.isNaN(amountNumber) || amountNumber <= 0) {
+      setEditError("Please enter a valid positive amount.");
+      return;
+    }
+
+    try {
+      setEditSubmitting(true);
+      setEditError(null);
+      const updated = await updateTripExpense(load.id, editingExpenseId, {
+        type: editingExpenseFields.type,
+        amount: amountNumber,
+        currency: editingExpenseFields.currency || "USD",
+        note: editingExpenseFields.note ?? "",
+      });
+
+      setExpenses((prev) =>
+        prev.map((exp) => (exp.id === editingExpenseId ? updated : exp))
+      );
+      cancelEditingExpense();
+    } catch (err: any) {
+      console.error("Error updating expense", err);
+      setEditError(err?.message || "Failed to update expense.");
+    } finally {
+      setEditSubmitting(false);
+    }
+  };
+
+  const handleDeleteExpense = async (expenseId: number) => {
+    if (!load?.id) return;
+    const confirmed = window.confirm("Remove this expense?");
+    if (!confirmed) return;
+
+    try {
+      setDeletingExpenseId(expenseId);
+      setExpensesError(null);
+      await deleteTripExpense(load.id, expenseId);
+      setExpenses((prev) => prev.filter((exp) => exp.id !== expenseId));
+      if (editingExpenseId === expenseId) {
+        cancelEditingExpense();
+      }
+    } catch (err: any) {
+      console.error("Error deleting expense", err);
+      setExpensesError(err?.message || "Failed to delete expense.");
+    } finally {
+      setDeletingExpenseId(null);
+    }
+  };
+
   if (loading) {
+
     return (
       <div className="p-4 text-sm text-gray-600">
         Loading trip details…
@@ -229,6 +414,247 @@ export function TripDetail() {
           >
             View tracking
           </button>
+        </div>
+
+      </div>
+
+      <div className="rounded-lg border border-gray-200 bg-white p-4 space-y-3">
+        <div className="flex items-center justify-between">
+          <h2 className="text-sm font-semibold text-gray-900">Trip expenses</h2>
+          <p className="text-[11px] text-gray-500">
+            Logged against this load by hauler/driver
+          </p>
+        </div>
+
+        <form
+          onSubmit={handleAddExpense}
+          className="grid gap-3 md:grid-cols-[1fr_1fr_2fr_auto] md:items-end"
+        >
+          <div className="space-y-1">
+            <label className="text-[11px] font-medium text-gray-700">
+              Type
+            </label>
+            <select
+              value={expenseType}
+              onChange={(e) =>
+                setExpenseType(
+                  e.target.value as
+                    | "fuel"
+                    | "toll"
+                    | "washout"
+                    | "feed"
+                    | "repair"
+                    | "other"
+                )
+              }
+              className="block w-full rounded-md border border-gray-300 px-2 py-1.5 text-xs text-gray-900 focus:border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-500"
+            >
+              {EXPENSE_TYPES.map((option) => (
+                <option key={option} value={option}>
+                  {option === "feed" ? "Feed / Hay" : option.charAt(0).toUpperCase() + option.slice(1)}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          <div className="space-y-1">
+            <label className="text-[11px] font-medium text-gray-700">
+              Amount (USD)
+            </label>
+            <input
+              type="number"
+              min="0"
+              step="0.01"
+              value={expenseAmount}
+              onChange={(e) => setExpenseAmount(e.target.value)}
+              className="block w-full rounded-md border border-gray-300 px-2 py-1.5 text-xs text-gray-900 focus:border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-500"
+              placeholder="e.g. 150.75"
+            />
+          </div>
+
+          <div className="space-y-1 md:col-span-2">
+            <label className="text-[11px] font-medium text-gray-700">
+              Note (optional)
+            </label>
+            <input
+              type="text"
+              value={expenseNote}
+              onChange={(e) => setExpenseNote(e.target.value)}
+              className="block w-full rounded-md border border-gray-300 px-2 py-1.5 text-xs text-gray-900 focus:border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-500"
+              placeholder="e.g. Fuel stop at XYZ station"
+            />
+          </div>
+
+          {expenseSubmitError && (
+            <div className="md:col-span-4 text-[11px] text-red-600">
+              {expenseSubmitError}
+            </div>
+          )}
+
+          <div className="flex justify-end">
+            <Button
+              type="submit"
+              disabled={expenseSubmitting || !load}
+              className="bg-[#29CA8D] hover:bg-[#24b67d] px-4 py-1.5 text-xs font-medium text-white disabled:opacity-60"
+            >
+              {expenseSubmitting ? "Saving…" : "Add expense"}
+            </Button>
+          </div>
+        </form>
+
+        <div className="border-t border-gray-100 pt-3">
+          {expensesLoading ? (
+            <div className="text-[11px] text-gray-500">Loading expenses…</div>
+          ) : expensesError ? (
+            <div className="text-[11px] text-red-600">{expensesError}</div>
+          ) : expenses.length === 0 ? (
+            <div className="text-[11px] text-gray-500">
+              No expenses logged yet for this trip.
+            </div>
+          ) : (
+            <div className="space-y-2">
+              {expenses.map((exp) => {
+                const isEditing = editingExpenseId === exp.id;
+                return (
+                  <div
+                    key={exp.id}
+                    className="rounded-md bg-gray-50 px-3 py-2 text-[11px]"
+                  >
+                    {isEditing ? (
+                      <form className="space-y-2" onSubmit={handleSaveExpenseEdit}>
+                        <div className="grid gap-2 md:grid-cols-4">
+                          <select
+                            value={editingExpenseFields.type}
+                            onChange={(e) =>
+                              setEditingExpenseFields((prev) => ({
+                                ...prev,
+                                type: e.target.value as
+                                  | "fuel"
+                                  | "toll"
+                                  | "washout"
+                                  | "feed"
+                                  | "repair"
+                                  | "other",
+                              }))
+                            }
+                            className="rounded-md border border-gray-300 px-2 py-1.5 text-xs text-gray-900 focus:border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-500"
+                          >
+                            {EXPENSE_TYPES.map((option) => (
+                              <option key={option} value={option}>
+                                {option === "feed"
+                                  ? "Feed / Hay"
+                                  : option.charAt(0).toUpperCase() + option.slice(1)}
+                              </option>
+                            ))}
+                          </select>
+                          <input
+                            type="number"
+                            min="0"
+                            step="0.01"
+                            value={editingExpenseFields.amount}
+                            onChange={(e) =>
+                              setEditingExpenseFields((prev) => ({
+                                ...prev,
+                                amount: e.target.value,
+                              }))
+                            }
+                            className="rounded-md border border-gray-300 px-2 py-1.5 text-xs text-gray-900 focus:border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-500"
+                            placeholder="Amount"
+                          />
+                          <input
+                            type="text"
+                            value={editingExpenseFields.currency}
+                            onChange={(e) =>
+                              setEditingExpenseFields((prev) => ({
+                                ...prev,
+                                currency: e.target.value,
+                              }))
+                            }
+                            className="rounded-md border border-gray-300 px-2 py-1.5 text-xs text-gray-900 focus:border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-500"
+                            placeholder="Currency"
+                          />
+                          <input
+                            type="text"
+                            value={editingExpenseFields.note}
+                            onChange={(e) =>
+                              setEditingExpenseFields((prev) => ({
+                                ...prev,
+                                note: e.target.value,
+                              }))
+                            }
+                            className="rounded-md border border-gray-300 px-2 py-1.5 text-xs text-gray-900 focus:border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-500 md:col-span-1"
+                            placeholder="Note"
+                          />
+                        </div>
+                        {editError && (
+                          <div className="text-[11px] text-red-600">{editError}</div>
+                        )}
+                        <div className="flex justify-end gap-2">
+                          <Button
+                            type="button"
+                            variant="outline"
+                            onClick={cancelEditingExpense}
+                            className="px-3 py-1 text-[11px]"
+                          >
+                            Cancel
+                          </Button>
+                          <Button
+                            type="submit"
+                            disabled={editSubmitting}
+                            className="bg-[#29CA8D] hover:bg-[#24b67d] px-3 py-1 text-[11px] font-medium text-white disabled:opacity-60"
+                          >
+                            {editSubmitting ? "Saving…" : "Save"}
+                          </Button>
+                        </div>
+                      </form>
+                    ) : (
+                      <div className="flex flex-col gap-3 rounded-xl border border-gray-100 bg-white p-3 shadow-sm md:flex-row md:items-center md:justify-between">
+                        <div className="space-y-1">
+                          <div className="font-medium text-gray-900 capitalize">
+                            {exp.type} · {Number(exp.amount).toFixed(2)} {exp.currency}
+                          </div>
+                          {exp.note && (
+                            <div className="text-gray-700">{exp.note}</div>
+                          )}
+                          <div className="text-[10px] text-gray-400">
+                            {new Date(exp.created_at).toLocaleString()}
+                          </div>
+                        </div>
+                        <div className="flex items-center gap-3 text-[10px]">
+                          <div className="text-gray-500 text-right">
+                            {exp.user_role}
+                            <br />
+                            <span className="font-mono">{exp.user_id}</span>
+                          </div>
+                          <div className="flex gap-2">
+                            <Button
+                              type="button"
+                              variant="outline"
+                              size="sm"
+                              className="h-7 px-3 text-[10px] border-gray-300 text-gray-600 hover:bg-gray-100"
+                              onClick={() => startEditingExpense(exp)}
+                            >
+                              Edit
+                            </Button>
+                            <Button
+                              type="button"
+                              variant="outline"
+                              size="sm"
+                              className="h-7 px-3 text-[10px] font-medium text-rose-700 border-rose-200 hover:bg-rose-50 disabled:opacity-60"
+                              onClick={() => handleDeleteExpense(exp.id)}
+                              disabled={deletingExpenseId === exp.id}
+                            >
+                              {deletingExpenseId === exp.id ? "Deleting…" : "Delete"}
+                            </Button>
+                          </div>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          )}
         </div>
       </div>
     </div>

@@ -7,14 +7,12 @@ import {
   startLoad,
   completeLoad,
 } from "../controllers/loadController";
+import tripExpenseRoutes from "./tripExpenseRoutes";
 
 const router = Router();
 
 // GET /api/loads
 router.get("/", getLoads);
-router.get("/:id", getLoadById);
-
-// GET /api/loads/:id
 router.get("/:id", getLoadById);
 
 // POST /api/loads
@@ -28,5 +26,7 @@ router.post("/:id/start", startLoad);
 
 // POST /api/loads/:id/complete
 router.post("/:id/complete", completeLoad);
+
+router.use("/:id/expenses", tripExpenseRoutes);
 
 export default router;
