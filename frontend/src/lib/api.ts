@@ -1,4 +1,4 @@
-import type { Payment, SupportTicket } from "./types";
+import type { Payment, SupportTicket, TripExpense } from "./types";
 
 export const API_BASE_URL =
   import.meta.env.VITE_API_URL || "http://localhost:4000";
@@ -235,4 +235,90 @@ export async function createSupportTicket(
     );
   }
   return (await response.json()) as SupportTicket;
+}
+
+export async function fetchTripExpenses(
+  loadId: number
+): Promise<TripExpense[]> {
+  const response = await fetch(`${API_BASE_URL}/api/loads/${loadId}/expenses`);
+  if (!response.ok) {
+    throw new Error(
+      `Failed to fetch trip expenses (status ${response.status})`
+    );
+  }
+  return (await response.json()) as TripExpense[];
+}
+
+interface CreateTripExpensePayload {
+  user_id: string;
+  user_role: "hauler" | "driver";
+  type: "fuel" | "toll" | "washout" | "feed" | "repair" | "other";
+  amount: number;
+  currency?: string;
+  note?: string;
+}
+
+export async function createTripExpense(
+  loadId: number,
+  payload: CreateTripExpensePayload
+): Promise<TripExpense> {
+  const response = await fetch(`${API_BASE_URL}/api/loads/${loadId}/expenses`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  if (!response.ok) {
+    const text = await response.text();
+    throw new Error(
+      `Failed to create trip expense (${response.status}): ${text || ""}`
+    );
+  }
+  return (await response.json()) as TripExpense;
+}
+
+interface UpdateTripExpensePayload {
+  type?: "fuel" | "toll" | "washout" | "feed" | "repair" | "other";
+  amount?: number;
+  currency?: string;
+  note?: string | null;
+}
+
+export async function updateTripExpense(
+  loadId: number,
+  expenseId: number,
+  payload: UpdateTripExpensePayload
+): Promise<TripExpense> {
+  const response = await fetch(
+    `${API_BASE_URL}/api/loads/${loadId}/expenses/${expenseId}`,
+    {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    }
+  );
+  if (!response.ok) {
+    const text = await response.text();
+    throw new Error(
+      `Failed to update trip expense (${response.status}): ${text || ""}`
+    );
+  }
+  return (await response.json()) as TripExpense;
+}
+
+export async function deleteTripExpense(
+  loadId: number,
+  expenseId: number
+): Promise<void> {
+  const response = await fetch(
+    `${API_BASE_URL}/api/loads/${loadId}/expenses/${expenseId}`,
+    {
+      method: "DELETE",
+    }
+  );
+  if (!response.ok) {
+    const text = await response.text();
+    throw new Error(
+      `Failed to delete trip expense (${response.status}): ${text || ""}`
+    );
+  }
 }
