@@ -12,6 +12,7 @@ const router = Router();
 
 // GET /api/loads
 router.get("/", getLoads);
+router.get("/:id", getLoadById);
 
 // GET /api/loads/:id
 router.get("/:id", getLoadById);

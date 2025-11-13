@@ -110,6 +110,7 @@ export default function HaulerMyLoads() {
     open: false,
     load: null,
   });
+  const navigate = useNavigate();
 
   async function refresh() {
     try {
