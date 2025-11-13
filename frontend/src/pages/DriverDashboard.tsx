@@ -6,7 +6,7 @@ import { Switch } from '../components/ui/switch';
 import { Input } from '../components/ui/input';
 import { RoleSwitcher } from './RoleSwitcher';
 import { TripsTab } from './TripsTab';
-import { WalletTab } from './WalletTab';
+import WalletTab from './WalletTab';
 import { ExpensesTab } from './ExpensesTab';
 import { DocumentsTab } from './DocumentsTab';
 import { SupportTab } from './SupportTab';

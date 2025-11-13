@@ -5,7 +5,7 @@ import { Badge } from '../components/ui/badge';
 import { RoleSwitcher } from './RoleSwitcher';
 import { PostLoadDialog } from './PostLoadDialog';
 import MyLoadsTab from './MyLoadsTab';
-import { WalletTab } from './WalletTab';
+import WalletTab from './WalletTab';
 import { SupportTab } from './SupportTab';
 import { 
   Package, 

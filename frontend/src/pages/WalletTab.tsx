@@ -1,299 +1,221 @@
-import { useState } from 'react';
-import { Button } from '../components/ui/button';
-import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/card';
-import { Badge } from '../components/ui/badge';
-import { Input } from '../components/ui/input';
-import { Label } from '../components/ui/label';
-import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '../components/ui/dialog';
-import { DollarSign, TrendingUp, Clock, ArrowUpRight, ArrowDownRight, CreditCard, Building2 } from 'lucide-react';
-import { toast } from 'sonner';
+import React, { useEffect, useMemo, useState } from "react";
+import { useLocation } from "react-router-dom";
+import { fetchPaymentsForUser } from "../lib/api";
+import type { Payment } from "../lib/types";
 
-interface Transaction {
-  id: string;
-  type: 'payment' | 'withdrawal' | 'refund';
-  tripId?: string;
-  amount: string;
-  status: 'pending' | 'completed' | 'failed';
-  date: string;
+type UserRole = "shipper" | "hauler" | "driver" | "stakeholder";
+
+function detectRoleFromPath(pathname: string): UserRole {
+  if (pathname.startsWith("/hauler")) return "hauler";
+  if (pathname.startsWith("/shipper")) return "shipper";
+  if (pathname.startsWith("/driver")) return "driver";
+  return "stakeholder";
 }
 
-const transactions: Transaction[] = [
-  {
-    id: 'TXN001',
-    type: 'payment',
-    tripId: 'T004',
-    amount: '$720',
-    status: 'completed',
-    date: 'Oct 27, 2025',
-  },
-  {
-    id: 'TXN002',
-    type: 'payment',
-    tripId: 'T005',
-    amount: '$450',
-    status: 'completed',
-    date: 'Oct 26, 2025',
-  },
-  {
-    id: 'TXN003',
-    type: 'payment',
-    tripId: 'T001',
-    amount: '$850',
-    status: 'pending',
-    date: 'Oct 28, 2025',
-  },
-  {
-    id: 'TXN004',
-    type: 'withdrawal',
-    amount: '$1,000',
-    status: 'completed',
-    date: 'Oct 25, 2025',
-  },
-];
+function getDemoUserId(role: UserRole): string {
+  switch (role) {
+    case "shipper":
+      return "demo_shipper_1";
+    case "hauler":
+      return "demo_hauler_1";
+    case "driver":
+      return "demo_driver_1";
+    case "stakeholder":
+    default:
+      return "demo_stakeholder_1";
+  }
+}
 
-export function WalletTab() {
-  const [isWithdrawOpen, setIsWithdrawOpen] = useState(false);
-  const [isBankDetailsOpen, setIsBankDetailsOpen] = useState(false);
-  const [hasBankDetails, setHasBankDetails] = useState(false);
-  const [withdrawAmount, setWithdrawAmount] = useState('');
+export default function WalletTab() {
+  const location = useLocation();
+  const role = useMemo(
+    () => detectRoleFromPath(location.pathname),
+    [location.pathname]
+  );
+  const userId = useMemo(() => getDemoUserId(role), [role]);
 
-  // Mock wallet data
-  const totalEarnings = 2450;
-  const escrow = 850;
-  const withdrawable = totalEarnings - escrow;
+  const [payments, setPayments] = useState<Payment[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
-  const handleWithdraw = () => {
-    if (!hasBankDetails) {
-      setIsWithdrawOpen(false);
-      setIsBankDetailsOpen(true);
-      return;
+  useEffect(() => {
+    async function load() {
+      try {
+        setLoading(true);
+        setError(null);
+        const data = await fetchPaymentsForUser(userId, role);
+        setPayments(data);
+      } catch (err: any) {
+        console.error("Error loading payments", err);
+        setError(err?.message || "Failed to load wallet data.");
+      } finally {
+        setLoading(false);
+      }
+    }
+    load();
+  }, [userId, role]);
+
+  const totals = useMemo(() => {
+    let credited = 0;
+    let debited = 0;
+
+    for (const p of payments) {
+      if (p.payee_id === userId && p.payee_role === role) {
+        credited += Number(p.amount || 0);
+      }
+      if (p.payer_id === userId && p.payer_role === role) {
+        debited += Number(p.amount || 0);
+      }
     }
 
-    const amount = parseFloat(withdrawAmount);
-    if (isNaN(amount) || amount <= 0) {
-      toast.error('Please enter a valid amount');
-      return;
-    }
+    return {
+      credited,
+      debited,
+      balance: credited - debited,
+    };
+  }, [payments, role, userId]);
 
-    if (amount > withdrawable) {
-      toast.error('Insufficient withdrawable balance');
-      return;
-    }
+  if (loading) {
+    return (
+      <div className="p-4 text-xs text-gray-600">
+        Loading your wallet…
+      </div>
+    );
+  }
 
-    toast.success(`Withdrawal of $${amount} initiated. Funds will arrive in 2-3 business days.`);
-    setIsWithdrawOpen(false);
-    setWithdrawAmount('');
-  };
-
-  const handleSaveBankDetails = (e: React.FormEvent) => {
-    e.preventDefault();
-    setHasBankDetails(true);
-    setIsBankDetailsOpen(false);
-    toast.success('Bank details saved successfully');
-  };
+  if (error) {
+    return (
+      <div className="p-4 space-y-3">
+        <div className="text-xs text-red-600">{error}</div>
+        <button
+          type="button"
+          onClick={() => window.location.reload()}
+          className="inline-flex items-center rounded-md border border-gray-300 px-3 py-1.5 text-xs font-medium text-gray-700 hover:bg-gray-50"
+        >
+          Retry
+        </button>
+      </div>
+    );
+  }
 
   return (
-    <div className="p-4 space-y-4">
-      {/* Balance Summary */}
-      <Card className="bg-gradient-to-r from-[#29CA8D] to-[#24b67d] text-white">
-        <CardContent className="p-6">
-          <div className="text-sm text-white/80 mb-1">Total Earnings</div>
-          <div className="text-3xl mb-4">${totalEarnings.toLocaleString()}</div>
-          
-          <div className="grid grid-cols-2 gap-4">
-            <div>
-              <div className="text-xs text-white/80">In Escrow</div>
-              <div className="text-xl">${escrow}</div>
-            </div>
-            <div>
-              <div className="text-xs text-white/80">Withdrawable</div>
-              <div className="text-xl">${withdrawable.toLocaleString()}</div>
-            </div>
-          </div>
-
-          <Button
-            onClick={() => setIsWithdrawOpen(true)}
-            className="w-full mt-4 bg-white text-[#29CA8D] hover:bg-gray-100"
-          >
-            <ArrowUpRight className="w-4 h-4 mr-2" />
-            Withdraw Funds
-          </Button>
-        </CardContent>
-      </Card>
-
-      {/* Quick Stats */}
-      <div className="grid grid-cols-2 gap-3">
-        <Card>
-          <CardContent className="p-4 text-center">
-            <TrendingUp className="w-6 h-6 mx-auto mb-2 text-[#29CA8D]" />
-            <div className="text-sm text-gray-600 mb-1">This Week</div>
-            <div className="text-xl text-gray-900">$1,270</div>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardContent className="p-4 text-center">
-            <Clock className="w-6 h-6 mx-auto mb-2 text-[#F97316]" />
-            <div className="text-sm text-gray-600 mb-1">Pending</div>
-            <div className="text-xl text-gray-900">$850</div>
-          </CardContent>
-        </Card>
+    <div className="p-4 space-y-6">
+      <div className="flex items-baseline justify-between gap-2">
+        <div>
+          <h1 className="text-lg font-semibold text-gray-900">
+            Wallet & Payments
+          </h1>
+          <p className="text-[11px] text-gray-500">
+            Role: <span className="font-medium capitalize">{role}</span> · User ID:{" "}
+            <span className="font-mono text-gray-700">{userId}</span>
+          </p>
+        </div>
       </div>
 
-      {/* Transaction History */}
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-base">Transaction History</CardTitle>
-        </CardHeader>
-        <CardContent className="space-y-3">
-          {transactions.map((txn) => (
-            <div key={txn.id} className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
-              <div className="flex items-center gap-3">
-                <div className={`w-10 h-10 rounded-full flex items-center justify-center ${
-                  txn.type === 'payment' ? 'bg-green-100' : 
-                  txn.type === 'withdrawal' ? 'bg-blue-100' : 
-                  'bg-orange-100'
-                }`}>
-                  {txn.type === 'payment' ? (
-                    <ArrowDownRight className="w-5 h-5 text-green-600" />
-                  ) : (
-                    <ArrowUpRight className="w-5 h-5 text-blue-600" />
-                  )}
-                </div>
-                <div>
-                  <div className="text-base text-gray-900">
-                    {txn.type === 'payment' ? 'Trip Payment' : 
-                     txn.type === 'withdrawal' ? 'Withdrawal' : 
-                     'Refund'}
-                  </div>
-                  <div className="text-sm text-gray-600">
-                    {txn.tripId ? `Trip #${txn.tripId}` : txn.date}
-                  </div>
-                </div>
-              </div>
-              <div className="text-right">
-                <div className={`text-base ${
-                  txn.type === 'payment' ? 'text-green-600' : 
-                  txn.type === 'withdrawal' ? 'text-blue-600' : 
-                  'text-orange-600'
-                }`}>
-                  {txn.type === 'withdrawal' ? '-' : '+'}{txn.amount}
-                </div>
-                <Badge 
-                  variant={txn.status === 'completed' ? 'default' : txn.status === 'pending' ? 'secondary' : 'destructive'}
-                  className={`text-xs ${txn.status === 'completed' ? 'bg-green-500' : ''}`}
-                >
-                  {txn.status.charAt(0).toUpperCase() + txn.status.slice(1)}
-                </Badge>
-              </div>
-            </div>
-          ))}
-        </CardContent>
-      </Card>
-
-      {/* Withdraw Dialog */}
-      <Dialog open={isWithdrawOpen} onOpenChange={setIsWithdrawOpen}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>Withdraw Funds</DialogTitle>
-            <DialogDescription>
-              Enter the amount you wish to withdraw
-            </DialogDescription>
-          </DialogHeader>
-
-          <div className="space-y-4">
-            <div className="p-4 bg-gray-50 rounded-lg">
-              <div className="text-sm text-gray-600 mb-1">Available Balance</div>
-              <div className="text-2xl text-gray-900">${withdrawable.toLocaleString()}</div>
-            </div>
-
-            <div className="space-y-2">
-              <Label htmlFor="amount">Amount</Label>
-              <div className="relative">
-                <DollarSign className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
-                <Input
-                  id="amount"
-                  type="number"
-                  placeholder="0.00"
-                  value={withdrawAmount}
-                  onChange={(e) => setWithdrawAmount(e.target.value)}
-                  className="pl-10"
-                />
-              </div>
-            </div>
-
-            <div className="text-xs text-gray-600">
-              Funds will be transferred to your linked bank account within 2-3 business days.
-            </div>
-
-            <div className="flex gap-3">
-              <Button
-                variant="outline"
-                onClick={() => setIsWithdrawOpen(false)}
-                className="flex-1"
-              >
-                Cancel
-              </Button>
-              <Button
-                onClick={handleWithdraw}
-                className="flex-1 bg-[#29CA8D] hover:bg-[#24b67d]"
-              >
-                Confirm Withdrawal
-              </Button>
-            </div>
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+        <div className="rounded-lg border border-gray-200 bg-white p-4">
+          <div className="text-[11px] text-gray-500">Total credited</div>
+          <div className="mt-1 text-base font-semibold text-emerald-700">
+            ${totals.credited.toFixed(2)}
           </div>
-        </DialogContent>
-      </Dialog>
+        </div>
+        <div className="rounded-lg border border-gray-200 bg-white p-4">
+          <div className="text-[11px] text-gray-500">Total debited</div>
+          <div className="mt-1 text-base font-semibold text-rose-600">
+            -${totals.debited.toFixed(2)}
+          </div>
+        </div>
+        <div className="rounded-lg border border-gray-200 bg-white p-4">
+          <div className="text-[11px] text-gray-500">Net balance (Phase 1)</div>
+          <div className="mt-1 text-base font-semibold text-gray-900">
+            ${totals.balance.toFixed(2)}
+          </div>
+        </div>
+      </div>
 
-      {/* Bank Details Dialog */}
-      <Dialog open={isBankDetailsOpen} onOpenChange={setIsBankDetailsOpen}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>Add Bank Details</DialogTitle>
-            <DialogDescription>
-              Please add your bank account to receive withdrawals
-            </DialogDescription>
-          </DialogHeader>
+      <div className="rounded-lg border border-gray-200 bg-white overflow-hidden">
+        <div className="border-b border-gray-100 px-4 py-2 text-[11px] font-semibold text-gray-600">
+          Transactions
+        </div>
 
-          <form onSubmit={handleSaveBankDetails} className="space-y-4">
-            <div className="space-y-2">
-              <Label htmlFor="bankName">Bank Name</Label>
-              <Input id="bankName" placeholder="e.g., Chase Bank" required />
-            </div>
+        {payments.length === 0 ? (
+          <div className="p-4 text-[11px] text-gray-500">
+            No payments recorded yet. Complete a trip to see entries here.
+          </div>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="min-w-full text-[11px]">
+              <thead className="bg-gray-50">
+                <tr className="text-left text-[10px] font-semibold text-gray-500 uppercase">
+                  <th className="px-4 py-2">Date</th>
+                  <th className="px-4 py-2">Trip</th>
+                  <th className="px-4 py-2">Direction</th>
+                  <th className="px-4 py-2">Amount</th>
+                  <th className="px-4 py-2">Status</th>
+                </tr>
+              </thead>
+              <tbody>
+                {payments.map((p) => {
+                  const isCredit = p.payee_id === userId && p.payee_role === role;
+                  const isDebit = p.payer_id === userId && p.payer_role === role;
 
-            <div className="space-y-2">
-              <Label htmlFor="accountNumber">Account Number</Label>
-              <Input id="accountNumber" placeholder="1234567890" required />
-            </div>
+                  const date = p.released_at || p.created_at;
 
-            <div className="space-y-2">
-              <Label htmlFor="routingNumber">Routing Number</Label>
-              <Input id="routingNumber" placeholder="021000021" required />
-            </div>
+                  const routeLabel =
+                    p.pickup_location && p.dropoff_location
+                      ? `${p.pickup_location} → ${p.dropoff_location}`
+                      : `Trip #${p.load_id}`;
 
-            <div className="space-y-2">
-              <Label htmlFor="accountHolder">Account Holder Name</Label>
-              <Input id="accountHolder" placeholder="John Smith" required />
-            </div>
+                  let directionLabel = "";
+                  if (isCredit) directionLabel = "Incoming payment";
+                  if (isDebit) directionLabel = "Outgoing payment";
 
-            <div className="flex gap-3">
-              <Button
-                type="button"
-                variant="outline"
-                onClick={() => setIsBankDetailsOpen(false)}
-                className="flex-1"
-              >
-                Cancel
-              </Button>
-              <Button
-                type="submit"
-                className="flex-1 bg-[#29CA8D] hover:bg-[#24b67d]"
-              >
-                Save Details
-              </Button>
-            </div>
-          </form>
-        </DialogContent>
-      </Dialog>
+                  return (
+                    <tr
+                      key={p.id}
+                      className="border-t border-gray-100 hover:bg-gray-50/50"
+                    >
+                      <td className="px-4 py-2 text-gray-600">
+                        {date ? new Date(date).toLocaleString() : "—"}
+                      </td>
+                      <td className="px-4 py-2 text-gray-700">{routeLabel}</td>
+                      <td className="px-4 py-2 text-gray-600">
+                        {directionLabel || "—"}
+                      </td>
+                      <td className="px-4 py-2">
+                        {isCredit && (
+                          <span className="font-semibold text-emerald-700">
+                            +${Number(p.amount).toFixed(2)}
+                          </span>
+                        )}
+                        {isDebit && (
+                          <span className="font-semibold text-rose-600">
+                            -${Number(p.amount).toFixed(2)}
+                          </span>
+                        )}
+                        {!isCredit && !isDebit && (
+                          <span className="text-gray-500">
+                            ${Number(p.amount).toFixed(2)}
+                          </span>
+                        )}
+                      </td>
+                      <td className="px-4 py-2 capitalize text-gray-600">
+                        {p.status}
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+
+      <p className="text-[10px] text-gray-400">
+        Phase 1 note: Payments are simulated based on completed trips and
+        simple rules. In later phases this will be connected to real payment
+        gateways and escrow flows.
+      </p>
     </div>
   );
 }
