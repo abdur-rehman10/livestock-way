@@ -15,3 +15,15 @@ export interface Payment {
   pickup_location?: string;
   dropoff_location?: string;
 }
+
+export interface SupportTicket {
+  id: number;
+  user_id: string;
+  user_role: string;
+  subject: string;
+  message: string;
+  status: string;
+  priority: string;
+  created_at: string;
+  updated_at: string;
+}
