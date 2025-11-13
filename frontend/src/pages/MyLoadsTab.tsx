@@ -6,7 +6,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '../components/ui/tabs'
 import { PostLoadDialog } from './PostLoadDialog';
 import { MapPin, Clock, Truck, DollarSign, Edit, Copy, X, Eye } from 'lucide-react';
 import { toast } from 'sonner';
-import { fetchMyLoads, API_BASE_URL } from "../lib/api";
+import { fetchLoadsByCreator, API_BASE_URL } from "../lib/api";
 import type { Load as ApiLoad } from "../lib/api";
 
 interface MyLoad {
@@ -56,7 +56,7 @@ export function MyLoadsTab({ onTrackLoad }: MyLoadsTabProps) {
         setIsLoading(true);
         setError(null);
 
-        const data = await fetchMyLoads(CURRENT_SHIPPER_ID);
+        const data = await fetchLoadsByCreator(CURRENT_SHIPPER_ID);
 
         if (isMounted) {
           const transformed: MyLoad[] = data.map((load: ApiLoad) => {
@@ -301,6 +301,16 @@ export function MyLoadsTab({ onTrackLoad }: MyLoadsTabProps) {
                 <div className="text-sm text-gray-600">
                   Pickup: {load.pickupDate}
                 </div>
+                {load.assigned_to ? (
+                  <div className="text-xs text-gray-500">
+                    Assigned to: <span className="font-medium">{load.assigned_to}</span>
+                    {load.assigned_at && (
+                      <> • {new Date(load.assigned_at).toLocaleString()}</>
+                    )}
+                  </div>
+                ) : (
+                  <div className="text-xs text-amber-600">Not yet assigned</div>
+                )}
                 {load.price && (
                   <div className="text-sm font-medium">
                     Offer: {load.price}
