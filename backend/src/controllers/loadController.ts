@@ -4,10 +4,9 @@ import { pool } from "../config/database";
 // GET /api/loads
 export async function getLoads(req: Request, res: Response) {
   try {
-    const createdBy = req.query.created_by as string | undefined;
-    const assignedTo = req.query.assigned_to as string | undefined;
+    const { status, assigned_to, created_by } = req.query;
 
-    let query = `
+    let sql = `
       SELECT
         id,
         title,
@@ -26,32 +25,30 @@ export async function getLoads(req: Request, res: Response) {
         completed_at,
         epod_url
       FROM loads
+      WHERE 1=1
     `;
 
-    const clauses: string[] = [];
-    const values: Array<string> = [];
+    const params: any[] = [];
+    let i = 1;
 
-    if (createdBy) {
-      clauses.push(`created_by = $${values.length + 1}`);
-      values.push(createdBy);
+    if (status) {
+      sql += ` AND status = $${i++}`;
+      params.push(status);
     }
 
-    if (assignedTo) {
-      clauses.push(`assigned_to = $${values.length + 1}`);
-      values.push(assignedTo);
+    if (assigned_to) {
+      sql += ` AND assigned_to = $${i++}`;
+      params.push(assigned_to);
     }
 
-    if (clauses.length) {
-      query += ` WHERE ${clauses.join(" AND ")}`;
-    } else {
-      query += ` WHERE status = 'open'`;
+    if (created_by) {
+      sql += ` AND created_by = $${i++}`;
+      params.push(created_by);
     }
 
-    query += ` ORDER BY pickup_date ASC`;
+    sql += ` ORDER BY created_at DESC`;
 
-    console.debug("GET_LOADS SQL:", query, "VALUES:", values);
-
-    const result = await pool.query(query, values);
+    const result = await pool.query(sql, params);
 
     return res.status(200).json({
       status: "OK",
