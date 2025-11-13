@@ -328,44 +328,21 @@ export async function completeLoad(req: Request, res: Response) {
 
 // GET /api/loads/:id
 export async function getLoadById(req: Request, res: Response) {
+  const id = Number(req.params.id);
+  if (Number.isNaN(id)) {
+    return res.status(400).json({ error: "Invalid ID" });
+  }
+
   try {
-    const { id } = req.params;
+    const { rows } = await pool.query("SELECT * FROM loads WHERE id = $1", [id]);
 
-    if (!id) {
-      return res.status(400).json({ error: "Load ID is required" });
-    }
-
-    const sql = `
-      SELECT
-        id,
-        title,
-        species,
-        quantity,
-        pickup_location,
-        dropoff_location,
-        pickup_date,
-        offer_price,
-        status,
-        created_by,
-        created_at,
-        assigned_to,
-        assigned_at,
-        started_at,
-        completed_at,
-        epod_url
-      FROM loads
-      WHERE id = $1
-    `;
-
-    const result = await pool.query(sql, [id]);
-
-    if (result.rows.length === 0) {
+    if (rows.length === 0) {
       return res.status(404).json({ error: "Load not found" });
     }
 
-    return res.json({ data: result.rows[0] });
-  } catch (err) {
-    console.error("Error in getLoadById", err);
-    return res.status(500).json({ error: "Failed to fetch load" });
+    return res.json({ data: rows[0] });
+  } catch (error) {
+    console.error("Error fetching load by ID:", error);
+    return res.status(500).json({ error: "Server error" });
   }
 }

@@ -1,327 +1,226 @@
-import { useState } from 'react';
-import { Button } from '../components/ui/button';
-import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/card';
-import { Badge } from '../components/ui/badge';
-import { Progress } from '../components/ui/progress';
-import { Textarea } from '../components/ui/textarea';
-import {
-  ArrowLeft,
-  MapPin,
-  Truck,
-  Phone,
-  MessageCircle,
-  Navigation,
-  Clock,
-  ThermometerSun,
-  Droplets,
-  AlertTriangle,
-  Star,
-  Maximize2,
-  Minimize2
-} from 'lucide-react';
-import { toast } from 'sonner';
+import React, { useEffect, useState } from "react";
+import { useParams, useNavigate } from "react-router-dom";
+import { fetchLoadById, type LoadDetail, API_BASE_URL } from "../lib/api";
 
-interface TripTrackingProps {
-  load?: {
-    id: string;
-    species: string;
-    quantity: string;
-    pickup: string;
-    dropoff: string;
-    driver?: string;
-    status: string;
-  };
-  onBack?: () => void;
-}
-
-const fallbackLoad: NonNullable<TripTrackingProps['load']> = {
-  id: 'L000',
-  species: 'Cattle',
-  quantity: '40 head',
-  pickup: 'Austin, TX',
-  dropoff: 'Dallas, TX',
-  driver: 'John Smith',
-  status: 'in-transit',
+const formatDateTime = (value?: string | null) => {
+  if (!value) return "—";
+  const d = new Date(value);
+  if (Number.isNaN(d.getTime())) return "—";
+  return d.toLocaleString();
 };
 
-export function TripTracking({ load = fallbackLoad, onBack }: TripTrackingProps) {
-  const [isFullScreen, setIsFullScreen] = useState(false);
-  const [rating, setRating] = useState(0);
-  const [feedback, setFeedback] = useState('');
-  
-  // Mock data
-  const progress = 65;
-  const eta = '2h 15min';
-  const currentLocation = 'I-35, TX';
-  const restStops = [
-    { id: 1, name: 'Waco Rest Area', type: 'Rest', time: '10:30 AM', status: 'completed' },
-    { id: 2, name: 'Temple Washout', type: 'Washout', time: '12:00 PM', status: 'upcoming' },
-    { id: 3, name: 'Belton Feed Station', type: 'Feed', time: '2:30 PM', status: 'upcoming' },
-  ];
+const statusLabel: Record<string, string> = {
+  open: "Open",
+  assigned: "Assigned",
+  in_transit: "In transit",
+  delivered: "Delivered",
+};
 
-  const telemetry = {
-    temperature: 22,
-    humidity: 65,
-    status: 'normal',
-  };
+const statusColor: Record<string, string> = {
+  open: "bg-gray-100 text-gray-700",
+  assigned: "bg-amber-100 text-amber-800",
+  in_transit: "bg-sky-100 text-sky-800",
+  delivered: "bg-emerald-100 text-emerald-800",
+};
 
-  const handleMessage = () => {
-    toast.info('Opening message to driver...');
-  };
+const resolveEpodUrl = (url?: string | null) => {
+  if (!url) return null;
+  if (/^https?:\/\//i.test(url)) return url;
+  return `${API_BASE_URL}${url}`;
+};
 
-  const handleCall = () => {
-    toast.info('Calling driver...');
-  };
+export function TripTracking() {
+  const { id } = useParams<{ id: string }>();
+  const navigate = useNavigate();
 
-  const handleReportIssue = () => {
-    toast.success('Issue reported to support team');
-  };
+  const [load, setLoad] = useState<LoadDetail | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
-  const handleSubmitRating = () => {
-    if (rating === 0) {
-      toast.error('Please select a rating');
+  useEffect(() => {
+    if (!id) {
+      setError("Missing trip ID in URL.");
+      setLoading(false);
       return;
     }
-    toast.success('Thank you for your feedback!');
-  };
 
-  const isCompleted = load.status === 'completed';
+    const numericId = Number(id);
+    if (Number.isNaN(numericId)) {
+      setError("Invalid trip ID.");
+      setLoading(false);
+      return;
+    }
+
+    async function loadTrip() {
+      try {
+        setLoading(true);
+        setError(null);
+        const data = await fetchLoadById(numericId);
+        setLoad(data);
+      } catch (err: any) {
+        console.error("Error loading tracking trip", err);
+        setError(
+          err?.message || "Something went wrong while loading tracking data."
+        );
+      } finally {
+        setLoading(false);
+      }
+    }
+
+    loadTrip();
+  }, [id]);
+
+  if (loading) {
+    return (
+      <div className="p-4 text-sm text-gray-600">Loading trip tracking…</div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="p-4 space-y-3">
+        <div className="text-sm text-red-600">{error}</div>
+        <button
+          type="button"
+          onClick={() => navigate(-1)}
+          className="inline-flex items-center rounded-md border border-gray-300 px-3 py-1.5 text-xs font-medium text-gray-700 hover:bg-gray-50"
+        >
+          Go back
+        </button>
+      </div>
+    );
+  }
+
+  if (!load) {
+    return (
+      <div className="p-4 text-sm text-gray-600">Trip not found.</div>
+    );
+  }
+
+  const statusKey = (load.status || "open").toLowerCase();
+  const badgeLabel = statusLabel[statusKey] ?? load.status ?? "Unknown";
+  const badgeClass = statusColor[statusKey] ?? "bg-gray-100 text-gray-700";
 
   return (
-    <div className="min-h-screen bg-gray-50">
-      {/* Header */}
-      <div className="bg-white border-b sticky top-0 z-50">
-        <div className="px-4 py-3 flex items-center justify-between">
-          <div className="flex items-center gap-3">
-      <Button variant="ghost" size="icon" onClick={() => onBack?.()}>
-              <ArrowLeft className="w-5 h-5" />
-            </Button>
-            <div>
-              <div className="text-sm text-gray-600">Load #{load.id}</div>
-              <Badge className={`${
-                load.status === 'active' ? 'bg-[#F97316]' : 'bg-green-500'
-              } text-white`}>
-                {load.status === 'active' ? 'In Transit' : 'Completed'}
-              </Badge>
-            </div>
-          </div>
-          <div className="flex items-center gap-2">
-            <Button variant="outline" size="icon" onClick={handleCall}>
-              <Phone className="w-5 h-5" />
-            </Button>
-            <Button variant="outline" size="icon" onClick={handleMessage}>
-              <MessageCircle className="w-5 h-5" />
-            </Button>
-          </div>
-        </div>
-      </div>
-
-      {/* Map Section */}
-      <div className={`relative bg-gray-200 ${isFullScreen ? 'h-screen' : 'h-80'} transition-all`}>
-        {/* Mock Map */}
-        <div className="absolute inset-0 flex items-center justify-center text-gray-500">
-          <div className="text-center">
-            <Navigation className="w-12 h-12 mx-auto mb-2 animate-pulse" />
-            <p>Real-time Tracking Map</p>
-            <p className="text-sm">Current Location: {currentLocation}</p>
-          </div>
-        </div>
-
-        {/* Full Screen Toggle */}
-        <button
-          onClick={() => setIsFullScreen(!isFullScreen)}
-          className="absolute top-4 right-4 bg-white rounded-lg p-2 shadow-lg"
-        >
-          {isFullScreen ? (
-            <Minimize2 className="w-5 h-5" />
-          ) : (
-            <Maximize2 className="w-5 h-5" />
-          )}
-        </button>
-
-        {/* Live Location Badge */}
-        <div className="absolute top-4 left-4 bg-white rounded-lg px-3 py-2 shadow-lg flex items-center gap-2">
-          <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse" />
-          <span className="text-sm">Live Tracking</span>
-        </div>
-      </div>
-
-      {/* Trip Details Panel */}
-      <div className="p-4 space-y-4">
-        {/* Progress Card */}
-        {!isCompleted && (
-          <Card>
-            <CardContent className="p-4">
-              <div className="flex justify-between text-sm mb-2">
-                <span className="text-gray-600">Trip Progress</span>
-                <span className="text-gray-900">{progress}%</span>
-              </div>
-              <Progress value={progress} className="h-2 mb-3" />
-              <div className="grid grid-cols-2 gap-3">
-                <div className="text-center p-2 bg-gray-50 rounded">
-                  <div className="text-xs text-gray-600">ETA</div>
-                  <div className="text-base text-gray-900">{eta}</div>
-                </div>
-                <div className="text-center p-2 bg-gray-50 rounded">
-                  <div className="text-xs text-gray-600">Distance Left</div>
-                  <div className="text-base text-gray-900">68 mi</div>
-                </div>
-              </div>
-            </CardContent>
-          </Card>
-        )}
-
-        {/* Trip Info */}
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-base">Trip Information</CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-3">
-            <div className="flex items-start gap-2">
-              <MapPin className="w-5 h-5 text-[#F97316] mt-0.5" />
-              <div className="flex-1">
-                <div className="text-sm text-gray-600">Route</div>
-                <div className="text-base text-gray-900">{load.pickup}</div>
-                <div className="text-gray-600">→</div>
-                <div className="text-base text-gray-900">{load.dropoff}</div>
-              </div>
-            </div>
-
-            <div className="flex items-center gap-2 p-2 bg-gray-50 rounded">
-              <Truck className="w-5 h-5 text-gray-600" />
-              <div>
-                <div className="text-sm text-gray-600">Driver</div>
-                <div className="text-base text-gray-900">{load.driver || 'Not assigned'}</div>
-              </div>
-            </div>
-
-            <div className="grid grid-cols-2 gap-2 text-sm">
-              <div>
-                <div className="text-gray-600">Livestock</div>
-                <div className="text-gray-900">{load.species}</div>
-              </div>
-              <div>
-                <div className="text-gray-600">Quantity</div>
-                <div className="text-gray-900">{load.quantity}</div>
-              </div>
-            </div>
-          </CardContent>
-        </Card>
-
-        {/* Live Telemetry */}
-        {!isCompleted && (
-          <Card>
-            <CardHeader>
-              <CardTitle className="text-base">Live Telemetry</CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-2">
-              <div className="flex items-center justify-between p-2 bg-green-50 rounded">
-                <div className="flex items-center gap-2">
-                  <ThermometerSun className="w-5 h-5 text-green-600" />
-                  <span className="text-sm">Temperature</span>
-                </div>
-                <span className="text-sm text-green-900">{telemetry.temperature}°C (Normal)</span>
-              </div>
-              <div className="flex items-center justify-between p-2 bg-blue-50 rounded">
-                <div className="flex items-center gap-2">
-                  <Droplets className="w-5 h-5 text-blue-600" />
-                  <span className="text-sm">Humidity</span>
-                </div>
-                <span className="text-sm text-blue-900">{telemetry.humidity}% (Normal)</span>
-              </div>
-            </CardContent>
-          </Card>
-        )}
-
-        {/* Rest Stops Timeline */}
-        {!isCompleted && (
-          <Card>
-            <CardHeader>
-              <CardTitle className="text-base">Scheduled Stops</CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-3">
-              {restStops.map((stop, idx) => (
-                <div key={stop.id} className="flex items-start gap-3">
-                  <div className="relative">
-                    <div className={`w-8 h-8 rounded-full flex items-center justify-center ${
-                      stop.status === 'completed' ? 'bg-green-500' : 'bg-gray-200'
-                    }`}>
-                      <Clock className={`w-4 h-4 ${
-                        stop.status === 'completed' ? 'text-white' : 'text-gray-600'
-                      }`} />
-                    </div>
-                    {idx < restStops.length - 1 && (
-                      <div className="absolute left-4 top-8 bottom-0 w-0.5 bg-gray-200" />
-                    )}
-                  </div>
-                  <div className="flex-1 pb-4">
-                    <div className="text-base text-gray-900">{stop.name}</div>
-                    <div className="text-sm text-gray-600">{stop.type} • {stop.time}</div>
-                    <Badge 
-                      variant={stop.status === 'completed' ? 'default' : 'secondary'}
-                      className={`mt-1 text-xs ${stop.status === 'completed' ? 'bg-green-500' : ''}`}
-                    >
-                      {stop.status === 'completed' ? 'Completed' : 'Upcoming'}
-                    </Badge>
-                  </div>
-                </div>
-              ))}
-            </CardContent>
-          </Card>
-        )}
-
-        {/* Actions */}
-        {!isCompleted && (
-          <Button
-            onClick={handleReportIssue}
-            variant="outline"
-            className="w-full border-red-200 text-red-600 hover:bg-red-50"
+    <div className="p-4 space-y-4">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <div className="space-y-1">
+          <button
+            type="button"
+            onClick={() => navigate(-1)}
+            className="text-xs text-gray-500 hover:underline"
           >
-            <AlertTriangle className="w-4 h-4 mr-2" />
-            Report Issue
-          </Button>
-        )}
+            ← Back to trip details
+          </button>
+          <h1 className="text-lg font-semibold text-gray-900">
+            Tracking – Trip #{load.id}
+          </h1>
+          <div className="text-xs text-gray-500">
+            {load.pickup_location ?? "—"} → {load.dropoff_location ?? "—"}
+          </div>
+        </div>
 
-        {/* Rating (Only if completed) */}
-        {isCompleted && (
-          <Card>
-            <CardHeader>
-              <CardTitle className="text-base">Rate Your Experience</CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              <div className="flex justify-center gap-2">
-                {[1, 2, 3, 4, 5].map((star) => (
-                  <button
-                    key={star}
-                    onClick={() => setRating(star)}
-                    className="p-1"
-                  >
-                    <Star
-                      className={`w-8 h-8 ${
-                        star <= rating ? 'fill-[#F97316] text-[#F97316]' : 'text-gray-300'
-                      }`}
-                    />
-                  </button>
-                ))}
+        <div className="flex flex-col items-end gap-1">
+          <span
+            className={`inline-flex items-center rounded-full px-3 py-1 text-xs font-semibold ${badgeClass}`}
+          >
+            {badgeLabel}
+          </span>
+          <div className="text-[11px] text-gray-500">
+            Last updated:{" "}
+            {formatDateTime(
+              load.completed_at ||
+                load.started_at ||
+                load.assigned_at ||
+                load.created_at
+            )}
+          </div>
+        </div>
+      </div>
+
+      <div className="grid gap-4 md:grid-cols-3">
+        <div className="md:col-span-2 rounded-lg border border-gray-200 bg-white p-4">
+          <h2 className="mb-2 text-sm font-semibold text-gray-900">
+            Live route (Phase 1 placeholder)
+          </h2>
+          <div className="relative flex h-56 items-center justify-center rounded-md border border-dashed border-gray-300 bg-slate-50 text-xs text-gray-500">
+            <div className="absolute inset-3 rounded-md bg-gradient-to-br from-emerald-50 to-sky-50 opacity-60" />
+            <div className="relative z-10 flex flex-col items-center gap-1">
+              <span>Map and GPS tracking</span>
+              <span className="text-[11px]">
+                will be integrated in IoT / Phase 2+
+              </span>
+            </div>
+          </div>
+        </div>
+
+        <div className="space-y-3 rounded-lg border border-gray-200 bg-white p-4 text-xs text-gray-700">
+          <h2 className="text-sm font-semibold text-gray-900">Trip overview</h2>
+          <div>
+            <div className="font-medium">Species / quantity</div>
+            <div className="text-gray-600">
+              {load.species ?? "Livestock"} • {load.quantity ?? "?"} head
+            </div>
+          </div>
+          <div>
+            <div className="font-medium">Pickup time</div>
+            <div className="text-gray-600">
+              {formatDateTime(load.pickup_date)}
+            </div>
+          </div>
+          <div>
+            <div className="font-medium">Assigned to</div>
+            <div className="text-gray-600">
+              {load.assigned_to || "Not assigned"}
+            </div>
+          </div>
+          <div>
+            <div className="font-medium">Timeline</div>
+            <div className="mt-1 space-y-0.5 text-[11px] text-gray-600">
+              <div>
+                <span className="font-medium">Assigned:</span>{" "}
+                {formatDateTime(load.assigned_at)}
               </div>
+              <div>
+                <span className="font-medium">Started:</span>{" "}
+                {formatDateTime(load.started_at)}
+              </div>
+              <div>
+                <span className="font-medium">Delivered:</span>{" "}
+                {formatDateTime(load.completed_at)}
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
 
-              <Textarea
-                placeholder="Share your experience (optional)"
-                value={feedback}
-                onChange={(e) => setFeedback(e.target.value)}
-                rows={3}
-              />
-
-              <Button
-                onClick={handleSubmitRating}
-                className="w-full bg-[#F97316] hover:bg-[#ea580c]"
-              >
-                Submit Rating
-              </Button>
-            </CardContent>
-          </Card>
+      <div className="rounded-lg border border-gray-200 bg-white p-4 text-xs text-gray-700">
+        <h2 className="text-sm font-semibold text-gray-900">
+          Delivery confirmation
+        </h2>
+        {resolveEpodUrl(load.epod_url) ? (
+          <div className="mt-1 flex flex-wrap items-center gap-2">
+            <span className="text-gray-600">
+              Trip is delivered and has an attached ePOD file.
+            </span>
+            <a
+              href={resolveEpodUrl(load.epod_url) ?? "#"}
+              target="_blank"
+              rel="noreferrer"
+              className="inline-flex items-center text-[11px] font-medium text-emerald-700 hover:underline"
+            >
+              View ePOD
+            </a>
+          </div>
+        ) : (
+          <div className="mt-1 text-gray-500">
+            No ePOD uploaded yet. Once the driver completes the trip and uploads
+            proof, it will appear here.
+          </div>
         )}
       </div>
     </div>
   );
 }
+
+export default TripTracking;

@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from "react";
 import { useParams, useNavigate } from "react-router-dom";
-import { fetchLoadById, type LoadDetail } from "../lib/api";
+import { fetchLoadById, type LoadDetail, API_BASE_URL } from "../lib/api";
 
 const formatDateTime = (value?: string | null) => {
   if (!value) return "—";
@@ -21,6 +21,12 @@ const statusColor: Record<string, string> = {
   assigned: "bg-amber-100 text-amber-800",
   in_transit: "bg-sky-100 text-sky-800",
   delivered: "bg-emerald-100 text-emerald-800",
+};
+
+const resolveEpodUrl = (url?: string | null) => {
+  if (!url) return null;
+  if (/^https?:\/\//i.test(url)) return url;
+  return `${API_BASE_URL}${url}`;
 };
 
 export function TripDetail() {
@@ -66,7 +72,9 @@ export function TripDetail() {
 
   if (loading) {
     return (
-      <div className="p-4 text-sm text-gray-600">Loading trip details…</div>
+      <div className="p-4 text-sm text-gray-600">
+        Loading trip details…
+      </div>
     );
   }
 
@@ -87,7 +95,9 @@ export function TripDetail() {
 
   if (!load) {
     return (
-      <div className="p-4 text-sm text-gray-600">Trip not found.</div>
+      <div className="p-4 text-sm text-gray-600">
+        Trip not found.
+      </div>
     );
   }
 
@@ -97,17 +107,16 @@ export function TripDetail() {
 
   return (
     <div className="p-4 space-y-4">
+      {/* Header + breadcrumb */}
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div className="space-y-1">
-          <div className="text-xs text-gray-500">
-            <button
-              type="button"
-              onClick={() => navigate(-1)}
-              className="text-xs text-gray-500 hover:underline"
-            >
-              ← Back to My Loads
-            </button>
-          </div>
+          <button
+            type="button"
+            onClick={() => navigate(-1)}
+            className="text-xs text-gray-500 hover:underline"
+          >
+            ← Back to My Loads
+          </button>
           <h1 className="text-lg font-semibold text-gray-900">
             Trip #{load.id} –{" "}
             {load.title ||
@@ -130,6 +139,7 @@ export function TripDetail() {
         </div>
       </div>
 
+      {/* Journey + timeline */}
       <div className="grid gap-3 rounded-lg border border-gray-200 bg-white p-4 md:grid-cols-2">
         <div className="space-y-2 text-xs text-gray-700">
           <h2 className="text-sm font-semibold text-gray-900">
@@ -150,7 +160,9 @@ export function TripDetail() {
         </div>
 
         <div className="space-y-2 text-xs text-gray-700">
-          <h2 className="text-sm font-semibold text-gray-900">Timeline</h2>
+          <h2 className="text-sm font-semibold text-gray-900">
+            Timeline
+          </h2>
           <div className="flex flex-col gap-1">
             <div>
               <span className="font-medium">Assigned:</span>{" "}
@@ -168,18 +180,19 @@ export function TripDetail() {
         </div>
       </div>
 
+      {/* ePOD + tracking */}
       <div className="grid gap-3 md:grid-cols-2">
         <div className="rounded-lg border border-gray-200 bg-white p-4 text-xs text-gray-700 space-y-2">
           <h2 className="text-sm font-semibold text-gray-900">
             Proof of Delivery (ePOD)
           </h2>
-          {load.epod_url ? (
+          {resolveEpodUrl(load.epod_url) ? (
             <div className="space-y-1">
               <div className="text-gray-600">
                 An ePOD file was attached when this trip was completed.
               </div>
               <a
-                href={load.epod_url}
+                href={resolveEpodUrl(load.epod_url) ?? "#"}
                 target="_blank"
                 rel="noreferrer"
                 className="inline-flex items-center text-[11px] font-medium text-emerald-700 hover:underline"
@@ -200,16 +213,15 @@ export function TripDetail() {
             Tracking & route
           </h2>
           <div className="text-gray-500 mb-2">
-            Live map and IoT telemetry will be integrated here in a later
-            phase. For now, use the trip status and timestamps as a record
-            of the journey.
+            Live map and IoT telemetry will be integrated in later phases. For
+            now, use the tracking view for a monitoring-friendly layout.
           </div>
           <button
             type="button"
-            className="inline-flex items-center rounded-md border border-gray-300 px-3 py-1.5 text-[11px] font-medium text-gray-700 hover:bg-gray-50"
-            disabled
+            onClick={() => navigate(`/hauler/trips/${load.id}/tracking`)}
+            className="inline-flex items-center rounded-md border border-emerald-200 px-3 py-1.5 text-[11px] font-medium text-emerald-800 hover:bg-emerald-50"
           >
-            Live tracking coming soon
+            View tracking
           </button>
         </div>
       </div>

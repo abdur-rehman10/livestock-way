@@ -140,17 +140,6 @@ export async function uploadEpod(file: File): Promise<string> {
   return json.url as string;
 }
 
-export async function fetchLoadsByCreator(creatorId: string): Promise<Load[]> {
-  const url = new URL(`${API_BASE_URL}/api/loads`);
-  url.searchParams.set("created_by", creatorId);
-  const response = await fetch(url.toString());
-  if (!response.ok) {
-    throw new Error(`Failed to fetch loads for shipper (${response.status})`);
-  }
-  const json = await response.json();
-  return json.data as Load[];
-}
-
 export type LoadDetail = Load;
 
 export async function fetchLoadById(id: number): Promise<LoadDetail> {

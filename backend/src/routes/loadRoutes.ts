@@ -14,6 +14,9 @@ const router = Router();
 router.get("/", getLoads);
 router.get("/:id", getLoadById);
 
+// GET /api/loads/:id
+router.get("/:id", getLoadById);
+
 // POST /api/loads
 router.post("/", createLoad);
 

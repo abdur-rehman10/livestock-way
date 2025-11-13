@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { Link } from "react-router-dom";
 import type { Load } from "../lib/api";
 import {
   API_BASE_URL,
@@ -357,9 +357,9 @@ export default function HaulerMyLoads() {
                     <Button
                       variant="outline"
                       className="w-full rounded-full text-sm font-semibold"
-                      onClick={() => navigate(`/hauler/trips/${load.id}`)}
+                      asChild
                     >
-                      View Trip
+                      <Link to={`/hauler/trips/${load.id}`}>View Trip</Link>
                     </Button>
                     {status === "assigned" && (
                       <Button
