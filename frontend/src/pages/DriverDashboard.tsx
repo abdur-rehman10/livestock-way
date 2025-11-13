@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { Button } from '../components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../components/ui/card';
 import { Badge } from '../components/ui/badge';
@@ -10,7 +11,6 @@ import WalletTab from './WalletTab';
 import { ExpensesTab } from './ExpensesTab';
 import { DocumentsTab } from './DocumentsTab';
 import SupportTab from './SupportTab';
-import { TripDetail } from './TripDetail';
 import { ProfileSettings } from './ProfileSettings';
 import { NotificationsCenter } from '../components/NotificationsCenter';
 import { LoadCardSkeleton } from './LoadingSkeleton';
@@ -88,7 +88,7 @@ export function DriverDashboard({ onLogout, onRoleSwitch }: DriverDashboardProps
     storage.get<boolean>(STORAGE_KEYS.DRIVER_ONLINE_STATUS, false)
   );
   const [activeTab, setActiveTab] = useState('home');
-  const [selectedTrip, setSelectedTrip] = useState<any>(null);
+  const navigate = useNavigate();
   const [showProfile, setShowProfile] = useState(false);
   const [showNotifications, setShowNotifications] = useState(false);
   
@@ -185,21 +185,10 @@ export function DriverDashboard({ onLogout, onRoleSwitch }: DriverDashboardProps
   };
 
   const handleViewTrip = (trip: any) => {
-    setSelectedTrip(trip);
+    if (trip?.id) {
+      navigate(`/driver/trips/${trip.id}`);
+    }
   };
-
-  if (selectedTrip) {
-    return (
-      <TripDetail
-        trip={selectedTrip}
-        onBack={() => setSelectedTrip(null)}
-        onComplete={() => {
-          setSelectedTrip(null);
-          toast.success('Trip completed! Great job!');
-        }}
-      />
-    );
-  }
 
   if (showProfile) {
     return <ProfileSettings role="driver" onBack={() => setShowProfile(false)} />;

@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import { useParams, useNavigate, useLocation } from "react-router-dom";
 import {
   fetchLoadById,
@@ -122,13 +122,15 @@ export function TripDetail() {
   }, [id]);
 
   useEffect(() => {
-    if (!load?.id) return;
+    if (!load || !load.id) return;
+
+    const loadId = load.id;
 
     async function loadExpenses() {
       try {
         setExpensesLoading(true);
         setExpensesError(null);
-        const data = await fetchTripExpenses(load.id);
+        const data = await fetchTripExpenses(loadId);
         setExpenses(data);
       } catch (err: any) {
         console.error("Error loading trip expenses", err);
@@ -142,6 +144,55 @@ export function TripDetail() {
 
     loadExpenses();
   }, [load?.id]);
+
+  const timelineEvents = useMemo(() => {
+    if (!load) return [];
+
+    const events: {
+      label: string;
+      at?: string | null;
+      description?: string;
+      active: boolean;
+    }[] = [];
+
+    events.push({
+      label: "Load posted",
+      at: load.created_at,
+      description:
+        load.created_by || load.posted_by
+          ? `Posted by ${load.created_by || load.posted_by}`
+          : undefined,
+      active: true,
+    });
+
+    events.push({
+      label: "Assigned to hauler",
+      at: load.assigned_at || null,
+      description: load.assigned_to ? `Assigned to ${load.assigned_to}` : undefined,
+      active:
+        load.status === "assigned" ||
+        load.status === "in_transit" ||
+        load.status === "delivered",
+    });
+
+    events.push({
+      label: "Trip started",
+      at: load.started_at || null,
+      description: "Driver departed with livestock",
+      active: load.status === "in_transit" || load.status === "delivered",
+    });
+
+    events.push({
+      label: "Trip completed",
+      at: load.completed_at || null,
+      description: load.epod_url
+        ? "Delivery confirmed, ePOD captured"
+        : "Marked delivered",
+      active: load.status === "delivered",
+    });
+
+    return events;
+  }, [load]);
 
   const handleAddExpense = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -370,6 +421,68 @@ export function TripDetail() {
           </div>
         </div>
       </div>
+
+      {load && (
+        <div className="rounded-lg border border-gray-200 bg-white p-4 space-y-3">
+          <div className="flex items-center justify-between">
+            <h2 className="text-sm font-semibold text-gray-900">Trip activity</h2>
+            <p className="text-[11px] text-gray-500">
+              Status changes for this load
+            </p>
+          </div>
+          <ol className="relative border-l border-gray-200 pl-4 space-y-4">
+            {timelineEvents.map((event, index) => {
+              const isDone = !!event.at;
+              const isActive = event.active;
+              return (
+                <li key={index} className="ml-1">
+                  <span
+                    className={[
+                      "absolute -left-[9px] flex h-3 w-3 items-center justify-center rounded-full border",
+                      isDone
+                        ? "border-emerald-500 bg-emerald-500"
+                        : isActive
+                          ? "border-emerald-500 bg-white"
+                          : "border-gray-300 bg-white",
+                    ].join(" ")}
+                  />
+                  <div className="space-y-0.5">
+                    <div className="flex items-center gap-2">
+                      <span
+                        className={[
+                          "text-xs font-medium",
+                          isDone
+                            ? "text-emerald-700"
+                            : isActive
+                              ? "text-gray-900"
+                              : "text-gray-400",
+                        ].join(" ")}
+                      >
+                        {event.label}
+                      </span>
+                      {!event.at && isActive && (
+                        <span className="rounded-full bg-emerald-50 px-2 py-[1px] text-[10px] font-medium text-emerald-700">
+                          current
+                        </span>
+                      )}
+                    </div>
+                    {event.at ? (
+                      <p className="text-[11px] text-gray-500">
+                        {new Date(event.at).toLocaleString()}
+                      </p>
+                    ) : (
+                      <p className="text-[11px] text-gray-400">Not yet occurred</p>
+                    )}
+                    {event.description && (
+                      <p className="text-[11px] text-gray-600">{event.description}</p>
+                    )}
+                  </div>
+                </li>
+              );
+            })}
+          </ol>
+        </div>
+      )}
 
       {/* ePOD + tracking */}
       <div className="grid gap-3 md:grid-cols-2">

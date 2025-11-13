@@ -110,6 +110,7 @@ export default function HaulerMyLoads() {
     open: false,
     load: null,
   });
+  const dialogLoad = detailsDialog.load;
   const navigate = useNavigate();
 
   async function refresh() {
@@ -450,35 +451,35 @@ export default function HaulerMyLoads() {
           <DialogHeader>
             <DialogTitle className="flex items-center justify-between">
               <span>Load Details</span>
-              {detailsDialog.load && (
-                <Badge className={`rounded-full px-4 py-1 text-xs font-semibold ${badgeStyles[normalizeStatus(detailsDialog.load.status)]}`}>
-                  {normalizeStatus(detailsDialog.load.status) === "in_transit"
+              {dialogLoad && (
+                <Badge className={`rounded-full px-4 py-1 text-xs font-semibold ${badgeStyles[normalizeStatus(dialogLoad.status)]}`}>
+                  {normalizeStatus(dialogLoad.status) === "in_transit"
                     ? "In Transit"
-                    : normalizeStatus(detailsDialog.load.status) === "open"
+                    : normalizeStatus(dialogLoad.status) === "open"
                       ? "Pending"
-                      : normalizeStatus(detailsDialog.load.status).charAt(0).toUpperCase() +
-                        normalizeStatus(detailsDialog.load.status).slice(1)}
+                      : normalizeStatus(dialogLoad.status).charAt(0).toUpperCase() +
+                        normalizeStatus(dialogLoad.status).slice(1)}
                 </Badge>
               )}
             </DialogTitle>
             <DialogDescription>
-              Complete information for {detailsDialog.load?.title ?? "this load"}
+              Complete information for {dialogLoad?.title ?? "this load"}
             </DialogDescription>
           </DialogHeader>
 
-          {detailsDialog.load && (
-            <div className="space-y-6">
+              {dialogLoad && (
+                <div className="space-y-6">
               <section>
                 <h3 className="mb-2 text-sm font-semibold text-slate-600">Load Information</h3>
                 <div className="rounded-xl bg-slate-50 p-4">
                   <div className="flex justify-between text-sm">
                     <span className="text-slate-500">Load ID:</span>
-                    <span className="text-slate-900">{detailsDialog.load.id}</span>
+                    <span className="text-slate-900">{dialogLoad.id}</span>
                   </div>
                   <div className="mt-2 flex justify-between text-sm">
                     <span className="text-slate-500">Title:</span>
                     <span className="text-slate-900">
-                      {detailsDialog.load.title || detailsDialog.load.species || "Livestock Load"}
+                      {dialogLoad.title || dialogLoad.species || "Livestock Load"}
                     </span>
                   </div>
                 </div>
@@ -494,14 +495,14 @@ export default function HaulerMyLoads() {
                 <div className="rounded-xl bg-slate-50 p-4 space-y-3">
                   <div>
                     <p className="text-xs text-slate-500">Pickup Location</p>
-                    <p className="text-sm text-slate-900">{detailsDialog.load.pickup_location ?? "—"}</p>
+                    <p className="text-sm text-slate-900">{dialogLoad.pickup_location ?? "—"}</p>
                   </div>
                   <div className="flex items-center justify-center">
                     <ArrowRight className="h-5 w-5 text-[#29CA8D]" />
                   </div>
                   <div>
                     <p className="text-xs text-slate-500">Dropoff Location</p>
-                    <p className="text-sm text-slate-900">{detailsDialog.load.dropoff_location ?? "—"}</p>
+                    <p className="text-sm text-slate-900">{dialogLoad.dropoff_location ?? "—"}</p>
                   </div>
                 </div>
               </section>
@@ -516,7 +517,7 @@ export default function HaulerMyLoads() {
                 <div className="rounded-xl bg-slate-50 p-4 space-y-2 text-sm">
                   <div className="flex justify-between">
                     <span className="text-slate-500">Pickup Date</span>
-                    <span className="text-slate-900">{formatDateTime(detailsDialog.load.pickup_date)}</span>
+                    <span className="text-slate-900">{formatDateTime(dialogLoad.pickup_date)}</span>
                   </div>
                 </div>
               </section>
@@ -531,12 +532,12 @@ export default function HaulerMyLoads() {
                 <div className="rounded-xl bg-slate-50 p-4 space-y-2 text-sm">
                   <div className="flex justify-between">
                     <span className="text-slate-500">Species</span>
-                    <span className="text-slate-900">{detailsDialog.load.species ?? "—"}</span>
+                    <span className="text-slate-900">{dialogLoad.species ?? "—"}</span>
                   </div>
                   <div className="flex justify-between">
                     <span className="text-slate-500">Quantity</span>
                     <span className="text-slate-900">
-                      {detailsDialog.load.quantity != null ? `${detailsDialog.load.quantity} head` : "—"}
+                      {dialogLoad.quantity != null ? `${dialogLoad.quantity} head` : "—"}
                     </span>
                   </div>
                 </div>
@@ -550,7 +551,7 @@ export default function HaulerMyLoads() {
                   Payment
                 </h3>
                 <div className="rounded-xl bg-slate-50 p-4 text-right text-xl font-semibold text-[#29CA8D]">
-                  {formatCurrency(detailsDialog.load.offer_price)}
+                  {formatCurrency(dialogLoad.offer_price)}
                 </div>
               </section>
 
@@ -562,57 +563,57 @@ export default function HaulerMyLoads() {
                   Timeline
                 </h3>
                 <div className="rounded-xl bg-slate-50 p-4 space-y-3 text-sm">
-                  {detailsDialog.load.assigned_at && (
+                  {dialogLoad.assigned_at && (
                     <div>
                       <p className="text-slate-900">Load Assigned</p>
-                      <p className="text-xs text-slate-500">{formatDateTime(detailsDialog.load.assigned_at)}</p>
+                      <p className="text-xs text-slate-500">{formatDateTime(dialogLoad.assigned_at)}</p>
                     </div>
                   )}
-                  {detailsDialog.load.started_at && (
+                  {dialogLoad.started_at && (
                     <div>
                       <p className="text-slate-900">Trip Started</p>
-                      <p className="text-xs text-slate-500">{formatDateTime(detailsDialog.load.started_at)}</p>
+                      <p className="text-xs text-slate-500">{formatDateTime(dialogLoad.started_at)}</p>
                     </div>
                   )}
-                  {detailsDialog.load.completed_at && (
+                  {dialogLoad.completed_at && (
                     <div>
                       <p className="text-slate-900">Delivered</p>
-                      <p className="text-xs text-slate-500">{formatDateTime(detailsDialog.load.completed_at)}</p>
+                      <p className="text-xs text-slate-500">{formatDateTime(dialogLoad.completed_at)}</p>
                     </div>
                   )}
                 </div>
               </section>
 
               <section className="flex flex-wrap gap-2 pt-2">
-                {normalizeStatus(detailsDialog.load.status) === "assigned" && (
+                {normalizeStatus(dialogLoad.status) === "assigned" && (
                   <Button
                     className="flex-1 rounded-full bg-[#29CA8D] text-white hover:bg-[#24b67d]"
                     onClick={() => {
                       closeDetails();
-                      openConfirm("start", detailsDialog.load);
+                      openConfirm("start", dialogLoad);
                     }}
                   >
                     <Play className="mr-2 h-4 w-4" />
                     Start Trip
                   </Button>
                 )}
-                {normalizeStatus(detailsDialog.load.status) === "in_transit" && (
+                {normalizeStatus(dialogLoad.status) === "in_transit" && (
                   <Button
                     className="flex-1 rounded-full bg-[#29CA8D] text-white hover:bg-[#24b67d]"
                     onClick={() => {
                       closeDetails();
-                      openConfirm("deliver", detailsDialog.load);
+                      openConfirm("deliver", dialogLoad);
                     }}
                   >
                     <CheckCircle className="mr-2 h-4 w-4" />
                     Mark as Delivered
                   </Button>
                 )}
-                {normalizeStatus(detailsDialog.load.status) === "delivered" && resolveEpodUrl(detailsDialog.load.epod_url) && (
+                {normalizeStatus(dialogLoad.status) === "delivered" && resolveEpodUrl(dialogLoad.epod_url) && (
                   <Button
                     className="flex-1 rounded-full bg-[#29CA8D] text-white hover:bg-[#24b67d]"
                     onClick={() =>
-                      window.open(resolveEpodUrl(detailsDialog.load.epod_url) ?? "#", "_blank")
+                      window.open(resolveEpodUrl(dialogLoad.epod_url) ?? "#", "_blank")
                     }
                   >
                     <FileText className="mr-2 h-4 w-4" />

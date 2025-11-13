@@ -14,6 +14,7 @@ export interface Load {
   offer_price: string | null;
   status: "open" | "assigned" | "in_transit" | "delivered";
   created_by: string | null;
+  posted_by?: string | null;
   created_at: string;
   assigned_to?: string | null;
   assigned_at?: string | null;
