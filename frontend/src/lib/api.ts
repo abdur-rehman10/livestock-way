@@ -1,4 +1,4 @@
-import type { Payment, SupportTicket, TripExpense } from "./types";
+import type { Payment, SupportTicket, TripExpense, TripMessage } from "./types";
 
 export const API_BASE_URL =
   import.meta.env.VITE_API_URL || "http://localhost:4000";
@@ -275,6 +275,41 @@ export async function createTripExpense(
     );
   }
   return (await response.json()) as TripExpense;
+}
+
+export async function fetchTripMessages(
+  loadId: number
+): Promise<TripMessage[]> {
+  const response = await fetch(`${API_BASE_URL}/api/loads/${loadId}/messages`);
+  if (!response.ok) {
+    throw new Error(
+      `Failed to fetch trip messages (status ${response.status})`
+    );
+  }
+  return (await response.json()) as TripMessage[];
+}
+
+interface CreateTripMessagePayload {
+  sender: "shipper" | "hauler";
+  message: string;
+}
+
+export async function createTripMessage(
+  loadId: number,
+  payload: CreateTripMessagePayload
+): Promise<TripMessage> {
+  const response = await fetch(`${API_BASE_URL}/api/loads/${loadId}/messages`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  if (!response.ok) {
+    const text = await response.text();
+    throw new Error(
+      `Failed to create trip message (${response.status}): ${text || ""}`
+    );
+  }
+  return (await response.json()) as TripMessage;
 }
 
 interface UpdateTripExpensePayload {
