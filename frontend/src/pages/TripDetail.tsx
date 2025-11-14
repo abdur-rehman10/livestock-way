@@ -145,55 +145,6 @@ export function TripDetail() {
     loadExpenses();
   }, [load?.id]);
 
-  const timelineEvents = useMemo(() => {
-    if (!load) return [];
-
-    const events: {
-      label: string;
-      at?: string | null;
-      description?: string;
-      active: boolean;
-    }[] = [];
-
-    events.push({
-      label: "Load posted",
-      at: load.created_at,
-      description:
-        load.created_by || load.posted_by
-          ? `Posted by ${load.created_by || load.posted_by}`
-          : undefined,
-      active: true,
-    });
-
-    events.push({
-      label: "Assigned to hauler",
-      at: load.assigned_at || null,
-      description: load.assigned_to ? `Assigned to ${load.assigned_to}` : undefined,
-      active:
-        load.status === "assigned" ||
-        load.status === "in_transit" ||
-        load.status === "delivered",
-    });
-
-    events.push({
-      label: "Trip started",
-      at: load.started_at || null,
-      description: "Driver departed with livestock",
-      active: load.status === "in_transit" || load.status === "delivered",
-    });
-
-    events.push({
-      label: "Trip completed",
-      at: load.completed_at || null,
-      description: load.epod_url
-        ? "Delivery confirmed, ePOD captured"
-        : "Marked delivered",
-      active: load.status === "delivered",
-    });
-
-    return events;
-  }, [load]);
-
   const handleAddExpense = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!load?.id) return;
@@ -422,7 +373,46 @@ export function TripDetail() {
         </div>
       </div>
 
-      {load && (
+      {load && (() => {
+        const events = [
+          {
+            label: "Load posted",
+            at: load.created_at,
+            description:
+              load.created_by || load.posted_by
+                ? `Posted by ${load.created_by || load.posted_by}`
+                : undefined,
+            active: true,
+          },
+          {
+            label: "Assigned to hauler",
+            at: load.assigned_at || null,
+            description: load.assigned_to
+              ? `Assigned to ${load.assigned_to}`
+              : undefined,
+            active:
+              load.status === "assigned" ||
+              load.status === "in_transit" ||
+              load.status === "delivered",
+          },
+          {
+            label: "Trip started",
+            at: load.started_at || null,
+            description: "Driver departed with livestock",
+            active:
+              load.status === "in_transit" ||
+              load.status === "delivered",
+          },
+          {
+            label: "Trip completed",
+            at: load.completed_at || null,
+            description: load.epod_url
+              ? "Delivery confirmed, ePOD captured"
+              : "Marked delivered",
+            active: load.status === "delivered",
+          },
+        ];
+        return (
         <div className="rounded-lg border border-gray-200 bg-white p-4 space-y-3">
           <div className="flex items-center justify-between">
             <h2 className="text-sm font-semibold text-gray-900">Trip activity</h2>
@@ -431,7 +421,7 @@ export function TripDetail() {
             </p>
           </div>
           <ol className="relative border-l border-gray-200 pl-4 space-y-4">
-            {timelineEvents.map((event, index) => {
+            {events.map((event, index) => {
               const isDone = !!event.at;
               const isActive = event.active;
               return (
@@ -482,7 +472,7 @@ export function TripDetail() {
             })}
           </ol>
         </div>
-      )}
+      )})()}
 
       {/* ePOD + tracking */}
       <div className="grid gap-3 md:grid-cols-2">
@@ -520,13 +510,22 @@ export function TripDetail() {
             Live map and IoT telemetry will be integrated in later phases. For
             now, use the tracking view for a monitoring-friendly layout.
           </div>
-          <button
-            type="button"
-            onClick={() => navigate(`${trackingBase}/trips/${load.id}/tracking`)}
-            className="inline-flex items-center rounded-md border border-emerald-200 px-3 py-1.5 text-[11px] font-medium text-emerald-800 hover:bg-emerald-50"
-          >
-            View tracking
-          </button>
+          <div className="flex flex-wrap gap-2">
+            <button
+              type="button"
+              onClick={() => navigate(`${trackingBase}/trips/${load.id}/tracking`)}
+              className="inline-flex items-center rounded-md border border-emerald-200 px-3 py-1.5 text-[11px] font-medium text-emerald-800 hover:bg-emerald-50"
+            >
+              View tracking
+            </button>
+            <button
+              type="button"
+              onClick={() => navigate(`${trackingBase}/trips/${load.id}/chat`)}
+              className="inline-flex items-center rounded-md border border-slate-200 px-3 py-1.5 text-[11px] font-medium text-slate-700 hover:bg-slate-50"
+            >
+              Open chat
+            </button>
+          </div>
         </div>
 
       </div>

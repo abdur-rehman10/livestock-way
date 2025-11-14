@@ -8,6 +8,7 @@ import {
   completeLoad,
 } from "../controllers/loadController";
 import tripExpenseRoutes from "./tripExpenseRoutes";
+import tripMessageRoutes from "./tripMessageRoutes";
 
 const router = Router();
 
@@ -28,5 +29,6 @@ router.post("/:id/start", startLoad);
 router.post("/:id/complete", completeLoad);
 
 router.use("/:id/expenses", tripExpenseRoutes);
+router.use("/:id/messages", tripMessageRoutes);
 
 export default router;

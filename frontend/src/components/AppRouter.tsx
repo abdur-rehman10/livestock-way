@@ -22,6 +22,7 @@ import MyLoadsTab from '../pages/MyLoadsTab';
 import TripDetail from '../pages/TripDetail';
 import { TripsTab } from '../pages/TripsTab';
 import TripTracking from '../pages/TripTracking';
+import TripChat from '../pages/TripChat';
 import { ExpensesTab } from '../pages/ExpensesTab';
 import SupportTab from '../pages/SupportTab';
 import { ProfileSettings } from '../pages/ProfileSettings';
@@ -233,6 +234,7 @@ export function AppRouter({ showKeyboardShortcuts, onKeyboardShortcutsToggle }: 
                   <Route path="trips" element={<TripsTab onViewTrip={() => toast.info('Trip view coming soon')} />} />
                   <Route path="trips/:id" element={<TripDetail />} />
                   <Route path="trips/:id/tracking" element={<TripTracking />} />
+                  <Route path="trips/:id/chat" element={<TripChat />} />
                   <Route path="earnings" element={<WalletTab />} />
                   <Route path="team" element={<TeamManagement />} />
                   <Route path="marketplace" element={<MarketplaceTab userRole="hauler" />} />
@@ -260,6 +262,7 @@ export function AppRouter({ showKeyboardShortcuts, onKeyboardShortcutsToggle }: 
                   <Route path="trips" element={<TripsTab onViewTrip={() => toast.info('Trip view coming soon')} />} />
                   <Route path="trips/:id" element={<TripDetail />} />
                   <Route path="trips/:id/tracking" element={<TripTracking />} />
+                  <Route path="trips/:id/chat" element={<TripChat />} />
                   <Route path="payments" element={<WalletTab />} />
                   <Route path="documents" element={<DocumentsTab />} />
                   <Route path="marketplace" element={<MarketplaceTab userRole="shipper" />} />

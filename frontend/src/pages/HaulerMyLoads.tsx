@@ -362,6 +362,13 @@ export default function HaulerMyLoads() {
                     >
                       <Link to={`/hauler/trips/${load.id}`}>View Trip</Link>
                     </Button>
+                    <Button
+                      variant="outline"
+                      className="w-full rounded-full text-sm font-semibold"
+                      onClick={() => navigate(`/hauler/trips/${load.id}/chat`)}
+                    >
+                      Open Chat
+                    </Button>
                     {status === "assigned" && (
                       <Button
                         className="w-full rounded-full bg-[#29CA8D] px-5 py-3 text-sm font-semibold text-white shadow-[0_10px_30px_rgba(41,202,141,0.45)] hover:bg-[#24b67d]"
@@ -620,6 +627,16 @@ export default function HaulerMyLoads() {
                     View ePOD
                   </Button>
                 )}
+                <Button
+                  variant="outline"
+                  className="flex-1 rounded-full"
+                  onClick={() => {
+                    closeDetails();
+                    navigate(`/hauler/trips/${dialogLoad.id}/chat`);
+                  }}
+                >
+                  Open Chat
+                </Button>
                 <Button variant="outline" className="flex-1 rounded-full" onClick={closeDetails}>
                   Close
                 </Button>

@@ -39,3 +39,11 @@ export interface TripExpense {
   note: string | null;
   created_at: string;
 }
+
+export interface TripMessage {
+  id: number;
+  trip_id: number;
+  sender: "shipper" | "hauler";
+  message: string;
+  created_at: string;
+}
