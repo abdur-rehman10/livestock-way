@@ -14,6 +14,7 @@ const paymentRoutes_1 = __importDefault(require("./routes/paymentRoutes"));
 const supportRoutes_1 = __importDefault(require("./routes/supportRoutes"));
 const authRoutes_1 = __importDefault(require("./routes/authRoutes"));
 const truckRoutes_1 = __importDefault(require("./routes/truckRoutes"));
+const loadboardRoutes_1 = __importDefault(require("./routes/loadboardRoutes"));
 dotenv_1.default.config();
 const app = (0, express_1.default)();
 app.use((0, cors_1.default)());
@@ -52,6 +53,7 @@ app.use("/api/payments", paymentRoutes_1.default);
 app.use("/api/support", supportRoutes_1.default);
 app.use("/api/auth", authRoutes_1.default);
 app.use("/api/trucks", truckRoutes_1.default);
+app.use("/api/loadboard", loadboardRoutes_1.default);
 const PORT = Number(process.env.PORT) || 4000;
 app.listen(PORT, () => {
     console.log(`✅ Server running on http://localhost:${PORT}`);
