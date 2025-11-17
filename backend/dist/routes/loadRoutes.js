@@ -7,12 +7,13 @@ const express_1 = require("express");
 const loadController_1 = require("../controllers/loadController");
 const tripExpenseRoutes_1 = __importDefault(require("./tripExpenseRoutes"));
 const tripMessageRoutes_1 = __importDefault(require("./tripMessageRoutes"));
+const auth_1 = __importDefault(require("../middlewares/auth"));
 const router = (0, express_1.Router)();
 // GET /api/loads
 router.get("/", loadController_1.getLoads);
 router.get("/:id", loadController_1.getLoadById);
 // POST /api/loads
-router.post("/", loadController_1.createLoad);
+router.post("/", auth_1.default, loadController_1.createLoad);
 // POST /api/loads/:id/assign
 router.post("/:id/assign", loadController_1.assignLoad);
 // POST /api/loads/:id/start
