@@ -7,50 +7,27 @@ exports.startLoad = startLoad;
 exports.completeLoad = completeLoad;
 exports.getLoadById = getLoadById;
 const database_1 = require("../config/database");
+const profileHelpers_1 = require("../utils/profileHelpers");
 const DEFAULT_SHIPPER_ID = "demo_shipper_1";
 const DEFAULT_SHIPPER_ROLE = "shipper";
 // GET /api/loads
 async function getLoads(req, res) {
     try {
-        const { status, assigned_to, created_by } = req.query;
-        let sql = `
-      SELECT
+        const result = await database_1.pool.query(`SELECT
         id,
         title,
         species,
-        quantity,
-        pickup_location,
-        dropoff_location,
-        pickup_date,
-        offer_price,
+        animal_count AS quantity,
+        estimated_weight_kg AS weight,
+        pickup_location_text AS pickup_location,
+        dropoff_location_text AS dropoff_location,
+        pickup_window_start AS pickup_date,
         status,
-        created_by,
-        created_role,
-        created_at,
-        assigned_to,
-        assigned_at,
-        started_at,
-        completed_at,
-        epod_url
+        notes AS description,
+        created_at
       FROM loads
-      WHERE 1=1
-    `;
-        const params = [];
-        let i = 1;
-        if (status) {
-            sql += ` AND status = $${i++}`;
-            params.push(status);
-        }
-        if (assigned_to) {
-            sql += ` AND assigned_to = $${i++}`;
-            params.push(assigned_to);
-        }
-        if (created_by) {
-            sql += ` AND created_by = $${i++}`;
-            params.push(created_by);
-        }
-        sql += ` ORDER BY created_at DESC`;
-        const result = await database_1.pool.query(sql, params);
+      WHERE is_deleted = FALSE
+      ORDER BY created_at DESC`);
         return res.status(200).json({
             status: "OK",
             data: result.rows,
@@ -67,10 +44,10 @@ async function getLoads(req, res) {
 // POST /api/loads
 async function createLoad(req, res) {
     try {
-        const { title, species, quantity, pickup_location, dropoff_location, pickup_date, offer_price, created_by, created_role, } = req.body;
-        if (!title ||
-            !species ||
+        const { species, quantity, weight, pickup_location, dropoff_location, pickup_date, description, } = req.body;
+        if (!species ||
             !quantity ||
+            !weight ||
             !pickup_location ||
             !dropoff_location ||
             !pickup_date) {
@@ -78,46 +55,58 @@ async function createLoad(req, res) {
                 .status(400)
                 .json({ status: "ERROR", message: "Missing required fields" });
         }
-        const shipperId = created_by || DEFAULT_SHIPPER_ID;
-        const shipperRole = created_role || DEFAULT_SHIPPER_ROLE;
+        const authReq = req;
+        const userId = authReq.user?.id ? Number(authReq.user.id) : null;
+        if (!userId) {
+            return res.status(401).json({
+                status: "ERROR",
+                message: "Unauthorized",
+            });
+        }
+        const shipperId = await (0, profileHelpers_1.ensureShipperProfile)(userId);
+        const loadTitle = `${species} load`;
         const insertQuery = `
       INSERT INTO loads (
+        shipper_id,
         title,
         species,
-        quantity,
-        pickup_location,
-        dropoff_location,
-        pickup_date,
-        offer_price,
+        animal_count,
+        estimated_weight_kg,
+        pickup_location_text,
+        dropoff_location_text,
+        pickup_window_start,
+        pickup_window_end,
         status,
-        created_by,
-        created_role
+        visibility,
+        notes
       )
-      VALUES ($1, $2, $3, $4, $5, $6, $7, 'open', $8, $9)
+      VALUES (
+        $1,$2,$3,$4,$5,$6,$7,$8,$9,'posted','public',$10
+      )
       RETURNING
         id,
         title,
         species,
-        quantity,
-        pickup_location,
-        dropoff_location,
-        pickup_date,
-        offer_price,
+        animal_count AS quantity,
+        estimated_weight_kg AS weight,
+        pickup_location_text AS pickup_location,
+        dropoff_location_text AS dropoff_location,
+        pickup_window_start AS pickup_date,
         status,
-        created_by,
-        created_role,
+        notes AS description,
         created_at
     `;
         const values = [
-            title,
+            shipperId,
+            loadTitle,
             species,
             quantity,
+            weight,
             pickup_location,
             dropoff_location,
             pickup_date,
-            offer_price ?? null,
-            shipperId,
-            shipperRole,
+            pickup_date,
+            description ?? null,
         ];
         const result = await database_1.pool.query(insertQuery, values);
         return res.status(201).json({

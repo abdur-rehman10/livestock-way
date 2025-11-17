@@ -8,6 +8,7 @@ import uploadRoutes from "./routes/uploadRoutes";
 import paymentRoutes from "./routes/paymentRoutes";
 import supportRoutes from "./routes/supportRoutes";
 import authRoutes from "./routes/authRoutes";
+import truckRoutes from "./routes/truckRoutes";
 
 dotenv.config();
 
@@ -53,6 +54,7 @@ app.use("/api/uploads", uploadRoutes);
 app.use("/api/payments", paymentRoutes);
 app.use("/api/support", supportRoutes);
 app.use("/api/auth", authRoutes);
+app.use("/api/trucks", truckRoutes);
 
 const PORT = Number(process.env.PORT) || 4000;
 app.listen(PORT, () => {

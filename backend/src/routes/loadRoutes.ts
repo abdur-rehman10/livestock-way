@@ -9,6 +9,7 @@ import {
 } from "../controllers/loadController";
 import tripExpenseRoutes from "./tripExpenseRoutes";
 import tripMessageRoutes from "./tripMessageRoutes";
+import authRequired from "../middlewares/auth";
 
 const router = Router();
 
@@ -17,7 +18,7 @@ router.get("/", getLoads);
 router.get("/:id", getLoadById);
 
 // POST /api/loads
-router.post("/", createLoad);
+router.post("/", authRequired, createLoad);
 
 // POST /api/loads/:id/assign
 router.post("/:id/assign", assignLoad);
