@@ -13,7 +13,19 @@ const DEFAULT_SHIPPER_ROLE = "shipper";
 // GET /api/loads
 async function getLoads(req, res) {
     try {
-        const result = await database_1.pool.query(`SELECT
+        const { status, created_by } = req.query;
+        let shipperFilter = null;
+        if (created_by) {
+            const { rows } = await database_1.pool.query("SELECT id FROM shippers WHERE user_id = $1 LIMIT 1", [created_by]);
+            if (rows.length) {
+                shipperFilter = Number(rows[0].id);
+            }
+            else {
+                return res.json({ status: "OK", data: [] });
+            }
+        }
+        let sql = `
+      SELECT
         id,
         title,
         species,
@@ -22,12 +34,28 @@ async function getLoads(req, res) {
         pickup_location_text AS pickup_location,
         dropoff_location_text AS dropoff_location,
         pickup_window_start AS pickup_date,
+        price_offer_amount AS offer_price,
         status,
         notes AS description,
         created_at
       FROM loads
       WHERE is_deleted = FALSE
-      ORDER BY created_at DESC`);
+    `;
+        const params = [];
+        let index = 1;
+        if (status) {
+            sql += ` AND status = $${index++}`;
+            params.push(status);
+        }
+        else if (!shipperFilter) {
+            sql += ` AND status = 'posted'`;
+        }
+        if (shipperFilter) {
+            sql += ` AND shipper_id = $${index++}`;
+            params.push(shipperFilter);
+        }
+        sql += ` ORDER BY created_at DESC LIMIT 100`;
+        const result = await database_1.pool.query(sql, params);
         return res.status(200).json({
             status: "OK",
             data: result.rows,
@@ -44,27 +72,64 @@ async function getLoads(req, res) {
 // POST /api/loads
 async function createLoad(req, res) {
     try {
-        const { species, quantity, weight, pickup_location, dropoff_location, pickup_date, description, } = req.body;
-        if (!species ||
-            !quantity ||
-            !weight ||
-            !pickup_location ||
-            !dropoff_location ||
-            !pickup_date) {
+        const { title, species, quantity, pickup_location, dropoff_location, delivery_location, pickup_date, pickup_date_from, pickup_date_to, estimated_weight_lbs, weight, rate_per_mile, offer_price, description, additional_comments, } = req.body;
+        const normalizedSpecies = species?.trim();
+        const pickupLocation = pickup_location?.trim() ?? req.body.pickup_location_text?.trim();
+        const deliveryLocation = dropoff_location?.trim() ??
+            delivery_location?.trim() ??
+            req.body.dropoff_location_text?.trim();
+        const pickupWindowStart = pickup_date_from ?? pickup_date ?? req.body.pickup_window_start;
+        const pickupWindowEnd = pickup_date_to ?? pickup_date ?? req.body.pickup_window_end;
+        if (!normalizedSpecies || !pickupLocation || !deliveryLocation || !pickupWindowStart) {
             return res
                 .status(400)
                 .json({ status: "ERROR", message: "Missing required fields" });
         }
         const authReq = req;
         const userId = authReq.user?.id ? Number(authReq.user.id) : null;
+        const userType = (authReq.user?.user_type || "").toUpperCase();
         if (!userId) {
             return res.status(401).json({
                 status: "ERROR",
                 message: "Unauthorized",
             });
         }
+        if (userType !== "SHIPPER") {
+            return res.status(403).json({
+                status: "ERROR",
+                message: "Only shippers can post loads",
+            });
+        }
         const shipperId = await (0, profileHelpers_1.ensureShipperProfile)(userId);
-        const loadTitle = `${species} load`;
+        const loadTitle = title?.trim() || `${normalizedSpecies} load`;
+        const quantityValue = typeof quantity === "number"
+            ? quantity
+            : typeof req.body.animal_count === "number"
+                ? req.body.animal_count
+                : null;
+        const weightKg = (() => {
+            if (typeof weight === "number")
+                return weight;
+            if (typeof req.body.estimated_weight_kg === "number") {
+                return req.body.estimated_weight_kg;
+            }
+            if (estimated_weight_lbs) {
+                const lbs = Number(estimated_weight_lbs);
+                if (!Number.isNaN(lbs)) {
+                    return Number((lbs * 0.453592).toFixed(2));
+                }
+            }
+            return null;
+        })();
+        const priceOffer = typeof rate_per_mile === "number"
+            ? rate_per_mile
+            : typeof offer_price === "number"
+                ? offer_price
+                : null;
+        const notes = description ??
+            additional_comments ??
+            req.body.notes ??
+            null;
         const insertQuery = `
       INSERT INTO loads (
         shipper_id,
@@ -76,12 +141,14 @@ async function createLoad(req, res) {
         dropoff_location_text,
         pickup_window_start,
         pickup_window_end,
+        price_offer_amount,
+        price_currency,
         status,
         visibility,
         notes
       )
       VALUES (
-        $1,$2,$3,$4,$5,$6,$7,$8,$9,'posted','public',$10
+        $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,'USD','posted','public',$11
       )
       RETURNING
         id,
@@ -92,6 +159,7 @@ async function createLoad(req, res) {
         pickup_location_text AS pickup_location,
         dropoff_location_text AS dropoff_location,
         pickup_window_start AS pickup_date,
+        price_offer_amount AS offer_price,
         status,
         notes AS description,
         created_at
@@ -99,14 +167,15 @@ async function createLoad(req, res) {
         const values = [
             shipperId,
             loadTitle,
-            species,
-            quantity,
-            weight,
-            pickup_location,
-            dropoff_location,
-            pickup_date,
-            pickup_date,
-            description ?? null,
+            normalizedSpecies,
+            quantityValue,
+            weightKg,
+            pickupLocation,
+            deliveryLocation,
+            pickupWindowStart,
+            pickupWindowEnd,
+            priceOffer,
+            notes,
         ];
         const result = await database_1.pool.query(insertQuery, values);
         return res.status(201).json({
