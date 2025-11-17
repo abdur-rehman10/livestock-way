@@ -12,6 +12,7 @@ const loadRoutes_1 = __importDefault(require("./routes/loadRoutes"));
 const uploadRoutes_1 = __importDefault(require("./routes/uploadRoutes"));
 const paymentRoutes_1 = __importDefault(require("./routes/paymentRoutes"));
 const supportRoutes_1 = __importDefault(require("./routes/supportRoutes"));
+const authRoutes_1 = __importDefault(require("./routes/authRoutes"));
 dotenv_1.default.config();
 const app = (0, express_1.default)();
 app.use((0, cors_1.default)());
@@ -26,25 +27,30 @@ app.get("/health", (_req, res) => {
         .status(200)
         .json({ status: "OK", message: "LivestockWay backend is running 🚀" });
 });
-// DB test route
-app.get("/db-test", async (_req, res) => {
+// DB health route
+app.get("/health/db", async (_req, res) => {
     try {
         await (0, database_1.testDbConnection)();
         const result = await database_1.pool.query("SELECT NOW() AS now");
-        res
-            .status(200)
-            .json({ status: "OK", message: "Database reachable", time: result.rows[0].now });
+        res.status(200).json({
+            status: "ok",
+            dbTime: result.rows[0].now,
+            db: process.env.DB_NAME || process.env.DATABASE_URL,
+        });
     }
     catch (err) {
-        console.error("Database test failed:", err);
-        res.status(500).json({ status: "ERROR", message: "Database connection failed" });
+        console.error("DB health check failed:", err);
+        res
+            .status(500)
+            .json({ status: "error", message: "DB connection failed" });
     }
 });
 app.use("/api/loads", loadRoutes_1.default);
 app.use("/api/uploads", uploadRoutes_1.default);
 app.use("/api/payments", paymentRoutes_1.default);
 app.use("/api/support", supportRoutes_1.default);
-const PORT = process.env.PORT || 5000;
+app.use("/api/auth", authRoutes_1.default);
+const PORT = Number(process.env.PORT) || 4000;
 app.listen(PORT, () => {
     console.log(`✅ Server running on http://localhost:${PORT}`);
 });
