@@ -34,6 +34,8 @@ export default function SignupLogin({ preselectedRole, onAuth, onForgotPassword,
   const [loginPhone, setLoginPhone] = useState('');
   const [loginPassword, setLoginPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
+  const [loginError, setLoginError] = useState<string | null>(null);
+  const [loginLoading, setLoginLoading] = useState(false);
   
   // Signup fields
   const [name, setName] = useState('');
@@ -48,6 +50,21 @@ export default function SignupLogin({ preselectedRole, onAuth, onForgotPassword,
   const [companyName, setCompanyName] = useState('');
   const [businessId, setBusinessId] = useState('');
   const [companyAddress, setCompanyAddress] = useState('');
+  const [signupError, setSignupError] = useState<string | null>(null);
+  const [signupLoading, setSignupLoading] = useState(false);
+
+  const roleRedirects: Record<string, string> = {
+    hauler: '/hauler/dashboard',
+    shipper: '/shipper/dashboard',
+    stakeholder: '/stakeholder/dashboard',
+  };
+
+  const navigateToRole = (userRole: string) => {
+    const normalizedRole = userRole.toLowerCase();
+    onAuth?.(normalizedRole as any);
+    const target = roleRedirects[normalizedRole] || '/';
+    navigate(target, { replace: true });
+  };
   
   // Password strength
   const getPasswordStrength = (pwd: string) => {
@@ -74,18 +91,59 @@ export default function SignupLogin({ preselectedRole, onAuth, onForgotPassword,
     return 'bg-green-500';
   };
 
-  const handleLoginSubmit = (e: React.FormEvent) => {
+  const handleLoginSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (authMethod === 'phone' && onNeedVerification) {
-      // Pass both phone AND role to verification
       onNeedVerification?.(loginPhone, role);
-    } else {
-      // In production, validate credentials here
-      onAuth?.(role);
+      return;
+    }
+
+    try {
+      setLoginError(null);
+      setLoginLoading(true);
+
+      const res = await fetch('/api/auth/login', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          email: loginEmail,
+          password: loginPassword,
+        }),
+      });
+
+      if (!res.ok) {
+        let message = 'Login failed';
+        try {
+          const data = await res.json();
+          if (data?.message) message = data.message;
+        } catch (err) {
+          // ignore
+        }
+        throw new Error(message);
+      }
+
+      const data = await res.json();
+      const token: string = data?.token;
+      const userRole: string = data?.user?.user_type;
+
+      if (!token || !userRole) {
+        throw new Error('Invalid response from server');
+      }
+
+      localStorage.setItem('token', token);
+      localStorage.setItem('role', userRole);
+
+      navigateToRole(userRole);
+    } catch (err: any) {
+      setLoginError(err?.message || 'Login failed');
+    } finally {
+      setLoginLoading(false);
     }
   };
 
-  const handleSignupSubmit = (e: React.FormEvent) => {
+  const handleSignupSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (password !== confirmPassword) {
       alert('Passwords do not match');
@@ -95,9 +153,57 @@ export default function SignupLogin({ preselectedRole, onAuth, onForgotPassword,
       alert('Please use a stronger password');
       return;
     }
-    // In production, create account here
-    // Pass both contact AND role to verification (if handler supplied)
-    onNeedVerification?.(authMethod === 'email' ? email : phone, role);
+
+    try {
+      setSignupError(null);
+      setSignupLoading(true);
+
+      const payload = {
+        full_name: name,
+        email,
+        password,
+        phone,
+        user_type: role,
+        account_mode: isCompany ? 'COMPANY' : 'INDIVIDUAL',
+        company_name: isCompany ? companyName : undefined,
+      };
+
+      const res = await fetch('/api/auth/register', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(payload),
+      });
+
+      if (!res.ok) {
+        let message = 'Signup failed';
+        try {
+          const data = await res.json();
+          if (data?.message) message = data.message;
+        } catch (err) {
+          // ignore parsing errors
+        }
+        throw new Error(message);
+      }
+
+      const data = await res.json();
+      const token: string = data?.token;
+      const userRole: string = data?.user?.user_type;
+
+      if (!token || !userRole) {
+        throw new Error('Invalid response from server');
+      }
+
+      localStorage.setItem('token', token);
+      localStorage.setItem('role', userRole);
+
+      navigateToRole(userRole);
+    } catch (err: any) {
+      setSignupError(err?.message || 'Signup failed');
+    } finally {
+      setSignupLoading(false);
+    }
   };
 
   const roles = [
@@ -249,8 +355,21 @@ export default function SignupLogin({ preselectedRole, onAuth, onForgotPassword,
                   </TabsContent>
                 </Tabs>
 
-                <Button type="submit" className="w-full" size="lg">
-                  {authMethod === 'phone' ? 'Send OTP' : 'Sign In'}
+                {loginError && authMethod === 'email' && (
+                  <p className="text-sm text-red-600">{loginError}</p>
+                )}
+
+                <Button
+                  type="submit"
+                  className="w-full"
+                  size="lg"
+                  disabled={loginLoading}
+                >
+                  {authMethod === 'phone'
+                    ? 'Send OTP'
+                    : loginLoading
+                      ? 'Signing in...'
+                      : 'Sign In'}
                 </Button>
               </form>
             ) : (
@@ -445,13 +564,18 @@ export default function SignupLogin({ preselectedRole, onAuth, onForgotPassword,
                   )}
                 </div>
 
+                {signupError && (
+                  <p className="text-sm text-red-600">{signupError}</p>
+                )}
+
                 <Button 
                   type="submit" 
                   className="w-full" 
                   size="lg"
+                  disabled={signupLoading}
                   style={{ backgroundColor: getRoleColor(role) }}
                 >
-                  Create Account
+                  {signupLoading ? 'Creating account...' : 'Create Account'}
                 </Button>
 
                 <p className="text-xs text-center text-muted-foreground">
