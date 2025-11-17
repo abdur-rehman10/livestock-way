@@ -23,6 +23,7 @@ import TripDetail from '../pages/TripDetail';
 import { TripsTab } from '../pages/TripsTab';
 import TripTracking from '../pages/TripTracking';
 import TripChat from '../pages/TripChat';
+import SuperAdminLogin from '../pages/SuperAdminLogin';
 import { ExpensesTab } from '../pages/ExpensesTab';
 import SupportTab from '../pages/SupportTab';
 import { ProfileSettings } from '../pages/ProfileSettings';
@@ -109,6 +110,7 @@ export function AppRouter({ showKeyboardShortcuts, onKeyboardShortcutsToggle }: 
   };
 
   const handleLogout = () => {
+    const nextPath = userRole === 'super-admin' ? '/admin/login' : '/';
     setIsAuthenticated(false);
     setUserRole(null);
     setNeedsOnboarding(false);
@@ -118,7 +120,7 @@ export function AppRouter({ showKeyboardShortcuts, onKeyboardShortcutsToggle }: 
     toast.success('Logged out successfully');
     
     // Navigate to landing page
-    navigate('/');
+    navigate(nextPath);
   };
 
   const handleRoleSwitch = (role: 'shipper' | 'driver') => {
@@ -149,7 +151,12 @@ export function AppRouter({ showKeyboardShortcuts, onKeyboardShortcutsToggle }: 
 
   // Protected Route Component
   const ProtectedRoute = ({ children }: { children: React.ReactNode }) => {
+    const isAdminPath = location.pathname.startsWith('/admin');
     if (!isAuthenticated || !userRole) {
+      return <Navigate to={isAdminPath ? '/admin/login' : '/'} replace />;
+    }
+
+    if (isAdminPath && userRole !== 'super-admin') {
       return <Navigate to="/" replace />;
     }
 
@@ -194,6 +201,12 @@ export function AppRouter({ showKeyboardShortcuts, onKeyboardShortcutsToggle }: 
               onAuth={handleLogin}
               onNeedVerification={handleNeedVerification}
             />
+          </AuthRoute>
+        } />
+
+        <Route path="/admin/login" element={
+          <AuthRoute>
+            <SuperAdminLogin onLoginSuccess={() => handleLogin('super-admin')} />
           </AuthRoute>
         } />
 

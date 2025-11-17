@@ -473,6 +473,16 @@ export default function SignupLogin({ preselectedRole, onAuth, onForgotPassword,
             </Button>
           </div>
         )}
+
+        <div className="text-center mt-6 text-xs text-muted-foreground">
+          <button
+            type="button"
+            onClick={() => navigate('/admin/login')}
+            className="inline-flex items-center gap-1 text-[#172039] hover:text-[#0b1530]"
+          >
+            <Shield className="w-3 h-3" /> Administrator Access
+          </button>
+        </div>
       </div>
     </div>
   );

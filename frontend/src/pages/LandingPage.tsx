@@ -1,4 +1,4 @@
-import { Truck, Home, Wrench } from 'lucide-react';
+import { Truck, Home, Wrench, Shield } from 'lucide-react';
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Button } from '../components/ui/button';
@@ -121,8 +121,16 @@ export default function LandingPage({ onSelectRole }: LandingPageProps) {
         </div>
 
         {/* Footer */}
-        <div className="mt-12 text-center text-sm text-muted-foreground">
+        <div className="mt-12 text-center text-sm text-muted-foreground space-y-3">
           <p>By continuing, you agree to our Terms of Service and Privacy Policy</p>
+          <button
+            type="button"
+            onClick={() => navigate('/admin/login')}
+            className="inline-flex items-center gap-2 text-[#172039] hover:text-[#0b1530]"
+          >
+            <Shield className="w-4 h-4" />
+            Administrator Access
+          </button>
         </div>
       </div>
     </div>

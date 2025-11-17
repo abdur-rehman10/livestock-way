@@ -155,10 +155,19 @@ export function SuperAdminDashboard({ onLogout }: SuperAdminDashboardProps) {
           </div>
           
           <div className="flex items-center gap-3">
-            <Button variant="ghost" size="icon" className="text-white hover:bg-white/10">
+            <Button
+              variant="ghost"
+              size="icon"
+              className="text-white hover:bg-white/10 active:bg-white/20 focus-visible:ring-white/40"
+            >
               <Bell className="w-5 h-5" />
             </Button>
-            <Button variant="ghost" size="icon" className="text-white hover:bg-white/10" onClick={() => onLogout?.()}>
+            <Button
+              variant="ghost"
+              size="icon"
+              className="text-white hover:bg-white/10 active:bg-white/20 focus-visible:ring-white/40"
+              onClick={() => onLogout?.()}
+            >
               <User className="w-5 h-5" />
             </Button>
           </div>
