@@ -1,15 +1,22 @@
 export interface Payment {
   id: number;
-  load_id: number;
-  payer_id: string;
+  load_id: number | null;
+  trip_id?: number | null;
+  payer_id: string | null;
   payer_role: string;
-  payee_id: string;
+  payee_id: string | null;
   payee_role: string;
   amount: number;
   currency: string;
   status: string;
   created_at: string;
+  funded_at?: string | null;
+  released_by_user_id?: string | null;
+  funded_by_user_id?: string | null;
   released_at: string | null;
+  platform_commission_amount?: number;
+  commission_percent?: number;
+  hauler_payout_amount?: number;
   species?: string;
   quantity?: number;
   pickup_location?: string;

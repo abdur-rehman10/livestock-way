@@ -59,7 +59,7 @@ router.get("/", async (req, res) => {
           status,
           created_at
         FROM loads
-        WHERE status = 'posted' AND is_deleted = FALSE
+        WHERE status = 'open' AND is_deleted = FALSE
         ORDER BY created_at DESC
         LIMIT 100`;
             const loadResult = await database_1.pool.query(loadQuery);

@@ -65,7 +65,16 @@ router.post("/:id/fund", auth_1.default, async (req, res) => {
         if (userType !== "shipper" || actorId !== payment.payer_id) {
             return res.status(403).json({ error: "Not allowed to fund this payment" });
         }
-        const updated = await (0, paymentsService_1.fundPayment)(paymentId);
+        const actorNumericId = actorId ? Number(actorId) : null;
+        if (!actorNumericId) {
+            return res.status(403).json({ error: "Not allowed to fund this payment" });
+        }
+        const updated = await (0, paymentsService_1.fundPayment)(paymentId, actorNumericId);
+        if (!updated) {
+            return res
+                .status(400)
+                .json({ error: "Payment is not in a fundable state" });
+        }
         res.json(updated);
     }
     catch (error) {
