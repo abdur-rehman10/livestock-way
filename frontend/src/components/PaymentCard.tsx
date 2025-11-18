@@ -63,10 +63,25 @@ export const PaymentCard: React.FC<PaymentCardProps> = ({
     description: "Escrow status updated",
   };
 
+  const [confirmVisible, setConfirmVisible] = React.useState(false);
+
   const canFund =
     isShipper &&
     ["PENDING_FUNDING", "PENDING"].includes(normalizedStatus) &&
     !funding;
+
+  const handlePrimaryClick = () => {
+    setConfirmVisible(true);
+  };
+
+  const handleConfirm = () => {
+    setConfirmVisible(false);
+    onFund(payment.id);
+  };
+
+  const handleCancelConfirm = () => {
+    setConfirmVisible(false);
+  };
 
   return (
     <div className="rounded-lg border border-gray-200 bg-white p-4 text-xs text-gray-700 space-y-3">
@@ -129,15 +144,41 @@ export const PaymentCard: React.FC<PaymentCardProps> = ({
         <div className="text-[11px] text-red-600">{fundError}</div>
       )}
 
-      {canFund && (
+      {canFund && !confirmVisible && (
         <Button
           type="button"
-          onClick={() => onFund(payment.id)}
+          onClick={handlePrimaryClick}
           disabled={funding}
           className="bg-[#F97316] hover:bg-[#ea580c] text-white text-[12px]"
         >
-          {funding ? "Funding…" : "Fund Escrow"}
+          Fund Escrow
         </Button>
+      )}
+
+      {canFund && confirmVisible && (
+        <div className="space-y-2">
+          <div className="text-[11px] text-gray-600">
+            Funding escrow charges your card for the full amount. Continue?
+          </div>
+          <div className="flex flex-wrap gap-2">
+            <Button
+              type="button"
+              onClick={handleConfirm}
+              disabled={funding}
+              className="bg-[#F97316] hover:bg-[#ea580c] text-white text-[12px]"
+            >
+              {funding ? "Funding…" : "Yes, fund escrow"}
+            </Button>
+            <Button
+              type="button"
+              onClick={handleCancelConfirm}
+              variant="outline"
+              className="text-[12px]"
+            >
+              Cancel
+            </Button>
+          </div>
+        </div>
       )}
 
       {normalizedStatus === "FUNDED" && (
