@@ -60,6 +60,17 @@ function buildRestStopPlan(plannedDistanceKm) {
         stops,
     };
 }
+function parseId(value) {
+    const numeric = Number(value);
+    return Number.isNaN(numeric) ? null : numeric;
+}
+function getTripIdParam(req) {
+    const params = req.params;
+    const raw = params?.id;
+    if (!raw)
+        return null;
+    return parseId(raw);
+}
 router.post("/", async (req, res) => {
     try {
         const { load_id, hauler_id, truck_id, driver_id, planned_departure_at, planned_arrival_at, planned_distance_km, } = req.body;
@@ -194,8 +205,8 @@ router.get("/", async (req, res) => {
 });
 router.get("/:id", async (req, res) => {
     try {
-        const id = Number(req.params.id);
-        if (Number.isNaN(id)) {
+        const id = getTripIdParam(req);
+        if (id === null) {
             return res.status(400).json({ message: "Invalid trip id" });
         }
         const query = `
@@ -228,9 +239,9 @@ router.get("/:id", async (req, res) => {
 });
 router.patch("/:id/status", async (req, res) => {
     try {
-        const id = Number(req.params.id);
+        const id = getTripIdParam(req);
         const { status } = req.body;
-        if (Number.isNaN(id)) {
+        if (id === null) {
             return res.status(400).json({ message: "Invalid trip id" });
         }
         if (!status) {
@@ -266,6 +277,312 @@ router.patch("/:id/status", async (req, res) => {
     }
     catch (err) {
         console.error("Error in PATCH /api/trips/:id/status:", err);
+        return res.status(500).json({ message: "Internal server error" });
+    }
+});
+router.post("/:id/pre-trip-check", async (req, res) => {
+    try {
+        const tripId = getTripIdParam(req);
+        if (tripId === null) {
+            return res.status(400).json({ message: "Invalid trip id" });
+        }
+        const driverId = Number(req.body.driver_id);
+        const truckId = Number(req.body.truck_id);
+        if (!driverId || Number.isNaN(driverId) || !truckId || Number.isNaN(truckId)) {
+            return res.status(400).json({
+                message: "driver_id and truck_id are required for pre-trip check",
+            });
+        }
+        const tripCheck = await database_1.pool.query("SELECT id FROM trips WHERE id = $1", [tripId]);
+        if (tripCheck.rowCount === 0) {
+            return res.status(404).json({ message: "Trip not found" });
+        }
+        const existing = await database_1.pool.query("SELECT id FROM pre_trip_checks WHERE trip_id = $1", [tripId]);
+        const values = [
+            tripId,
+            driverId,
+            truckId,
+            req.body.checklist_status || "COMPLETED",
+            req.body.is_vehicle_clean ?? null,
+            req.body.is_vehicle_roadworthy ?? null,
+            req.body.tyres_ok ?? null,
+            req.body.brakes_ok ?? null,
+            req.body.lights_ok ?? null,
+            req.body.gate_latches_ok ?? null,
+            req.body.ventilation_ok ?? null,
+            req.body.is_animals_fit_to_travel ?? null,
+            req.body.overcrowding_checked ?? null,
+            req.body.water_and_feed_checked ?? null,
+            req.body.odometer_start ?? null,
+            req.body.additional_notes ?? null,
+        ];
+        let result;
+        const existingCount = existing.rowCount ?? 0;
+        if (existingCount > 0) {
+            const updateQuery = `
+        UPDATE pre_trip_checks
+        SET
+          driver_id = $2,
+          truck_id = $3,
+          checklist_status = $4,
+          is_vehicle_clean = $5,
+          is_vehicle_roadworthy = $6,
+          tyres_ok = $7,
+          brakes_ok = $8,
+          lights_ok = $9,
+          gate_latches_ok = $10,
+          ventilation_ok = $11,
+          is_animals_fit_to_travel = $12,
+          overcrowding_checked = $13,
+          water_and_feed_checked = $14,
+          odometer_start = $15,
+          additional_notes = $16,
+          updated_at = NOW()
+        WHERE trip_id = $1
+        RETURNING *
+      `;
+            result = await database_1.pool.query(updateQuery, values);
+        }
+        else {
+            const insertQuery = `
+        INSERT INTO pre_trip_checks (
+          trip_id,
+          driver_id,
+          truck_id,
+          checklist_status,
+          is_vehicle_clean,
+          is_vehicle_roadworthy,
+          tyres_ok,
+          brakes_ok,
+          lights_ok,
+          gate_latches_ok,
+          ventilation_ok,
+          is_animals_fit_to_travel,
+          overcrowding_checked,
+          water_and_feed_checked,
+          odometer_start,
+          additional_notes,
+          created_at,
+          updated_at
+        )
+        VALUES (
+          $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,
+          NOW(),NOW()
+        )
+        RETURNING *
+      `;
+            result = await database_1.pool.query(insertQuery, values);
+        }
+        return res.json(result.rows[0]);
+    }
+    catch (err) {
+        console.error("Error in POST /api/trips/:id/pre-trip-check:", err);
+        return res.status(500).json({ message: "Internal server error" });
+    }
+});
+router.get("/:id/pre-trip-check", async (req, res) => {
+    try {
+        const tripId = getTripIdParam(req);
+        if (tripId === null) {
+            return res.status(400).json({ message: "Invalid trip id" });
+        }
+        const result = await database_1.pool.query(`
+      SELECT *
+      FROM pre_trip_checks
+      WHERE trip_id = $1
+      LIMIT 1
+    `, [tripId]);
+        if (result.rowCount === 0) {
+            return res.status(404).json({ message: "Pre-trip check not found" });
+        }
+        return res.json(result.rows[0]);
+    }
+    catch (err) {
+        console.error("Error in GET /api/trips/:id/pre-trip-check:", err);
+        return res.status(500).json({ message: "Internal server error" });
+    }
+});
+router.post("/:id/epod", async (req, res) => {
+    try {
+        const tripId = getTripIdParam(req);
+        if (tripId === null) {
+            return res.status(400).json({ message: "Invalid trip id" });
+        }
+        const tripCheck = await database_1.pool.query("SELECT id FROM trips WHERE id = $1", [tripId]);
+        if (tripCheck.rowCount === 0) {
+            return res.status(404).json({ message: "Trip not found" });
+        }
+        const existing = await database_1.pool.query("SELECT id FROM trip_epods WHERE trip_id = $1", [tripId]);
+        const photosJson = Array.isArray(req.body.delivery_photos) && req.body.delivery_photos.length > 0
+            ? JSON.stringify(req.body.delivery_photos)
+            : JSON.stringify([]);
+        const values = [
+            tripId,
+            req.body.delivered_at || null,
+            req.body.receiver_name || null,
+            req.body.receiver_signature || null,
+            photosJson,
+            req.body.delivery_notes || null,
+        ];
+        let result;
+        const existingCount = existing.rowCount ?? 0;
+        if (existingCount > 0) {
+            const updateQuery = `
+        UPDATE trip_epods
+        SET
+          delivered_at = $2,
+          receiver_name = $3,
+          receiver_signature = $4,
+          delivery_photos = $5::jsonb,
+          delivery_notes = $6,
+          updated_at = NOW()
+        WHERE trip_id = $1
+        RETURNING *
+      `;
+            result = await database_1.pool.query(updateQuery, values);
+        }
+        else {
+            const insertQuery = `
+        INSERT INTO trip_epods (
+          trip_id,
+          delivered_at,
+          receiver_name,
+          receiver_signature,
+          delivery_photos,
+          delivery_notes,
+          created_at,
+          updated_at
+        )
+        VALUES (
+          $1,$2,$3,$4,$5::jsonb,$6,
+          NOW(),NOW()
+        )
+        RETURNING *
+      `;
+            result = await database_1.pool.query(insertQuery, values);
+        }
+        return res.json(result.rows[0]);
+    }
+    catch (err) {
+        console.error("Error in POST /api/trips/:id/epod:", err);
+        return res.status(500).json({ message: "Internal server error" });
+    }
+});
+router.get("/:id/epod", async (req, res) => {
+    try {
+        const tripId = getTripIdParam(req);
+        if (tripId === null) {
+            return res.status(400).json({ message: "Invalid trip id" });
+        }
+        const result = await database_1.pool.query(`
+      SELECT *
+      FROM trip_epods
+      WHERE trip_id = $1
+      LIMIT 1
+    `, [tripId]);
+        if (result.rowCount === 0) {
+            return res.status(404).json({ message: "ePOD not found" });
+        }
+        return res.json(result.rows[0]);
+    }
+    catch (err) {
+        console.error("Error in GET /api/trips/:id/epod:", err);
+        return res.status(500).json({ message: "Internal server error" });
+    }
+});
+router.post("/:id/expenses", async (req, res) => {
+    try {
+        const tripId = getTripIdParam(req);
+        if (tripId === null) {
+            return res.status(400).json({ message: "Invalid trip id" });
+        }
+        const tripCheck = await database_1.pool.query("SELECT id FROM trips WHERE id = $1", [tripId]);
+        if (tripCheck.rowCount === 0) {
+            return res.status(404).json({ message: "Trip not found" });
+        }
+        const { driver_id, expense_type, amount, currency, description, receipt_photo_url, incurred_at } = req.body;
+        if (!expense_type || amount === undefined || amount === null) {
+            return res.status(400).json({ message: "expense_type and amount are required" });
+        }
+        const amountNumber = Number(amount);
+        if (Number.isNaN(amountNumber)) {
+            return res.status(400).json({ message: "amount must be a number" });
+        }
+        const driverIdValue = driver_id ? Number(driver_id) : null;
+        if (driver_id && Number.isNaN(driverIdValue)) {
+            return res.status(400).json({ message: "driver_id must be numeric" });
+        }
+        const insertQuery = `
+      INSERT INTO trip_expenses (
+        trip_id,
+        driver_id,
+        expense_type,
+        amount,
+        currency,
+        notes,
+        receipt_url,
+        incurred_at,
+        created_at
+      )
+      VALUES (
+        $1,$2,$3,$4,$5,$6,$7,$8,NOW()
+      )
+      RETURNING
+        id,
+        trip_id,
+        driver_id,
+        expense_type,
+        amount,
+        currency,
+        notes AS description,
+        receipt_url AS receipt_photo_url,
+        incurred_at,
+        created_at
+    `;
+        const values = [
+            tripId,
+            driverIdValue,
+            expense_type,
+            amountNumber,
+            currency || "USD",
+            description || null,
+            receipt_photo_url || null,
+            incurred_at || null,
+        ];
+        const result = await database_1.pool.query(insertQuery, values);
+        return res.status(201).json(result.rows[0]);
+    }
+    catch (err) {
+        console.error("Error in POST /api/trips/:id/expenses:", err);
+        return res.status(500).json({ message: "Internal server error" });
+    }
+});
+router.get("/:id/expenses", async (req, res) => {
+    try {
+        const tripId = getTripIdParam(req);
+        if (tripId === null) {
+            return res.status(400).json({ message: "Invalid trip id" });
+        }
+        const result = await database_1.pool.query(`
+      SELECT
+        id,
+        trip_id,
+        driver_id,
+        expense_type,
+        amount,
+        currency,
+        notes AS description,
+        receipt_url AS receipt_photo_url,
+        incurred_at,
+        created_at
+      FROM trip_expenses
+      WHERE trip_id = $1
+      ORDER BY incurred_at DESC NULLS LAST, created_at DESC
+    `, [tripId]);
+        return res.json(result.rows);
+    }
+    catch (err) {
+        console.error("Error in GET /api/trips/:id/expenses:", err);
         return res.status(500).json({ message: "Internal server error" });
     }
 });
