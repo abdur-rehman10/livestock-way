@@ -1,5 +1,11 @@
 import { Router, Request, Response } from "express";
 import { pool } from "../config/database";
+import {
+  createPaymentForTrip,
+  getPaymentByTripId,
+  releasePayment,
+} from "../services/paymentsService";
+import { PoolClient } from "pg";
 
 const router = Router();
 
@@ -78,6 +84,7 @@ function getTripIdParam(req: Request) {
 }
 
 router.post("/", async (req: Request, res: Response) => {
+  const client = await pool.connect();
   try {
     const {
       load_id,
@@ -87,6 +94,8 @@ router.post("/", async (req: Request, res: Response) => {
       planned_departure_at,
       planned_arrival_at,
       planned_distance_km,
+      agreed_price,
+      currency,
     } = req.body;
 
     if (
@@ -102,11 +111,20 @@ router.post("/", async (req: Request, res: Response) => {
       });
     }
 
+    const priceNumber = Number(agreed_price);
+    if (!priceNumber || Number.isNaN(priceNumber) || priceNumber <= 0) {
+      return res
+        .status(400)
+        .json({ message: "agreed_price must be provided for payments" });
+    }
+
+    await client.query("BEGIN");
+
     const [loadCheck, haulerCheck, truckCheck, driverCheck] = await Promise.all([
-      pool.query("SELECT id FROM loads WHERE id = $1", [load_id]),
-      pool.query("SELECT id FROM haulers WHERE id = $1", [hauler_id]),
-      pool.query("SELECT id FROM trucks WHERE id = $1", [truck_id]),
-      pool.query("SELECT id FROM drivers WHERE id = $1", [driver_id]),
+      client.query("SELECT id, shipper_id FROM loads WHERE id = $1", [load_id]),
+      client.query("SELECT id, user_id FROM haulers WHERE id = $1", [hauler_id]),
+      client.query("SELECT id, hauler_id FROM trucks WHERE id = $1", [truck_id]),
+      client.query("SELECT id FROM drivers WHERE id = $1", [driver_id]),
     ]);
 
     if (loadCheck.rowCount === 0) {
@@ -123,6 +141,23 @@ router.post("/", async (req: Request, res: Response) => {
     }
 
     const restStopPlan = buildRestStopPlan(planned_distance_km);
+
+    const haulerProfileId = truckCheck.rows[0].hauler_id || hauler_id;
+    const shipperProfileId = loadCheck.rows[0].shipper_id;
+
+    const shipperUser = await client.query(
+      "SELECT user_id FROM shippers WHERE id = $1",
+      [shipperProfileId]
+    );
+    const haulerUser = await client.query(
+      "SELECT user_id FROM haulers WHERE id = $1",
+      [haulerProfileId]
+    );
+
+    if (shipperUser.rowCount === 0 || haulerUser.rowCount === 0) {
+      await client.query("ROLLBACK");
+      return res.status(400).json({ message: "Linked shipper/hauler not found" });
+    }
 
     const insertQuery = `
       INSERT INTO trips (
@@ -170,12 +205,27 @@ router.post("/", async (req: Request, res: Response) => {
       JSON.stringify(restStopPlan),
     ];
 
-    const result = await pool.query(insertQuery, values);
+    const result = await client.query(insertQuery, values);
+    const trip = result.rows[0];
 
-    return res.status(201).json(result.rows[0]);
+    const payment = await createPaymentForTrip({
+      tripId: trip.id,
+      loadId: trip.load_id,
+      shipperUserId: Number(shipperUser.rows[0].user_id),
+      haulerUserId: Number(haulerUser.rows[0].user_id),
+      amount: priceNumber,
+      currency: (currency || "USD").toUpperCase(),
+      client,
+    });
+
+    await client.query("COMMIT");
+    return res.status(201).json({ trip, payment });
   } catch (err) {
+    await client.query("ROLLBACK");
     console.error("Error in POST /api/trips:", err);
     return res.status(500).json({ message: "Internal server error" });
+  } finally {
+    client.release();
   }
 });
 
@@ -460,18 +510,23 @@ router.get("/:id/pre-trip-check", async (req: Request, res: Response) => {
 });
 
 router.post("/:id/epod", async (req: Request, res: Response) => {
+  const client = await pool.connect();
   try {
     const tripId = getTripIdParam(req);
     if (tripId === null) {
       return res.status(400).json({ message: "Invalid trip id" });
     }
 
-    const tripCheck = await pool.query("SELECT id FROM trips WHERE id = $1", [tripId]);
+    await client.query("BEGIN");
+
+    const tripCheck = await client.query("SELECT id FROM trips WHERE id = $1", [tripId]);
     if (tripCheck.rowCount === 0) {
+      await client.query("ROLLBACK");
+      client.release();
       return res.status(404).json({ message: "Trip not found" });
     }
 
-    const existing = await pool.query(
+    const existing = await client.query(
       "SELECT id FROM trip_epods WHERE trip_id = $1",
       [tripId]
     );
@@ -490,7 +545,7 @@ router.post("/:id/epod", async (req: Request, res: Response) => {
       req.body.delivery_notes || null,
     ];
 
-    let result;
+    let epodResult;
     const existingCount = existing.rowCount ?? 0;
     if (existingCount > 0) {
       const updateQuery = `
@@ -505,7 +560,7 @@ router.post("/:id/epod", async (req: Request, res: Response) => {
         WHERE trip_id = $1
         RETURNING *
       `;
-      result = await pool.query(updateQuery, values);
+      epodResult = await client.query(updateQuery, values);
     } else {
       const insertQuery = `
         INSERT INTO trip_epods (
@@ -524,13 +579,33 @@ router.post("/:id/epod", async (req: Request, res: Response) => {
         )
         RETURNING *
       `;
-      result = await pool.query(insertQuery, values);
+      epodResult = await client.query(insertQuery, values);
     }
 
-    return res.json(result.rows[0]);
+    const tripUpdate = await client.query(
+      `UPDATE trips SET status = 'completed', updated_at = NOW() WHERE id = $1 RETURNING *`,
+      [tripId]
+    );
+
+    let releasedPayment = null;
+    const payment = await getPaymentByTripId(tripId, client);
+    if (payment) {
+      releasedPayment = await releasePayment(payment.id, client);
+    }
+
+    await client.query("COMMIT");
+
+    return res.json({
+      epod: epodResult.rows[0],
+      trip: tripUpdate.rows[0],
+      payment: releasedPayment,
+    });
   } catch (err) {
+    await client.query("ROLLBACK");
     console.error("Error in POST /api/trips/:id/epod:", err);
     return res.status(500).json({ message: "Internal server error" });
+  } finally {
+    client.release();
   }
 });
 
