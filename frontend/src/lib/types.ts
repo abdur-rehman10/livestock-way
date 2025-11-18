@@ -30,14 +30,31 @@ export interface SupportTicket {
 
 export interface TripExpense {
   id: number;
-  load_id: number;
-  user_id: string;
-  user_role: string;
-  type: string;
+  trip_id: number;
+  driver_id: number | null;
+  expense_type: string;
   amount: number;
   currency: string;
-  note: string | null;
+  description: string | null;
+  receipt_photo_url: string | null;
+  incurred_at: string | null;
   created_at: string;
+  updated_at?: string | null;
+}
+
+export interface TripRecord {
+  id: number;
+  load_id: number;
+  hauler_id: number;
+  truck_id: number;
+  driver_id: number;
+  status: string;
+  planned_start_time: string | null;
+  planned_end_time: string | null;
+  route_distance_km: number | null;
+  rest_stop_plan_json: any;
+  created_at: string;
+  updated_at: string | null;
 }
 
 export interface TripMessage {

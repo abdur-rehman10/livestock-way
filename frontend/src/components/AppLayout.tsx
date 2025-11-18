@@ -290,19 +290,6 @@ export function AppLayout({ children, userRole, onLogout }: AppLayoutProps) {
             </div>
 
             <div className="flex items-center gap-2">
-              {/* Reset Demo Button */}
-              <Button
-                onClick={() => {
-                  storage.clear();
-                  window.location.reload();
-                }}
-                variant="ghost"
-                size="sm"
-                className="text-red-600 hover:text-red-700 hover:bg-red-50 dark:hover:bg-red-950"
-              >
-                Reset Demo
-              </Button>
-
               {/* Theme Toggle */}
               <ThemeToggle />
 

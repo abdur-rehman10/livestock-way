@@ -1,10 +1,10 @@
 import React, { useEffect, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { fetchLoadsForShipper, type LoadSummary, API_BASE_URL } from "../lib/api";
+import { storage, STORAGE_KEYS } from "../lib/storage";
+import { formatLoadStatusLabel } from "../lib/status";
 import { Button } from "../components/ui/button";
 import { Badge } from "../components/ui/badge";
-
-const DEMO_SHIPPER_ID = "demo_shipper_1";
 
 function resolveEpodUrl(url?: string | null) {
   if (!url) return null;
@@ -19,15 +19,21 @@ export default function MyLoadsTab() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const navigate = useNavigate();
+  const shipperId = storage.get<string | null>(STORAGE_KEYS.USER_ID, null);
 
   useEffect(() => {
     let cancelled = false;
 
     async function loadData() {
+      if (!shipperId) {
+        setError("Please log in as a shipper to view your loads.");
+        setLoading(false);
+        return;
+      }
       try {
         setLoading(true);
         setError(null);
-        const data = await fetchLoadsForShipper(DEMO_SHIPPER_ID);
+        const data = await fetchLoadsForShipper(shipperId);
         if (!cancelled) {
           setLoads(data);
         }
@@ -47,7 +53,7 @@ export default function MyLoadsTab() {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [shipperId]);
 
   if (loading) {
     return (
@@ -114,7 +120,7 @@ export default function MyLoadsTab() {
                 </td>
                 <td className="px-4 py-2">
                   <Badge className="capitalize">
-                    {load.status?.replace(/_/g, " ") ?? "open"}
+                    {formatLoadStatusLabel(load.status)}
                   </Badge>
                 </td>
                 <td className="px-4 py-2 text-gray-700">

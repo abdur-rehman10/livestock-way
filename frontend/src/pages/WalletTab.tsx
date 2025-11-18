@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useState } from "react";
 import { useLocation } from "react-router-dom";
 import { fetchPaymentsForUser } from "../lib/api";
 import type { Payment } from "../lib/types";
+import { storage, STORAGE_KEYS } from "../lib/storage";
 
 type UserRole = "shipper" | "hauler" | "driver" | "stakeholder";
 
@@ -12,27 +13,14 @@ function detectRoleFromPath(pathname: string): UserRole {
   return "stakeholder";
 }
 
-function getDemoUserId(role: UserRole): string {
-  switch (role) {
-    case "shipper":
-      return "demo_shipper_1";
-    case "hauler":
-      return "demo_hauler_1";
-    case "driver":
-      return "demo_driver_1";
-    case "stakeholder":
-    default:
-      return "demo_stakeholder_1";
-  }
-}
-
 export default function WalletTab() {
   const location = useLocation();
   const role = useMemo(
     () => detectRoleFromPath(location.pathname),
     [location.pathname]
   );
-  const userId = useMemo(() => getDemoUserId(role), [role]);
+  const storedUserId = storage.get<string | null>(STORAGE_KEYS.USER_ID, null);
+  const userId = useMemo(() => storedUserId, [storedUserId]);
 
   const [payments, setPayments] = useState<Payment[]>([]);
   const [loading, setLoading] = useState(true);
@@ -40,6 +28,11 @@ export default function WalletTab() {
 
   useEffect(() => {
     async function load() {
+      if (!userId) {
+        setError("Please log in to view wallet information.");
+        setLoading(false);
+        return;
+      }
       try {
         setLoading(true);
         setError(null);
@@ -60,10 +53,10 @@ export default function WalletTab() {
     let debited = 0;
 
     for (const p of payments) {
-      if (p.payee_id === userId && p.payee_role === role) {
+      if (userId && p.payee_id === userId && p.payee_role === role) {
         credited += Number(p.amount || 0);
       }
-      if (p.payer_id === userId && p.payer_role === role) {
+      if (userId && p.payer_id === userId && p.payer_role === role) {
         debited += Number(p.amount || 0);
       }
     }
@@ -106,8 +99,8 @@ export default function WalletTab() {
             Wallet & Payments
           </h1>
           <p className="text-[11px] text-gray-500">
-            Role: <span className="font-medium capitalize">{role}</span> · User ID:{" "}
-            <span className="font-mono text-gray-700">{userId}</span>
+          Role: <span className="font-medium capitalize">{role}</span> · User ID:{" "}
+          <span className="font-mono text-gray-700">{userId ?? "n/a"}</span>
           </p>
         </div>
       </div>

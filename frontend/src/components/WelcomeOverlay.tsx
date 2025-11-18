@@ -123,10 +123,6 @@ export function WelcomeOverlay({ onClose, onStartPrototype, onViewShowcase }: We
                 <span className="text-[#29CA8D] mt-0.5">•</span>
                 <span><strong>Toggle Modes:</strong> Use buttons in top-right corner</span>
               </li>
-              <li className="flex items-start gap-2">
-                <span className="text-[#29CA8D] mt-0.5">•</span>
-                <span><strong>Reset Demo:</strong> Click "Reset Demo" to restart</span>
-              </li>
             </ul>
           </div>
 

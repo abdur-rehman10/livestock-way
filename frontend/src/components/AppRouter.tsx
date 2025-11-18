@@ -116,6 +116,7 @@ export function AppRouter({ showKeyboardShortcuts, onKeyboardShortcutsToggle }: 
     setNeedsOnboarding(false);
     storage.remove(STORAGE_KEYS.USER_ROLE);
     storage.remove(STORAGE_KEYS.USER_EMAIL);
+    storage.remove(STORAGE_KEYS.USER_ID);
     storage.remove('pendingRole');
     toast.success('Logged out successfully');
     

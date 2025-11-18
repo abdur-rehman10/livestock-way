@@ -7,7 +7,6 @@ import {
   startLoad,
   completeLoad,
 } from "../controllers/loadController";
-import tripExpenseRoutes from "./tripExpenseRoutes";
 import tripMessageRoutes from "./tripMessageRoutes";
 import authRequired from "../middlewares/auth";
 
@@ -29,7 +28,6 @@ router.post("/:id/start", startLoad);
 // POST /api/loads/:id/complete
 router.post("/:id/complete", completeLoad);
 
-router.use("/:id/expenses", tripExpenseRoutes);
 router.use("/:id/messages", tripMessageRoutes);
 
 export default router;

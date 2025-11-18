@@ -10,6 +10,26 @@ const paymentsService_1 = require("../services/paymentsService");
 const router = (0, express_1.Router)();
 // GET /api/payments?user_id=...&role=shipper|hauler
 router.get("/", paymentController_1.getPaymentsForUser);
+// GET /api/payments/by-trip/:tripId
+router.get("/by-trip/:tripId", auth_1.default, async (req, res) => {
+    const tripId = Number(req.params.tripId);
+    if (Number.isNaN(tripId)) {
+        return res.status(400).json({ error: "Invalid trip id" });
+    }
+    try {
+        const payment = await (0, paymentsService_1.getPaymentByTripId)(tripId);
+        if (!payment) {
+            return res
+                .status(404)
+                .json({ error: "No payment found for this trip" });
+        }
+        res.json(payment);
+    }
+    catch (error) {
+        console.error("GET /api/payments/by-trip/:tripId error", error);
+        res.status(500).json({ error: "Internal server error" });
+    }
+});
 // GET /api/payments/:id
 router.get("/:id", auth_1.default, async (req, res) => {
     const paymentId = Number(req.params.id);

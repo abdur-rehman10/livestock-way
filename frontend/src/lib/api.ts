@@ -1,4 +1,10 @@
-import type { Payment, SupportTicket, TripExpense, TripMessage } from "./types";
+import type {
+  Payment,
+  SupportTicket,
+  TripExpense,
+  TripMessage,
+  TripRecord,
+} from "./types";
 
 export const API_BASE_URL =
   import.meta.env.VITE_API_URL || "http://localhost:4000";
@@ -43,10 +49,20 @@ export async function fetchLoads(): Promise<Load[]> {
   return json.data as Load[];
 }
 
+function getAuthHeaders(headers: Record<string, string> = {}) {
+  if (typeof window === "undefined") return headers;
+  const token = window.localStorage.getItem("token");
+  if (!token) return headers;
+  return {
+    ...headers,
+    Authorization: `Bearer ${token}`,
+  };
+}
+
 export async function createLoad(payload: CreateLoadPayload): Promise<Load> {
   const response = await fetch(`${API_BASE_URL}/api/loads`, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: getAuthHeaders({ "Content-Type": "application/json" }),
     body: JSON.stringify(payload),
   });
   if (!response.ok) {
@@ -239,9 +255,9 @@ export async function createSupportTicket(
 }
 
 export async function fetchTripExpenses(
-  loadId: number
+  tripId: number
 ): Promise<TripExpense[]> {
-  const response = await fetch(`${API_BASE_URL}/api/loads/${loadId}/expenses`);
+  const response = await fetch(`${API_BASE_URL}/api/trips/${tripId}/expenses`);
   if (!response.ok) {
     throw new Error(
       `Failed to fetch trip expenses (status ${response.status})`
@@ -251,19 +267,20 @@ export async function fetchTripExpenses(
 }
 
 interface CreateTripExpensePayload {
-  user_id: string;
-  user_role: "hauler" | "driver";
-  type: "fuel" | "toll" | "washout" | "feed" | "repair" | "other";
+  driver_id?: number | null;
+  expense_type: string;
   amount: number;
   currency?: string;
-  note?: string;
+  description?: string | null;
+  receipt_photo_url?: string | null;
+  incurred_at?: string | null;
 }
 
 export async function createTripExpense(
-  loadId: number,
+  tripId: number,
   payload: CreateTripExpensePayload
 ): Promise<TripExpense> {
-  const response = await fetch(`${API_BASE_URL}/api/loads/${loadId}/expenses`, {
+  const response = await fetch(`${API_BASE_URL}/api/trips/${tripId}/expenses`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(payload),
@@ -313,19 +330,21 @@ export async function createTripMessage(
 }
 
 interface UpdateTripExpensePayload {
-  type?: "fuel" | "toll" | "washout" | "feed" | "repair" | "other";
+  expense_type?: string;
   amount?: number;
   currency?: string;
-  note?: string | null;
+  description?: string | null;
+  receipt_photo_url?: string | null;
+  incurred_at?: string | null;
 }
 
 export async function updateTripExpense(
-  loadId: number,
+  tripId: number,
   expenseId: number,
   payload: UpdateTripExpensePayload
 ): Promise<TripExpense> {
   const response = await fetch(
-    `${API_BASE_URL}/api/loads/${loadId}/expenses/${expenseId}`,
+    `${API_BASE_URL}/api/trips/${tripId}/expenses/${expenseId}`,
     {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
@@ -342,11 +361,11 @@ export async function updateTripExpense(
 }
 
 export async function deleteTripExpense(
-  loadId: number,
+  tripId: number,
   expenseId: number
 ): Promise<void> {
   const response = await fetch(
-    `${API_BASE_URL}/api/loads/${loadId}/expenses/${expenseId}`,
+    `${API_BASE_URL}/api/trips/${tripId}/expenses/${expenseId}`,
     {
       method: "DELETE",
     }
@@ -357,4 +376,17 @@ export async function deleteTripExpense(
       `Failed to delete trip expense (${response.status}): ${text || ""}`
     );
   }
+}
+
+export async function fetchTripByLoadId(
+  loadId: number
+): Promise<TripRecord | null> {
+  const url = new URL(`${API_BASE_URL}/api/trips`);
+  url.searchParams.set("load_id", String(loadId));
+  const response = await fetch(url.toString());
+  if (!response.ok) {
+    throw new Error(`Failed to fetch trip for load (${response.status})`);
+  }
+  const trips = (await response.json()) as TripRecord[];
+  return trips[0] || null;
 }

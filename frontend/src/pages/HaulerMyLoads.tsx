@@ -8,6 +8,8 @@ import {
   completeLoad,
   uploadEpod,
 } from "../lib/api";
+import { storage, STORAGE_KEYS } from "../lib/storage";
+import { normalizeLoadStatus } from "../lib/status";
 import { Card, CardContent } from "../components/ui/card";
 import { Button } from "../components/ui/button";
 import { Badge } from "../components/ui/badge";
@@ -44,7 +46,6 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 
-const CURRENT_HAULER_ID = "demo_hauler_1";
 const FILTERS = ["all", "assigned", "in_transit", "delivered", "pending"] as const;
 type FilterOption = (typeof FILTERS)[number];
 
@@ -67,14 +68,6 @@ const badgeStyles: Record<LoadStatus, string> = {
   in_transit: "bg-[#29CA8D]/10 text-[#29CA8D] border border-[#29CA8D]/30",
   delivered: "bg-slate-100 text-slate-700 border border-slate-200",
 };
-
-function normalizeStatus(status?: string | null): LoadStatus {
-  const normalized = (status ?? "open").toString().trim().toLowerCase();
-  if (normalized === "assigned" || normalized === "in_transit" || normalized === "delivered") {
-    return normalized as LoadStatus;
-  }
-  return "open";
-}
 
 function formatDateTime(value?: string | null) {
   return value ? new Date(value).toLocaleString() : "—";
@@ -112,11 +105,17 @@ export default function HaulerMyLoads() {
   });
   const dialogLoad = detailsDialog.load;
   const navigate = useNavigate();
+  const haulerId = storage.get<string | null>(STORAGE_KEYS.USER_ID, null);
 
   async function refresh() {
+    if (!haulerId) {
+      setError("Please log in as a hauler to view loads.");
+      setLoading(false);
+      return;
+    }
     try {
       setLoading(true);
-      const data = await fetchLoadsByAssigned(CURRENT_HAULER_ID);
+      const data = await fetchLoadsByAssigned(haulerId);
       setLoads(data);
       setError(null);
     } catch (err: any) {
@@ -128,14 +127,14 @@ export default function HaulerMyLoads() {
 
   useEffect(() => {
     refresh();
-  }, []);
+  }, [haulerId]);
 
   const filteredLoads = useMemo(() => {
     if (filter === "all") return loads;
     if (filter === "pending") {
-      return loads.filter((load) => normalizeStatus(load.status) === "open");
+      return loads.filter((load) => normalizeLoadStatus(load.status) === "open");
     }
-    return loads.filter((load) => normalizeStatus(load.status) === filter);
+    return loads.filter((load) => normalizeLoadStatus(load.status) === filter);
   }, [filter, loads]);
 
   const openConfirm = (type: "start" | "deliver", load: Load) => {
@@ -227,17 +226,6 @@ export default function HaulerMyLoads() {
               </p>
             </div>
           </div>
-          <Button
-            variant="ghost"
-            className="text-sm font-semibold text-rose-500 hover:text-rose-600 hover:bg-rose-50"
-            onClick={() => {
-              setFilter("all");
-              refresh();
-              toast.success("Demo refreshed");
-            }}
-          >
-            Reset Demo
-          </Button>
         </div>
         <div className="mt-4 flex flex-wrap items-center gap-2">
           {FILTERS.map((option) => {
@@ -283,7 +271,7 @@ export default function HaulerMyLoads() {
           </div>
         ) : (
           filteredLoads.map((load) => {
-            const status = normalizeStatus(load.status);
+            const status = normalizeLoadStatus(load.status);
             const pickupTime = formatDateTime(load.pickup_date);
             const assignedTime = formatDateTime(load.assigned_at);
             const startedTime = formatDateTime(load.started_at);
@@ -459,13 +447,13 @@ export default function HaulerMyLoads() {
             <DialogTitle className="flex items-center justify-between">
               <span>Load Details</span>
               {dialogLoad && (
-                <Badge className={`rounded-full px-4 py-1 text-xs font-semibold ${badgeStyles[normalizeStatus(dialogLoad.status)]}`}>
-                  {normalizeStatus(dialogLoad.status) === "in_transit"
+                <Badge className={`rounded-full px-4 py-1 text-xs font-semibold ${badgeStyles[normalizeLoadStatus(dialogLoad.status)]}`}>
+                  {normalizeLoadStatus(dialogLoad.status) === "in_transit"
                     ? "In Transit"
-                    : normalizeStatus(dialogLoad.status) === "open"
+                    : normalizeLoadStatus(dialogLoad.status) === "open"
                       ? "Pending"
-                      : normalizeStatus(dialogLoad.status).charAt(0).toUpperCase() +
-                        normalizeStatus(dialogLoad.status).slice(1)}
+                      : normalizeLoadStatus(dialogLoad.status).charAt(0).toUpperCase() +
+                        normalizeLoadStatus(dialogLoad.status).slice(1)}
                 </Badge>
               )}
             </DialogTitle>
@@ -592,7 +580,7 @@ export default function HaulerMyLoads() {
               </section>
 
               <section className="flex flex-wrap gap-2 pt-2">
-                {normalizeStatus(dialogLoad.status) === "assigned" && (
+                {normalizeLoadStatus(dialogLoad.status) === "assigned" && (
                   <Button
                     className="flex-1 rounded-full bg-[#29CA8D] text-white hover:bg-[#24b67d]"
                     onClick={() => {
@@ -604,7 +592,7 @@ export default function HaulerMyLoads() {
                     Start Trip
                   </Button>
                 )}
-                {normalizeStatus(dialogLoad.status) === "in_transit" && (
+                {normalizeLoadStatus(dialogLoad.status) === "in_transit" && (
                   <Button
                     className="flex-1 rounded-full bg-[#29CA8D] text-white hover:bg-[#24b67d]"
                     onClick={() => {
@@ -616,7 +604,7 @@ export default function HaulerMyLoads() {
                     Mark as Delivered
                   </Button>
                 )}
-                {normalizeStatus(dialogLoad.status) === "delivered" && resolveEpodUrl(dialogLoad.epod_url) && (
+                {normalizeLoadStatus(dialogLoad.status) === "delivered" && resolveEpodUrl(dialogLoad.epod_url) && (
                   <Button
                     className="flex-1 rounded-full bg-[#29CA8D] text-white hover:bg-[#24b67d]"
                     onClick={() =>

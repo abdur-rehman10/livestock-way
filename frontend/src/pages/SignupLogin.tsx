@@ -9,6 +9,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '.
 import { Switch } from '../components/ui/switch';
 import { Truck, Home, Wrench, Eye, EyeOff, Check, X, User, Shield, ArrowLeft } from 'lucide-react';
 import { Progress } from '../components/ui/progress';
+import { storage, STORAGE_KEYS } from '../lib/storage';
 
 interface SignupLoginProps {
   preselectedRole?: 'hauler' | 'shipper' | 'stakeholder' | 'driver' | 'super-admin';
@@ -127,6 +128,7 @@ export default function SignupLogin({ preselectedRole, onAuth, onForgotPassword,
       const data = await res.json();
       const token: string = data?.token;
       const userRole: string = data?.user?.user_type;
+      const userId: string | number | undefined = data?.user?.id;
 
       if (!token || !userRole) {
         throw new Error('Invalid response from server');
@@ -134,6 +136,9 @@ export default function SignupLogin({ preselectedRole, onAuth, onForgotPassword,
 
       localStorage.setItem('token', token);
       localStorage.setItem('role', userRole);
+      if (userId !== undefined && userId !== null) {
+        storage.set(STORAGE_KEYS.USER_ID, String(userId));
+      }
 
       navigateToRole(userRole);
     } catch (err: any) {
@@ -190,6 +195,7 @@ export default function SignupLogin({ preselectedRole, onAuth, onForgotPassword,
       const data = await res.json();
       const token: string = data?.token;
       const userRole: string = data?.user?.user_type;
+      const userId: string | number | undefined = data?.user?.id;
 
       if (!token || !userRole) {
         throw new Error('Invalid response from server');
@@ -197,6 +203,9 @@ export default function SignupLogin({ preselectedRole, onAuth, onForgotPassword,
 
       localStorage.setItem('token', token);
       localStorage.setItem('role', userRole);
+      if (userId !== undefined && userId !== null) {
+        storage.set(STORAGE_KEYS.USER_ID, String(userId));
+      }
 
       navigateToRole(userRole);
     } catch (err: any) {

@@ -6,6 +6,7 @@ import {
 } from "../lib/api";
 import type { SupportTicket } from "../lib/types";
 import { Button } from "../components/ui/button";
+import { storage, STORAGE_KEYS } from "../lib/storage";
 
 type UserRole = "shipper" | "hauler" | "driver" | "stakeholder";
 
@@ -14,20 +15,6 @@ function detectRoleFromPath(pathname: string): UserRole {
   if (pathname.startsWith("/shipper")) return "shipper";
   if (pathname.startsWith("/driver")) return "driver";
   return "stakeholder";
-}
-
-function getDemoUserId(role: UserRole): string {
-  switch (role) {
-    case "shipper":
-      return "demo_shipper_1";
-    case "hauler":
-      return "demo_hauler_1";
-    case "driver":
-      return "demo_driver_1";
-    case "stakeholder":
-    default:
-      return "demo_stakeholder_1";
-  }
 }
 
 const PRIORITY_OPTIONS: Array<"low" | "normal" | "high" | "urgent"> = [
@@ -50,7 +37,8 @@ export default function SupportTab() {
     () => detectRoleFromPath(location.pathname),
     [location.pathname]
   );
-  const userId = useMemo(() => getDemoUserId(role), [role]);
+  const storedUserId = storage.get<string | null>(STORAGE_KEYS.USER_ID, null);
+  const userId = storedUserId;
 
   const [tickets, setTickets] = useState<SupportTicket[]>([]);
   const [loading, setLoading] = useState(true);
@@ -66,6 +54,11 @@ export default function SupportTab() {
 
   useEffect(() => {
     async function load() {
+      if (!userId) {
+        setError("Please log in to submit support tickets.");
+        setLoading(false);
+        return;
+      }
       try {
         setLoading(true);
         setError(null);
@@ -85,6 +78,11 @@ export default function SupportTab() {
     e.preventDefault();
     if (!subject.trim() || !message.trim()) {
       setSubmitError("Please fill subject and message.");
+      return;
+    }
+
+    if (!userId) {
+      setSubmitError("You must be logged in to submit a ticket.");
       return;
     }
 
@@ -145,7 +143,7 @@ export default function SupportTab() {
         </h1>
         <p className="text-[11px] text-gray-500">
           Role: <span className="font-medium capitalize">{role}</span> · User ID:{" "}
-          <span className="font-mono text-gray-700">{userId}</span>
+          <span className="font-mono text-gray-700">{userId ?? "n/a"}</span>
         </p>
       </div>
 

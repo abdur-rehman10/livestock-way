@@ -1,6 +1,7 @@
 import { Request, Response } from "express";
 import { pool } from "../config/database";
 import { ensureShipperProfile } from "../utils/profileHelpers";
+import { createPaymentForTrip } from "../services/paymentsService";
 
 const DEFAULT_SHIPPER_ID = "demo_shipper_1";
 const DEFAULT_SHIPPER_ROLE = "shipper";
@@ -12,10 +13,45 @@ type AuthenticatedRequest = Request & {
   };
 };
 
+function buildSimpleRestPlan(distanceKm?: number | null) {
+  const numericDistance =
+    typeof distanceKm === "number" && !Number.isNaN(distanceKm)
+      ? distanceKm
+      : null;
+
+  if (!numericDistance || numericDistance <= 0) {
+    return {
+      total_distance_km: numericDistance,
+      stops: [],
+    };
+  }
+
+  const stopInterval = 400;
+  const stops: Array<{ stop_number: number; at_distance_km: number; notes: string }> = [];
+
+  let covered = stopInterval;
+  let stopNumber = 1;
+
+  while (covered < numericDistance) {
+    stops.push({
+      stop_number: stopNumber,
+      at_distance_km: covered,
+      notes: "Mandatory animal welfare rest stop (auto-planned)",
+    });
+    covered += stopInterval;
+    stopNumber += 1;
+  }
+
+  return {
+    total_distance_km: numericDistance,
+    stops,
+  };
+}
+
 // GET /api/loads
 export async function getLoads(req: Request, res: Response) {
   try {
-    const { status, created_by } = req.query;
+    const { status, created_by, assigned_to } = req.query;
 
     let shipperFilter: number | null = null;
     if (created_by) {
@@ -28,6 +64,18 @@ export async function getLoads(req: Request, res: Response) {
       } else {
         return res.json({ status: "OK", data: [] });
       }
+    }
+
+    let assignedFilter: number | null = null;
+    if (assigned_to) {
+      const parsed = Number(assigned_to);
+      if (!parsed || Number.isNaN(parsed)) {
+        return res.status(400).json({
+          status: "ERROR",
+          message: "assigned_to must be a numeric user id",
+        });
+      }
+      assignedFilter = parsed;
     }
 
     let sql = `
@@ -43,7 +91,12 @@ export async function getLoads(req: Request, res: Response) {
         price_offer_amount AS offer_price,
         status,
         notes AS description,
-        created_at
+        created_at,
+        assigned_to_user_id AS assigned_to,
+        assigned_at,
+        started_at,
+        completed_at,
+        epod_url
       FROM loads
       WHERE is_deleted = FALSE
     `;
@@ -54,13 +107,18 @@ export async function getLoads(req: Request, res: Response) {
     if (status) {
       sql += ` AND status = $${index++}`;
       params.push(status);
-    } else if (!shipperFilter) {
+    } else if (!shipperFilter && !assignedFilter) {
       sql += ` AND status = 'posted'`;
     }
 
     if (shipperFilter) {
       sql += ` AND shipper_id = $${index++}`;
       params.push(shipperFilter);
+    }
+
+    if (assignedFilter) {
+      sql += ` AND assigned_to_user_id = $${index++}`;
+      params.push(assignedFilter);
     }
 
     sql += ` ORDER BY created_at DESC LIMIT 100`;
@@ -239,11 +297,10 @@ export async function createLoad(req: Request, res: Response) {
 
 // POST /api/loads/:id/assign
 export async function assignLoad(req: Request, res: Response) {
+  const client = await pool.connect();
   try {
     const { id } = req.params;
     const { assigned_to } = req.body;
-
-    console.debug("ASSIGN_LOAD: id=", id, "assigned_to=", assigned_to);
 
     if (!id) {
       return res.status(400).json({
@@ -259,51 +316,315 @@ export async function assignLoad(req: Request, res: Response) {
       });
     }
 
-    const updateQuery = `
-      UPDATE loads
-      SET
-        assigned_to = $1,
-        assigned_at = NOW(),
-        status = 'assigned'
-      WHERE id = $2 AND status = 'open'
-      RETURNING
-        id,
-        title,
-        species,
-        quantity,
-        pickup_location,
-        dropoff_location,
-        pickup_date,
-        offer_price,
-        status,
-        created_by,
-        created_at,
-        assigned_to,
-        assigned_at
-    `;
+    const loadId = Number(id);
+    const assignedUserId = Number(assigned_to);
 
-    const values = [assigned_to, id];
-    const result = await pool.query(updateQuery, values);
-
-    console.debug("ASSIGN_LOAD result rows:", result.rows.length);
-
-    if (result.rows.length === 0) {
-      return res.status(404).json({
+    if (!loadId || Number.isNaN(loadId)) {
+      return res.status(400).json({
         status: "ERROR",
-        message: "Load not found or not open",
+        message: "Load ID must be numeric",
       });
     }
 
+    if (!assignedUserId || Number.isNaN(assignedUserId)) {
+      return res.status(400).json({
+        status: "ERROR",
+        message: "assigned_to must be a numeric user id",
+      });
+    }
+
+    await client.query("BEGIN");
+
+    const loadResult = await client.query(
+      `
+      SELECT
+        id,
+        title,
+        species,
+        animal_count,
+        pickup_location_text,
+        dropoff_location_text,
+        pickup_window_start,
+        price_offer_amount,
+        status,
+        shipper_id,
+        created_at,
+        assigned_at,
+        started_at,
+        completed_at,
+        price_currency,
+        pickup_window_end,
+        distance_km,
+        assigned_to_user_id
+      FROM loads
+      WHERE id = $1
+      FOR UPDATE
+    `,
+      [loadId]
+    );
+
+    if (loadResult.rowCount === 0) {
+      await client.query("ROLLBACK");
+      return res.status(404).json({
+        status: "ERROR",
+        message: "Load not found",
+      });
+    }
+
+    const loadRow = loadResult.rows[0];
+
+    const shipperUserResult = await client.query(
+      "SELECT user_id FROM shippers WHERE id = $1",
+      [loadRow.shipper_id]
+    );
+    const shipperUserId = shipperUserResult.rowCount
+      ? Number(shipperUserResult.rows[0].user_id)
+      : null;
+
+    const isAlreadyAssignedToSameHauler =
+      loadRow.status === "matched" &&
+      loadRow.assigned_to_user_id &&
+      Number(loadRow.assigned_to_user_id) === assignedUserId;
+
+    if (loadRow.status !== "posted" && !isAlreadyAssignedToSameHauler) {
+      await client.query("ROLLBACK");
+      return res.status(409).json({
+        status: "ERROR",
+        message: "Load is not open for assignment",
+      });
+    }
+
+    const haulerResult = await client.query(
+      "SELECT id, user_id FROM haulers WHERE user_id = $1",
+      [assignedUserId]
+    );
+
+    if (haulerResult.rowCount === 0) {
+      await client.query("ROLLBACK");
+      return res.status(400).json({
+        status: "ERROR",
+        message: "Hauler profile not found for this user",
+      });
+    }
+
+    const haulerProfileId = Number(haulerResult.rows[0].id);
+
+    const existingTripResult = await client.query(
+      `
+      SELECT
+        id,
+        load_id,
+        hauler_id,
+        truck_id,
+        driver_id,
+        status,
+        planned_start_time,
+        planned_end_time,
+        route_distance_km,
+        rest_stop_plan_json,
+        created_at,
+        updated_at
+      FROM trips
+      WHERE load_id = $1
+      LIMIT 1
+    `,
+      [loadId]
+    );
+
+    let tripRecord = existingTripResult.rowCount
+      ? existingTripResult.rows[0]
+      : null;
+    let paymentRecord: any = null;
+
+    let selectedTruckId: number | null = null;
+    let selectedDriverId: number | null = null;
+
+    if (!tripRecord) {
+      const truckResult = await client.query(
+        `
+        SELECT id
+        FROM trucks
+        WHERE hauler_id = $1
+        ORDER BY updated_at DESC
+        LIMIT 1
+      `,
+        [haulerProfileId]
+      );
+
+      if (truckResult.rowCount === 0) {
+        await client.query("ROLLBACK");
+        return res.status(409).json({
+          status: "ERROR",
+          message: "Add a truck to your hauler profile before accepting loads.",
+        });
+      }
+
+      const driverResult = await client.query(
+        `
+        SELECT id
+        FROM drivers
+        WHERE hauler_id = $1
+        ORDER BY updated_at DESC
+        LIMIT 1
+      `,
+        [haulerProfileId]
+      );
+
+      if (driverResult.rowCount === 0) {
+        await client.query("ROLLBACK");
+        return res.status(409).json({
+          status: "ERROR",
+          message: "Add a driver to your hauler profile before accepting loads.",
+        });
+      }
+
+      selectedTruckId = Number(truckResult.rows[0].id);
+      selectedDriverId = Number(driverResult.rows[0].id);
+    }
+
+    if (!isAlreadyAssignedToSameHauler) {
+      const updateResult = await client.query(
+        `
+        UPDATE loads
+        SET
+          assigned_to_user_id = $1,
+          assigned_at = NOW(),
+          status = 'matched'
+        WHERE id = $2 AND status = 'posted'
+      `,
+        [assignedUserId, loadId]
+      );
+
+      if (updateResult.rowCount === 0) {
+        await client.query("ROLLBACK");
+        return res.status(404).json({
+          status: "ERROR",
+          message: "Load not found or already assigned",
+        });
+      }
+    }
+
+    const finalLoadResult = await client.query(
+      `
+      SELECT
+        id,
+        title,
+        species,
+        animal_count,
+        pickup_location_text,
+        dropoff_location_text,
+        pickup_window_start,
+        price_offer_amount,
+        status,
+        shipper_id,
+        created_at,
+        assigned_at,
+        started_at,
+        completed_at
+      FROM loads
+      WHERE id = $1
+    `,
+      [loadId]
+    );
+
+    const updatedLoad = finalLoadResult.rows[0];
+
+    if (!tripRecord) {
+      const plannedStart =
+        loadRow.pickup_window_start || new Date().toISOString();
+      const plannedEnd = loadRow.pickup_window_end || null;
+      const distanceValue =
+        loadRow.distance_km === null || loadRow.distance_km === undefined
+          ? null
+          : Number(loadRow.distance_km);
+
+      const tripInsert = await client.query(
+        `
+        INSERT INTO trips (
+          load_id,
+          hauler_id,
+          truck_id,
+          driver_id,
+          status,
+          planned_start_time,
+          planned_end_time,
+          route_distance_km,
+          rest_stop_plan_json,
+          created_at,
+          updated_at
+        )
+        VALUES (
+          $1,$2,$3,$4,
+          'planned',
+          $5,$6,$7,$8::jsonb,
+          NOW(),NOW()
+        )
+        RETURNING
+          id,
+          load_id,
+          hauler_id,
+          truck_id,
+          driver_id,
+          status,
+          planned_start_time,
+          planned_end_time,
+          route_distance_km,
+          rest_stop_plan_json,
+          created_at,
+          updated_at
+      `,
+        [
+          loadId,
+          haulerProfileId,
+          selectedTruckId,
+          selectedDriverId,
+          plannedStart,
+          plannedEnd,
+          distanceValue,
+          JSON.stringify(buildSimpleRestPlan(distanceValue)),
+        ]
+      );
+
+      tripRecord = tripInsert.rows[0];
+
+      const priceOffer = loadRow.price_offer_amount
+        ? Number(loadRow.price_offer_amount)
+        : null;
+      if (
+        priceOffer &&
+        priceOffer > 0 &&
+        shipperUserId &&
+        assignedUserId
+      ) {
+        paymentRecord = await createPaymentForTrip({
+          tripId: Number(tripRecord.id),
+          loadId,
+          shipperUserId,
+          haulerUserId: assignedUserId,
+          amount: priceOffer,
+          currency: (loadRow.price_currency || "USD").trim(),
+          client,
+        });
+      }
+    }
+
+    await client.query("COMMIT");
+
     return res.status(200).json({
       status: "OK",
-      data: result.rows[0],
+      data: updatedLoad,
+      trip: tripRecord,
+      payment: paymentRecord,
     });
   } catch (error) {
+    await client.query("ROLLBACK");
     console.error("Error assigning load:", error);
     return res.status(500).json({
       status: "ERROR",
       message: "Failed to assign load",
     });
+  } finally {
+    client.release();
   }
 }
 
@@ -324,20 +645,20 @@ export async function startLoad(req: Request, res: Response) {
       UPDATE loads
       SET status = 'in_transit',
           started_at = NOW()
-      WHERE id = $1 AND status = 'assigned'
+      WHERE id = $1 AND status = 'matched'
       RETURNING
         id,
         title,
         species,
-        quantity,
-        pickup_location,
-        dropoff_location,
-        pickup_date,
-        offer_price,
+        animal_count AS quantity,
+        pickup_location_text AS pickup_location,
+        dropoff_location_text AS dropoff_location,
+        pickup_window_start AS pickup_date,
+        price_offer_amount AS offer_price,
         status,
-        created_by,
+        shipper_id AS created_by,
         created_at,
-        assigned_to,
+        assigned_to_user_id AS assigned_to,
         assigned_at,
         started_at,
         completed_at,
@@ -379,7 +700,7 @@ export async function completeLoad(req: Request, res: Response) {
     const result = await pool.query(
       `
       UPDATE loads
-      SET status = 'delivered',
+      SET status = 'completed',
           completed_at = NOW(),
           epod_url = COALESCE($2, epod_url)
       WHERE id = $1 AND status = 'in_transit'
@@ -387,15 +708,15 @@ export async function completeLoad(req: Request, res: Response) {
         id,
         title,
         species,
-        quantity,
-        pickup_location,
-        dropoff_location,
-        pickup_date,
-        offer_price,
+        animal_count AS quantity,
+        pickup_location_text AS pickup_location,
+        dropoff_location_text AS dropoff_location,
+        pickup_window_start AS pickup_date,
+        price_offer_amount AS offer_price,
         status,
-        created_by,
+        shipper_id,
         created_at,
-        assigned_to,
+        assigned_to_user_id AS assigned_to,
         assigned_at,
         started_at,
         completed_at,
@@ -412,33 +733,6 @@ export async function completeLoad(req: Request, res: Response) {
     }
 
     const load = result.rows[0];
-
-    const payerId = load.created_by || DEFAULT_SHIPPER_ID;
-    const payerRole = load.created_role || DEFAULT_SHIPPER_ROLE;
-    const payeeId = load.assigned_to || "demo_hauler_1";
-    const payeeRole = "hauler";
-    const amount =
-      typeof load.offer_price === "number"
-        ? load.offer_price
-        : Number(load.offer_price) || 100;
-
-    await pool.query(
-      `
-      INSERT INTO payments (
-        load_id,
-        payer_id,
-        payer_role,
-        payee_id,
-        payee_role,
-        amount,
-        currency,
-        status,
-        created_at,
-        released_at
-      ) VALUES ($1,$2,$3,$4,$5,$6,'USD','released',NOW(),NOW())
-      `,
-      [load.id, payerId, payerRole, payeeId, payeeRole, amount]
-    );
 
     return res.status(200).json({ status: "OK", data: load });
   } catch (error) {

@@ -8,9 +8,12 @@ import {
   createTripExpense,
   updateTripExpense,
   deleteTripExpense,
+  fetchTripByLoadId,
 } from "../lib/api";
-import type { TripExpense } from "../lib/types";
+import type { TripExpense, TripRecord } from "../lib/types";
+import { storage, STORAGE_KEYS } from "../lib/storage";
 import { Button } from "../components/ui/button";
+import { normalizeLoadStatus, formatLoadStatusLabel } from "../lib/status";
 
 
 const formatDateTime = (value?: string | null) => {
@@ -58,10 +61,14 @@ export function TripDetail() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const location = useLocation();
+  const currentUserId = storage.get<string | null>(STORAGE_KEYS.USER_ID, null);
 
   const [load, setLoad] = useState<LoadDetail | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [trip, setTrip] = useState<TripRecord | null>(null);
+  const [tripLoading, setTripLoading] = useState(true);
+  const [tripError, setTripError] = useState<string | null>(null);
   const [expenses, setExpenses] = useState<TripExpense[]>([]);
   const [expensesLoading, setExpensesLoading] = useState(true);
   const [expensesError, setExpensesError] = useState<string | null>(null);
@@ -87,6 +94,7 @@ export function TripDetail() {
   const [editSubmitting, setEditSubmitting] = useState(false);
   const [editError, setEditError] = useState<string | null>(null);
   const [deletingExpenseId, setDeletingExpenseId] = useState<number | null>(null);
+  const tripId = trip?.id ?? null;
 
   useEffect(() => {
     if (!id) {
@@ -126,28 +134,76 @@ export function TripDetail() {
 
     const loadId = load.id;
 
+    let cancelled = false;
+    async function loadTripRecord() {
+      try {
+        setTripLoading(true);
+        setTripError(null);
+        const tripRecord = await fetchTripByLoadId(loadId);
+        if (!cancelled) {
+          setTrip(tripRecord);
+        }
+      } catch (err: any) {
+        console.error("Error fetching trip for load", err);
+        if (!cancelled) {
+          setTripError(err?.message || "Trip not created yet.");
+          setTrip(null);
+        }
+      } finally {
+        if (!cancelled) {
+          setTripLoading(false);
+        }
+      }
+    }
+
+    loadTripRecord();
+    return () => {
+      cancelled = true;
+    };
+  }, [load?.id]);
+
+  useEffect(() => {
+    if (!tripId) {
+      setExpenses([]);
+      setExpensesLoading(false);
+      return;
+    }
+
+    let cancelled = false;
     async function loadExpenses() {
       try {
         setExpensesLoading(true);
         setExpensesError(null);
-        const data = await fetchTripExpenses(loadId);
-        setExpenses(data);
+        const data = await fetchTripExpenses(tripId);
+        if (!cancelled) {
+          setExpenses(data);
+        }
       } catch (err: any) {
         console.error("Error loading trip expenses", err);
-        setExpensesError(
-          err?.message || "Failed to load expenses for this trip."
-        );
+        if (!cancelled) {
+          setExpensesError(
+            err?.message || "Failed to load expenses for this trip."
+          );
+        }
       } finally {
-        setExpensesLoading(false);
+        if (!cancelled) {
+          setExpensesLoading(false);
+        }
       }
     }
 
     loadExpenses();
-  }, [load?.id]);
+    return () => {
+      cancelled = true;
+    };
+  }, [tripId]);
 
   const handleAddExpense = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!load?.id) return;
+    if (!tripId) {
+      setExpenseSubmitError("Trip has not been created yet.");
+      return;
+    }
 
     const amountNumber = Number(expenseAmount);
     if (Number.isNaN(amountNumber) || amountNumber <= 0) {
@@ -159,13 +215,22 @@ export function TripDetail() {
       setExpenseSubmitting(true);
       setExpenseSubmitError(null);
 
-      const newExpense = await createTripExpense(load.id, {
-        user_id: "demo_hauler_1",
-        user_role: "hauler",
-        type: expenseType,
+      if (!currentUserId) {
+        setExpenseSubmitError("Please log in to submit expenses.");
+        return;
+      }
+
+      const driverNumericId =
+        currentUserId && !Number.isNaN(Number(currentUserId))
+          ? Number(currentUserId)
+          : null;
+
+      const newExpense = await createTripExpense(tripId, {
+        driver_id: driverNumericId,
+        expense_type: expenseType.toUpperCase(),
         amount: amountNumber,
         currency: "USD",
-        note: expenseNote || undefined,
+        description: expenseNote || null,
       });
 
       setExpenses((prev) => [newExpense, ...prev]);
@@ -185,9 +250,9 @@ export function TripDetail() {
   const startEditingExpense = (expense: TripExpense) => {
     setEditingExpenseId(expense.id);
     setEditingExpenseFields({
-      type: normalizeExpenseType(expense.type),
+      type: normalizeExpenseType(expense.expense_type),
       amount: Number(expense.amount ?? 0).toString(),
-      note: expense.note ?? "",
+      note: expense.description ?? "",
       currency: expense.currency ?? "USD",
     });
     setEditError(null);
@@ -206,7 +271,7 @@ export function TripDetail() {
 
   const handleSaveExpenseEdit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!load?.id || editingExpenseId == null) return;
+    if (!tripId || editingExpenseId == null) return;
 
     const amountNumber = Number(editingExpenseFields.amount);
     if (Number.isNaN(amountNumber) || amountNumber <= 0) {
@@ -217,11 +282,11 @@ export function TripDetail() {
     try {
       setEditSubmitting(true);
       setEditError(null);
-      const updated = await updateTripExpense(load.id, editingExpenseId, {
-        type: editingExpenseFields.type,
+      const updated = await updateTripExpense(tripId, editingExpenseId, {
+        expense_type: editingExpenseFields.type.toUpperCase(),
         amount: amountNumber,
         currency: editingExpenseFields.currency || "USD",
-        note: editingExpenseFields.note ?? "",
+        description: editingExpenseFields.note ?? "",
       });
 
       setExpenses((prev) =>
@@ -237,14 +302,14 @@ export function TripDetail() {
   };
 
   const handleDeleteExpense = async (expenseId: number) => {
-    if (!load?.id) return;
+    if (!tripId) return;
     const confirmed = window.confirm("Remove this expense?");
     if (!confirmed) return;
 
     try {
       setDeletingExpenseId(expenseId);
       setExpensesError(null);
-      await deleteTripExpense(load.id, expenseId);
+      await deleteTripExpense(tripId, expenseId);
       setExpenses((prev) => prev.filter((exp) => exp.id !== expenseId));
       if (editingExpenseId === expenseId) {
         cancelEditingExpense();
@@ -289,8 +354,8 @@ export function TripDetail() {
     );
   }
 
-  const statusKey = (load.status || "open").toLowerCase();
-  const badgeLabel = statusLabel[statusKey] ?? load.status ?? "Unknown";
+  const statusKey = normalizeLoadStatus(load.status);
+  const badgeLabel = statusLabel[statusKey] ?? formatLoadStatusLabel(load.status);
   const badgeClass = statusColor[statusKey] ?? "bg-gray-100 text-gray-700";
   const roleSegment = location.pathname.split("/").filter(Boolean)[0] ?? "hauler";
   const trackingBase =
@@ -606,7 +671,7 @@ export function TripDetail() {
           <div className="flex justify-end">
             <Button
               type="submit"
-              disabled={expenseSubmitting || !load}
+            disabled={expenseSubmitting || !tripId}
               className="bg-[#29CA8D] hover:bg-[#24b67d] px-4 py-1.5 text-xs font-medium text-white disabled:opacity-60"
             >
               {expenseSubmitting ? "Saving…" : "Add expense"}
@@ -614,8 +679,19 @@ export function TripDetail() {
           </div>
         </form>
 
+        {!tripId && !tripLoading && (
+          <div className="text-[11px] text-gray-500">
+            Accept this load to create a trip before logging expenses.
+          </div>
+        )}
+
         <div className="border-t border-gray-100 pt-3">
-          {expensesLoading ? (
+          {!tripId ? (
+            <div className="text-[11px] text-gray-500">
+              Trip not created yet. Expenses will appear here once the trip
+              starts.
+            </div>
+          ) : expensesLoading ? (
             <div className="text-[11px] text-gray-500">Loading expenses…</div>
           ) : expensesError ? (
             <div className="text-[11px] text-red-600">{expensesError}</div>
@@ -723,21 +799,24 @@ export function TripDetail() {
                       <div className="flex flex-col gap-3 rounded-xl border border-gray-100 bg-white p-3 shadow-sm md:flex-row md:items-center md:justify-between">
                         <div className="space-y-1">
                           <div className="font-medium text-gray-900 capitalize">
-                            {exp.type} · {Number(exp.amount).toFixed(2)} {exp.currency}
+                            {normalizeExpenseType(exp.expense_type)} ·{" "}
+                            {Number(exp.amount).toFixed(2)} {exp.currency}
                           </div>
-                          {exp.note && (
-                            <div className="text-gray-700">{exp.note}</div>
+                          {exp.description && (
+                            <div className="text-gray-700">{exp.description}</div>
                           )}
                           <div className="text-[10px] text-gray-400">
                             {new Date(exp.created_at).toLocaleString()}
                           </div>
                         </div>
                         <div className="flex items-center gap-3 text-[10px]">
-                          <div className="text-gray-500 text-right">
-                            {exp.user_role}
-                            <br />
-                            <span className="font-mono">{exp.user_id}</span>
-                          </div>
+                          {exp.driver_id && (
+                            <div className="text-gray-500 text-right">
+                              Driver ID
+                              <br />
+                              <span className="font-mono">{exp.driver_id}</span>
+                            </div>
+                          )}
                           <div className="flex gap-2">
                             <Button
                               type="button"

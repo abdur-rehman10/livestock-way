@@ -72,6 +72,52 @@ function getTripIdParam(req) {
         return null;
     return parseId(raw);
 }
+const expenseColumnCandidates = [
+    "description",
+    "notes",
+    "receipt_photo_url",
+    "receipt_url",
+    "updated_at",
+];
+let cachedExpenseColumns = null;
+let expenseColumnProfilePromise = null;
+async function detectExpenseColumns() {
+    try {
+        const { rows } = await database_1.pool.query(`
+        SELECT column_name
+        FROM information_schema.columns
+        WHERE table_schema = 'public'
+          AND table_name = 'trip_expenses'
+          AND column_name = ANY($1)
+      `, [expenseColumnCandidates]);
+        const names = new Set(rows.map((row) => row.column_name));
+        return {
+            descriptionColumn: names.has("description") ? "description" : "notes",
+            receiptColumn: names.has("receipt_photo_url") ? "receipt_photo_url" : "receipt_url",
+            hasUpdatedAt: names.has("updated_at"),
+        };
+    }
+    catch (error) {
+        console.error("Failed to inspect trip_expenses schema:", error);
+        return {
+            descriptionColumn: "notes",
+            receiptColumn: "receipt_url",
+            hasUpdatedAt: false,
+        };
+    }
+}
+async function getExpenseColumnProfile() {
+    if (cachedExpenseColumns) {
+        return cachedExpenseColumns;
+    }
+    if (!expenseColumnProfilePromise) {
+        expenseColumnProfilePromise = detectExpenseColumns().then((profile) => {
+            cachedExpenseColumns = profile;
+            return profile;
+        });
+    }
+    return expenseColumnProfilePromise;
+}
 router.post("/", async (req, res) => {
     const client = await database_1.pool.connect();
     try {
@@ -559,10 +605,34 @@ router.post("/:id/expenses", async (req, res) => {
         if (Number.isNaN(amountNumber)) {
             return res.status(400).json({ message: "amount must be a number" });
         }
-        const driverIdValue = driver_id ? Number(driver_id) : null;
-        if (driver_id && Number.isNaN(driverIdValue)) {
-            return res.status(400).json({ message: "driver_id must be numeric" });
+        let driverIdValue = null;
+        if (driver_id !== undefined && driver_id !== null && driver_id !== "") {
+            const numericDriverId = Number(driver_id);
+            if (Number.isNaN(numericDriverId) || numericDriverId <= 0) {
+                return res.status(400).json({ message: "driver_id must be numeric" });
+            }
+            const driverExists = await database_1.pool.query("SELECT id FROM drivers WHERE id = $1", [numericDriverId]);
+            const driverCount = driverExists.rowCount ?? 0;
+            if (driverCount > 0) {
+                driverIdValue = numericDriverId;
+            }
+            else {
+                console.warn(`Skipping driver_id ${numericDriverId}: no matching driver profile`);
+            }
         }
+        const expenseTypeValue = String(expense_type).trim().toUpperCase();
+        if (!expenseTypeValue) {
+            return res.status(400).json({ message: "expense_type is required" });
+        }
+        const currencyValue = typeof currency === "string" && currency.trim() ? currency.trim().toUpperCase() : "USD";
+        const incurredAtValue = (() => {
+            if (!incurred_at) {
+                return new Date().toISOString();
+            }
+            const parsed = new Date(incurred_at);
+            return Number.isNaN(parsed.getTime()) ? new Date().toISOString() : parsed.toISOString();
+        })();
+        const { descriptionColumn, receiptColumn, hasUpdatedAt } = await getExpenseColumnProfile();
         const insertQuery = `
       INSERT INTO trip_expenses (
         trip_id,
@@ -570,13 +640,12 @@ router.post("/:id/expenses", async (req, res) => {
         expense_type,
         amount,
         currency,
-        notes,
-        receipt_url,
-        incurred_at,
-        created_at
+        ${descriptionColumn},
+        ${receiptColumn},
+        incurred_at
       )
       VALUES (
-        $1,$2,$3,$4,$5,$6,$7,$8,NOW()
+        $1,$2,$3,$4,$5,$6,$7,$8
       )
       RETURNING
         id,
@@ -585,20 +654,20 @@ router.post("/:id/expenses", async (req, res) => {
         expense_type,
         amount,
         currency,
-        notes AS description,
-        receipt_url AS receipt_photo_url,
+        ${descriptionColumn} AS description,
+        ${receiptColumn} AS receipt_photo_url,
         incurred_at,
-        created_at
+        created_at${hasUpdatedAt ? ", updated_at" : ""}
     `;
         const values = [
             tripId,
             driverIdValue,
-            expense_type,
+            expenseTypeValue,
             amountNumber,
-            currency || "USD",
+            currencyValue,
             description || null,
             receipt_photo_url || null,
-            incurred_at || null,
+            incurredAtValue,
         ];
         const result = await database_1.pool.query(insertQuery, values);
         return res.status(201).json(result.rows[0]);
@@ -614,6 +683,7 @@ router.get("/:id/expenses", async (req, res) => {
         if (tripId === null) {
             return res.status(400).json({ message: "Invalid trip id" });
         }
+        const { descriptionColumn, receiptColumn, hasUpdatedAt } = await getExpenseColumnProfile();
         const result = await database_1.pool.query(`
       SELECT
         id,
@@ -622,10 +692,10 @@ router.get("/:id/expenses", async (req, res) => {
         expense_type,
         amount,
         currency,
-        notes AS description,
-        receipt_url AS receipt_photo_url,
+        ${descriptionColumn} AS description,
+        ${receiptColumn} AS receipt_photo_url,
         incurred_at,
-        created_at
+        created_at${hasUpdatedAt ? ", updated_at" : ""}
       FROM trip_expenses
       WHERE trip_id = $1
       ORDER BY incurred_at DESC NULLS LAST, created_at DESC

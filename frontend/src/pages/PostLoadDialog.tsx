@@ -81,7 +81,6 @@ export function PostLoadDialog({ open = false, onOpenChange, initialData }: Post
       dropoff_location: formData.dropoff,
       pickup_date: date.toISOString(),
       offer_price: null,
-      created_by: "demo_shipper_1",
     };
 
     try {

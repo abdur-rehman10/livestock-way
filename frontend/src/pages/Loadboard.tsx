@@ -27,9 +27,10 @@ import {
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { filterLoads, searchFilter } from '../lib/filter-utils';
-import { storage, STORAGE_KEYS, saveFilterPreset, getFilterPresets, deleteFilterPreset } from '../lib/storage';
+import { storage as appStorage, STORAGE_KEYS, saveFilterPreset, getFilterPresets, deleteFilterPreset } from '../lib/storage';
 import { showUndoToast } from '../components/UndoToast';
 import { undoManager } from '../lib/undo-manager';
+import { normalizeLoadStatus } from "../lib/status";
 
 interface Load {
   id: string;
@@ -43,7 +44,7 @@ interface Load {
   postedDate: string;
   pickupDate: string;
   price: string;
-  status: 'open' | 'assigned' | 'in-transit';
+  status: 'open' | 'assigned' | 'in-transit' | 'delivered';
   bids?: number;
 }
 
@@ -95,11 +96,11 @@ export function Loadboard() {
   const [searchQuery, setSearchQuery] = useState('');
   const [saveFilterName, setSaveFilterName] = useState('');
   const [isAssigning, setIsAssigning] = useState<number | null>(null);
-  const CURRENT_HAULER_ID = "demo_hauler_1";
+  const currentHaulerId = appStorage.get<string | null>(STORAGE_KEYS.USER_ID, null);
   
   // Filters with persistence
   const [filters, setFilters] = useState(() => {
-    const saved = storage.get(STORAGE_KEYS.FILTERS, null);
+    const saved = appStorage.get(STORAGE_KEYS.FILTERS, null);
     return saved || {
       species: '',
       origin: '',
@@ -115,7 +116,7 @@ export function Loadboard() {
 
   // Persist filters
   useEffect(() => {
-    storage.set(STORAGE_KEYS.FILTERS, filters);
+    appStorage.set(STORAGE_KEYS.FILTERS, filters);
   }, [filters]);
 
   const handlePlaceBid = () => {
@@ -142,9 +143,13 @@ export function Loadboard() {
   };
 
   const handleAcceptLoad = async (loadId: number) => {
+    if (!currentHaulerId) {
+      toast.error("Log in as a hauler to accept loads.");
+      return;
+    }
     try {
       setIsAssigning(loadId);
-      await assignLoad(loadId, CURRENT_HAULER_ID);
+      await assignLoad(loadId, currentHaulerId);
       toast.success(`Load #${loadId} accepted`);
       setLoads((prev) => prev.filter((load) => load.id !== loadId));
     } catch (err: any) {
@@ -188,12 +193,13 @@ export function Loadboard() {
   }, []);
 
   const transformedLoads: Load[] = loads.map((load) => {
-    const normalizedStatus: "open" | "assigned" | "in-transit" =
-      load.status === 'assigned'
-        ? 'assigned'
-        : load.status === 'in_transit'
-          ? 'in-transit'
-          : 'open';
+    const mappedStatus = normalizeLoadStatus(load.status);
+    const normalizedStatus: "open" | "assigned" | "in-transit" | "delivered" =
+      mappedStatus === "in_transit"
+        ? "in-transit"
+        : mappedStatus === "delivered"
+          ? "delivered"
+          : mappedStatus;
 
     return {
       id: `L${load.id}`,
@@ -204,8 +210,8 @@ export function Loadboard() {
       destination: load.dropoff_location,
       distance: "0 miles",
       postedBy: load.created_by ?? "Unknown shipper",
-      postedDate: new Date(load.created_at).toLocaleDateString(),
-      pickupDate: new Date(load.pickup_date).toLocaleString(),
+      postedDate: load.created_at ? new Date(load.created_at).toLocaleDateString() : "—",
+      pickupDate: load.pickup_date ? new Date(load.pickup_date).toLocaleString() : "—",
       price: load.offer_price
         ? `$${Number(load.offer_price).toFixed(0)}`
         : "$0",
