@@ -1,5 +1,6 @@
 import { Request, Response } from "express";
 import { pool } from "../config/database";
+import { mapPaymentRow } from "../services/paymentsService";
 
 // GET /api/payments?user_id=xxx&role=shipper|hauler
 export const getPaymentsForUser = async (req: Request, res: Response) => {
@@ -20,20 +21,29 @@ export const getPaymentsForUser = async (req: Request, res: Response) => {
       `
       SELECT
         p.*,
-        l.species,
-        l.quantity,
-        l.pickup_location,
-        l.dropoff_location
+        l.pickup_location_text,
+        l.dropoff_location_text
       FROM payments p
       LEFT JOIN loads l ON l.id = p.load_id
-      WHERE (p.payer_id = $1 AND p.payer_role = $2)
-         OR (p.payee_id = $1 AND p.payee_role = $2)
+      WHERE p.payer_user_id::text = $1 OR p.payee_user_id::text = $1
       ORDER BY p.created_at DESC
       `,
-      [userId, userRole]
+      [userId]
     );
 
-    res.json(rows);
+    const mapped = rows
+      .map((row) => mapPaymentRow(row))
+      .filter((payment) => {
+        if (userRole.toLowerCase() === "shipper") {
+          return payment.payer_id === userId;
+        }
+        if (userRole.toLowerCase() === "hauler") {
+          return payment.payee_id === userId;
+        }
+        return true;
+      });
+
+    res.json(mapped);
   } catch (error) {
     console.error("Error fetching payments:", error);
     res.status(500).json({ error: "Failed to fetch payments" });

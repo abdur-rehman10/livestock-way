@@ -2,6 +2,7 @@
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.getPaymentsForUser = void 0;
 const database_1 = require("../config/database");
+const paymentsService_1 = require("../services/paymentsService");
 // GET /api/payments?user_id=xxx&role=shipper|hauler
 const getPaymentsForUser = async (req, res) => {
     try {
@@ -17,17 +18,25 @@ const getPaymentsForUser = async (req, res) => {
         const { rows } = await database_1.pool.query(`
       SELECT
         p.*,
-        l.species,
-        l.quantity,
-        l.pickup_location,
-        l.dropoff_location
+        l.pickup_location_text,
+        l.dropoff_location_text
       FROM payments p
       LEFT JOIN loads l ON l.id = p.load_id
-      WHERE (p.payer_id = $1 AND p.payer_role = $2)
-         OR (p.payee_id = $1 AND p.payee_role = $2)
+      WHERE p.payer_user_id::text = $1 OR p.payee_user_id::text = $1
       ORDER BY p.created_at DESC
-      `, [userId, userRole]);
-        res.json(rows);
+      `, [userId]);
+        const mapped = rows
+            .map((row) => (0, paymentsService_1.mapPaymentRow)(row))
+            .filter((payment) => {
+            if (userRole.toLowerCase() === "shipper") {
+                return payment.payer_id === userId;
+            }
+            if (userRole.toLowerCase() === "hauler") {
+                return payment.payee_id === userId;
+            }
+            return true;
+        });
+        res.json(mapped);
     }
     catch (error) {
         console.error("Error fetching payments:", error);

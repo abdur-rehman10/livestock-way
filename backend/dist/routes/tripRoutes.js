@@ -2,6 +2,7 @@
 Object.defineProperty(exports, "__esModule", { value: true });
 const express_1 = require("express");
 const database_1 = require("../config/database");
+const paymentsService_1 = require("../services/paymentsService");
 const router = (0, express_1.Router)();
 function getQueryValue(value) {
     if (typeof value === "string")
@@ -72,8 +73,9 @@ function getTripIdParam(req) {
     return parseId(raw);
 }
 router.post("/", async (req, res) => {
+    const client = await database_1.pool.connect();
     try {
-        const { load_id, hauler_id, truck_id, driver_id, planned_departure_at, planned_arrival_at, planned_distance_km, } = req.body;
+        const { load_id, hauler_id, truck_id, driver_id, planned_departure_at, planned_arrival_at, planned_distance_km, agreed_price, currency, } = req.body;
         if (!load_id ||
             !hauler_id ||
             !truck_id ||
@@ -83,11 +85,18 @@ router.post("/", async (req, res) => {
                 message: "load_id, hauler_id, truck_id, driver_id and planned_departure_at are required",
             });
         }
+        const priceNumber = Number(agreed_price);
+        if (!priceNumber || Number.isNaN(priceNumber) || priceNumber <= 0) {
+            return res
+                .status(400)
+                .json({ message: "agreed_price must be provided for payments" });
+        }
+        await client.query("BEGIN");
         const [loadCheck, haulerCheck, truckCheck, driverCheck] = await Promise.all([
-            database_1.pool.query("SELECT id FROM loads WHERE id = $1", [load_id]),
-            database_1.pool.query("SELECT id FROM haulers WHERE id = $1", [hauler_id]),
-            database_1.pool.query("SELECT id FROM trucks WHERE id = $1", [truck_id]),
-            database_1.pool.query("SELECT id FROM drivers WHERE id = $1", [driver_id]),
+            client.query("SELECT id, shipper_id FROM loads WHERE id = $1", [load_id]),
+            client.query("SELECT id, user_id FROM haulers WHERE id = $1", [hauler_id]),
+            client.query("SELECT id, hauler_id FROM trucks WHERE id = $1", [truck_id]),
+            client.query("SELECT id FROM drivers WHERE id = $1", [driver_id]),
         ]);
         if (loadCheck.rowCount === 0) {
             return res.status(400).json({ message: "Invalid load_id" });
@@ -102,6 +111,14 @@ router.post("/", async (req, res) => {
             return res.status(400).json({ message: "Invalid driver_id" });
         }
         const restStopPlan = buildRestStopPlan(planned_distance_km);
+        const haulerProfileId = truckCheck.rows[0].hauler_id || hauler_id;
+        const shipperProfileId = loadCheck.rows[0].shipper_id;
+        const shipperUser = await client.query("SELECT user_id FROM shippers WHERE id = $1", [shipperProfileId]);
+        const haulerUser = await client.query("SELECT user_id FROM haulers WHERE id = $1", [haulerProfileId]);
+        if (shipperUser.rowCount === 0 || haulerUser.rowCount === 0) {
+            await client.query("ROLLBACK");
+            return res.status(400).json({ message: "Linked shipper/hauler not found" });
+        }
         const insertQuery = `
       INSERT INTO trips (
         load_id,
@@ -146,12 +163,27 @@ router.post("/", async (req, res) => {
             planned_distance_km || null,
             JSON.stringify(restStopPlan),
         ];
-        const result = await database_1.pool.query(insertQuery, values);
-        return res.status(201).json(result.rows[0]);
+        const result = await client.query(insertQuery, values);
+        const trip = result.rows[0];
+        const payment = await (0, paymentsService_1.createPaymentForTrip)({
+            tripId: trip.id,
+            loadId: trip.load_id,
+            shipperUserId: Number(shipperUser.rows[0].user_id),
+            haulerUserId: Number(haulerUser.rows[0].user_id),
+            amount: priceNumber,
+            currency: (currency || "USD").toUpperCase(),
+            client,
+        });
+        await client.query("COMMIT");
+        return res.status(201).json({ trip, payment });
     }
     catch (err) {
+        await client.query("ROLLBACK");
         console.error("Error in POST /api/trips:", err);
         return res.status(500).json({ message: "Internal server error" });
+    }
+    finally {
+        client.release();
     }
 });
 router.get("/", async (req, res) => {
@@ -403,16 +435,20 @@ router.get("/:id/pre-trip-check", async (req, res) => {
     }
 });
 router.post("/:id/epod", async (req, res) => {
+    const client = await database_1.pool.connect();
     try {
         const tripId = getTripIdParam(req);
         if (tripId === null) {
             return res.status(400).json({ message: "Invalid trip id" });
         }
-        const tripCheck = await database_1.pool.query("SELECT id FROM trips WHERE id = $1", [tripId]);
+        await client.query("BEGIN");
+        const tripCheck = await client.query("SELECT id FROM trips WHERE id = $1", [tripId]);
         if (tripCheck.rowCount === 0) {
+            await client.query("ROLLBACK");
+            client.release();
             return res.status(404).json({ message: "Trip not found" });
         }
-        const existing = await database_1.pool.query("SELECT id FROM trip_epods WHERE trip_id = $1", [tripId]);
+        const existing = await client.query("SELECT id FROM trip_epods WHERE trip_id = $1", [tripId]);
         const photosJson = Array.isArray(req.body.delivery_photos) && req.body.delivery_photos.length > 0
             ? JSON.stringify(req.body.delivery_photos)
             : JSON.stringify([]);
@@ -424,7 +460,7 @@ router.post("/:id/epod", async (req, res) => {
             photosJson,
             req.body.delivery_notes || null,
         ];
-        let result;
+        let epodResult;
         const existingCount = existing.rowCount ?? 0;
         if (existingCount > 0) {
             const updateQuery = `
@@ -439,7 +475,7 @@ router.post("/:id/epod", async (req, res) => {
         WHERE trip_id = $1
         RETURNING *
       `;
-            result = await database_1.pool.query(updateQuery, values);
+            epodResult = await client.query(updateQuery, values);
         }
         else {
             const insertQuery = `
@@ -459,13 +495,28 @@ router.post("/:id/epod", async (req, res) => {
         )
         RETURNING *
       `;
-            result = await database_1.pool.query(insertQuery, values);
+            epodResult = await client.query(insertQuery, values);
         }
-        return res.json(result.rows[0]);
+        const tripUpdate = await client.query(`UPDATE trips SET status = 'completed', updated_at = NOW() WHERE id = $1 RETURNING *`, [tripId]);
+        let releasedPayment = null;
+        const payment = await (0, paymentsService_1.getPaymentByTripId)(tripId, client);
+        if (payment) {
+            releasedPayment = await (0, paymentsService_1.releasePayment)(payment.id, client);
+        }
+        await client.query("COMMIT");
+        return res.json({
+            epod: epodResult.rows[0],
+            trip: tripUpdate.rows[0],
+            payment: releasedPayment,
+        });
     }
     catch (err) {
+        await client.query("ROLLBACK");
         console.error("Error in POST /api/trips/:id/epod:", err);
         return res.status(500).json({ message: "Internal server error" });
+    }
+    finally {
+        client.release();
     }
 });
 router.get("/:id/epod", async (req, res) => {
