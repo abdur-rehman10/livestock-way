@@ -4,12 +4,34 @@ import authRequired from "../middlewares/auth";
 import {
   fundPayment,
   getPaymentById,
+  getPaymentByTripId,
 } from "../services/paymentsService";
 
 const router = Router();
 
 // GET /api/payments?user_id=...&role=shipper|hauler
 router.get("/", getPaymentsForUser);
+
+// GET /api/payments/by-trip/:tripId
+router.get("/by-trip/:tripId", authRequired, async (req, res) => {
+  const tripId = Number(req.params.tripId);
+  if (Number.isNaN(tripId)) {
+    return res.status(400).json({ error: "Invalid trip id" });
+  }
+
+  try {
+    const payment = await getPaymentByTripId(tripId);
+    if (!payment) {
+      return res
+        .status(404)
+        .json({ error: "No payment found for this trip" });
+    }
+    res.json(payment);
+  } catch (error) {
+    console.error("GET /api/payments/by-trip/:tripId error", error);
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
 
 // GET /api/payments/:id
 router.get("/:id", authRequired, async (req, res) => {
