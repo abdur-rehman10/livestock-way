@@ -93,7 +93,7 @@ async function getLoads(req, res) {
             params.push(status);
         }
         else if (!shipperFilter && !assignedFilter) {
-            sql += ` AND status = 'posted'`;
+            sql += ` AND status = 'open'`;
         }
         if (shipperFilter) {
             sql += ` AND shipper_id = $${index++}`;
@@ -121,7 +121,7 @@ async function getLoads(req, res) {
 // POST /api/loads
 async function createLoad(req, res) {
     try {
-        const { title, species, quantity, pickup_location, dropoff_location, delivery_location, pickup_date, pickup_date_from, pickup_date_to, estimated_weight_lbs, weight, rate_per_mile, offer_price, description, additional_comments, } = req.body;
+        const { title, species, quantity, pickup_location, dropoff_location, delivery_location, pickup_date, pickup_date_from, pickup_date_to, estimated_weight_lbs, weight, rate_per_mile, offer_price, description, additional_comments, price_offer_amount, price_currency, } = req.body;
         const normalizedSpecies = species?.trim();
         const pickupLocation = pickup_location?.trim() ?? req.body.pickup_location_text?.trim();
         const deliveryLocation = dropoff_location?.trim() ??
@@ -170,11 +170,28 @@ async function createLoad(req, res) {
             }
             return null;
         })();
-        const priceOffer = typeof rate_per_mile === "number"
-            ? rate_per_mile
-            : typeof offer_price === "number"
-                ? offer_price
-                : null;
+        let priceOffer = null;
+        if (price_offer_amount !== undefined &&
+            price_offer_amount !== null &&
+            price_offer_amount !== "") {
+            const parsed = Number(price_offer_amount);
+            if (Number.isNaN(parsed) || parsed <= 0) {
+                return res.status(400).json({
+                    status: "ERROR",
+                    message: "price_offer_amount must be a positive number",
+                });
+            }
+            priceOffer = parsed;
+        }
+        else if (typeof rate_per_mile === "number" && rate_per_mile > 0) {
+            priceOffer = rate_per_mile;
+        }
+        else if (typeof offer_price === "number" && offer_price > 0) {
+            priceOffer = offer_price;
+        }
+        const priceCurrency = typeof price_currency === "string" && price_currency.trim()
+            ? price_currency.trim().toUpperCase()
+            : "USD";
         const notes = description ??
             additional_comments ??
             req.body.notes ??
@@ -197,7 +214,7 @@ async function createLoad(req, res) {
         notes
       )
       VALUES (
-        $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,'USD','posted','public',$11
+        $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,'open','public',$12
       )
       RETURNING
         id,
@@ -224,6 +241,7 @@ async function createLoad(req, res) {
             pickupWindowStart,
             pickupWindowEnd,
             priceOffer,
+            priceCurrency,
             notes,
         ];
         const result = await database_1.pool.query(insertQuery, values);
@@ -311,7 +329,7 @@ async function assignLoad(req, res) {
         const isAlreadyAssignedToSameHauler = loadRow.status === "matched" &&
             loadRow.assigned_to_user_id &&
             Number(loadRow.assigned_to_user_id) === assignedUserId;
-        if (loadRow.status !== "posted" && !isAlreadyAssignedToSameHauler) {
+        if (loadRow.status !== "open" && !isAlreadyAssignedToSameHauler) {
             await client.query("ROLLBACK");
             return res.status(409).json({
                 status: "ERROR",
@@ -390,7 +408,7 @@ async function assignLoad(req, res) {
           assigned_to_user_id = $1,
           assigned_at = NOW(),
           status = 'matched'
-        WHERE id = $2 AND status = 'posted'
+        WHERE id = $2 AND status = 'open'
       `, [assignedUserId, loadId]);
             if (updateResult.rowCount === 0) {
                 await client.query("ROLLBACK");

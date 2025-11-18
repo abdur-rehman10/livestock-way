@@ -44,6 +44,8 @@ export function PostLoadDialog({ open = false, onOpenChange, initialData }: Post
     dropoff: initialData?.dropoff || '',
     specialRequirements: initialData?.specialRequirements || '',
     visibility: initialData?.visibility || 'public',
+    offerPrice: initialData?.offerPrice || '',
+    currency: initialData?.currency || 'USD',
   });
   const [invitedCarriers, setInvitedCarriers] = useState<string[]>([]);
   const [carrierSearch, setCarrierSearch] = useState('');
@@ -51,7 +53,12 @@ export function PostLoadDialog({ open = false, onOpenChange, initialData }: Post
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
 
-  const estimatedPrice = formData.species && formData.quantity ? '$850 - $950' : '--';
+  const estimatedPrice =
+    formData.offerPrice && !Number.isNaN(Number(formData.offerPrice))
+      ? `$${Number(formData.offerPrice).toLocaleString()} ${formData.currency}`
+      : formData.species && formData.quantity
+      ? '$850 - $950'
+      : '--';
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -80,8 +87,19 @@ export function PostLoadDialog({ open = false, onOpenChange, initialData }: Post
       pickup_location: formData.pickup,
       dropoff_location: formData.dropoff,
       pickup_date: date.toISOString(),
-      offer_price: null,
     };
+
+    if (formData.offerPrice !== '') {
+      const numericOffer = Number(formData.offerPrice);
+      if (Number.isNaN(numericOffer) || numericOffer <= 0) {
+        toast.error('Offer price must be a positive number');
+        return;
+      }
+      payload.price_offer_amount = numericOffer;
+    } else {
+      payload.price_offer_amount = null;
+    }
+    payload.price_currency = formData.currency || 'USD';
 
     try {
       setIsSubmitting(true);
@@ -105,6 +123,8 @@ export function PostLoadDialog({ open = false, onOpenChange, initialData }: Post
         dropoff: '',
         specialRequirements: '',
         visibility: 'public',
+        offerPrice: '',
+        currency: 'USD',
       });
       setDate(undefined);
       setInvitedCarriers([]);
@@ -243,6 +263,38 @@ export function PostLoadDialog({ open = false, onOpenChange, initialData }: Post
                 />
               </PopoverContent>
             </Popover>
+          </div>
+
+          {/* Offer Price */}
+          <div className="grid grid-cols-3 gap-3">
+            <div className="col-span-2 space-y-2">
+              <Label htmlFor="offerPrice">Offer Price</Label>
+              <Input
+                id="offerPrice"
+                type="number"
+                min="0"
+                step="0.01"
+                placeholder="Enter amount"
+                value={formData.offerPrice}
+                onChange={(e) => setFormData({ ...formData, offerPrice: e.target.value })}
+              />
+            </div>
+            <div className="space-y-2">
+              <Label>Currency</Label>
+              <Select
+                value={formData.currency}
+                onValueChange={(value) => setFormData({ ...formData, currency: value })}
+              >
+                <SelectTrigger>
+                  <SelectValue placeholder="Select currency" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="USD">USD</SelectItem>
+                  <SelectItem value="CAD">CAD</SelectItem>
+                  <SelectItem value="AUD">AUD</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
           </div>
 
           {/* Visibility Control */}

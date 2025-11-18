@@ -10,10 +10,12 @@ import {
   deleteTripExpense,
   fetchTripByLoadId,
 } from "../lib/api";
-import type { TripExpense, TripRecord } from "../lib/types";
+import type { TripExpense, TripRecord, Payment } from "../lib/types";
 import { storage, STORAGE_KEYS } from "../lib/storage";
 import { Button } from "../components/ui/button";
 import { normalizeLoadStatus, formatLoadStatusLabel } from "../lib/status";
+import { getPaymentByTrip, fundTripPayment } from "../api/payments";
+import { PaymentCard } from "../components/PaymentCard";
 
 
 const formatDateTime = (value?: string | null) => {
@@ -62,6 +64,10 @@ export function TripDetail() {
   const navigate = useNavigate();
   const location = useLocation();
   const currentUserId = storage.get<string | null>(STORAGE_KEYS.USER_ID, null);
+  const currentUserRole = storage.get<string | null>(
+    STORAGE_KEYS.USER_ROLE,
+    null
+  );
 
   const [load, setLoad] = useState<LoadDetail | null>(null);
   const [loading, setLoading] = useState(true);
@@ -94,6 +100,11 @@ export function TripDetail() {
   const [editSubmitting, setEditSubmitting] = useState(false);
   const [editError, setEditError] = useState<string | null>(null);
   const [deletingExpenseId, setDeletingExpenseId] = useState<number | null>(null);
+  const [payment, setPayment] = useState<Payment | null>(null);
+  const [paymentLoading, setPaymentLoading] = useState(false);
+  const [paymentError, setPaymentError] = useState<string | null>(null);
+  const [funding, setFunding] = useState(false);
+  const [fundError, setFundError] = useState<string | null>(null);
   const tripId = trip?.id ?? null;
 
   useEffect(() => {
@@ -163,18 +174,25 @@ export function TripDetail() {
   }, [load?.id]);
 
   useEffect(() => {
-    if (!tripId) {
+    const currentTripId = tripId;
+
+    if (!currentTripId) {
       setExpenses([]);
       setExpensesLoading(false);
+      setPayment(null);
+      setPaymentLoading(false);
+      setPaymentError(null);
       return;
     }
+
+    const safeTripId: number = currentTripId;
 
     let cancelled = false;
     async function loadExpenses() {
       try {
         setExpensesLoading(true);
         setExpensesError(null);
-        const data = await fetchTripExpenses(tripId);
+        const data = await fetchTripExpenses(safeTripId);
         if (!cancelled) {
           setExpenses(data);
         }
@@ -198,12 +216,52 @@ export function TripDetail() {
     };
   }, [tripId]);
 
+  useEffect(() => {
+    if (!tripId) {
+      setPayment(null);
+      setPaymentError(null);
+      setPaymentLoading(false);
+      return;
+    }
+
+    let cancelled = false;
+    const safeTripId: number = tripId;
+    async function loadPayment() {
+      try {
+        setPaymentLoading(true);
+        setPaymentError(null);
+        const data = await getPaymentByTrip(safeTripId);
+        if (!cancelled) {
+          setPayment(data);
+        }
+      } catch (err: any) {
+        console.error("Error loading payment for trip", err);
+        if (!cancelled) {
+          setPayment(null);
+          setPaymentError(
+            err?.message || "Failed to load payment information."
+          );
+        }
+      } finally {
+        if (!cancelled) {
+          setPaymentLoading(false);
+        }
+      }
+    }
+
+    loadPayment();
+    return () => {
+      cancelled = true;
+    };
+  }, [tripId]);
+
   const handleAddExpense = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!tripId) {
       setExpenseSubmitError("Trip has not been created yet.");
       return;
     }
+    const safeTripId: number = tripId;
 
     const amountNumber = Number(expenseAmount);
     if (Number.isNaN(amountNumber) || amountNumber <= 0) {
@@ -225,7 +283,7 @@ export function TripDetail() {
           ? Number(currentUserId)
           : null;
 
-      const newExpense = await createTripExpense(tripId, {
+      const newExpense = await createTripExpense(safeTripId, {
         driver_id: driverNumericId,
         expense_type: expenseType.toUpperCase(),
         amount: amountNumber,
@@ -272,6 +330,7 @@ export function TripDetail() {
   const handleSaveExpenseEdit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!tripId || editingExpenseId == null) return;
+    const safeTripId: number = tripId;
 
     const amountNumber = Number(editingExpenseFields.amount);
     if (Number.isNaN(amountNumber) || amountNumber <= 0) {
@@ -282,7 +341,7 @@ export function TripDetail() {
     try {
       setEditSubmitting(true);
       setEditError(null);
-      const updated = await updateTripExpense(tripId, editingExpenseId, {
+      const updated = await updateTripExpense(safeTripId, editingExpenseId, {
         expense_type: editingExpenseFields.type.toUpperCase(),
         amount: amountNumber,
         currency: editingExpenseFields.currency || "USD",
@@ -303,13 +362,14 @@ export function TripDetail() {
 
   const handleDeleteExpense = async (expenseId: number) => {
     if (!tripId) return;
+    const safeTripId: number = tripId;
     const confirmed = window.confirm("Remove this expense?");
     if (!confirmed) return;
 
     try {
       setDeletingExpenseId(expenseId);
       setExpensesError(null);
-      await deleteTripExpense(tripId, expenseId);
+      await deleteTripExpense(safeTripId, expenseId);
       setExpenses((prev) => prev.filter((exp) => exp.id !== expenseId));
       if (editingExpenseId === expenseId) {
         cancelEditingExpense();
@@ -319,6 +379,21 @@ export function TripDetail() {
       setExpensesError(err?.message || "Failed to delete expense.");
     } finally {
       setDeletingExpenseId(null);
+    }
+  };
+
+  const handleFundEscrow = async () => {
+    if (!payment) return;
+    setFundError(null);
+    try {
+      setFunding(true);
+      const updated = await fundTripPayment(payment.id);
+      setPayment(updated);
+    } catch (err: any) {
+      console.error("Failed to fund escrow", err);
+      setFundError(err?.message || "Unable to fund escrow right now.");
+    } finally {
+      setFunding(false);
     }
   };
 
@@ -594,6 +669,28 @@ export function TripDetail() {
         </div>
 
       </div>
+
+      {paymentLoading ? (
+        <div className="rounded-lg border border-gray-200 bg-white p-4 text-xs text-gray-500">
+          Loading escrow…
+        </div>
+      ) : paymentError ? (
+        <div className="rounded-lg border border-gray-200 bg-white p-4 text-xs text-red-600">
+          {paymentError}
+        </div>
+      ) : !payment ? (
+        <div className="rounded-lg border border-gray-200 bg-white p-4 text-xs text-gray-500">
+          No payment record yet. Accept this load to initiate escrow.
+        </div>
+      ) : (
+        <PaymentCard
+          payment={payment}
+          isShipper={currentUserRole?.toUpperCase() === "SHIPPER"}
+          onFund={handleFundEscrow}
+          funding={funding}
+          fundError={fundError}
+        />
+      )}
 
       <div className="rounded-lg border border-gray-200 bg-white p-4 space-y-3">
         <div className="flex items-center justify-between">

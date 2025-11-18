@@ -108,7 +108,7 @@ export function Loadboard() {
       dateFrom: '',
       dateTo: '',
       priceMin: 0,
-      priceMax: 2000,
+      priceMax: 10000,
       distance: 0,
       status: 'open',
     };
@@ -243,7 +243,7 @@ export function Loadboard() {
       dateFrom: '',
       dateTo: '',
       priceMin: 0,
-      priceMax: 2000,
+      priceMax: 10000,
       distance: 0,
       status: 'open',
     };
@@ -520,11 +520,21 @@ export function Loadboard() {
             <div className="grid grid-cols-2 gap-4">
               <div className="space-y-2">
                 <Label>Min Price: ${filters.priceMin}</Label>
-                <Slider value={[filters.priceMin]} onValueChange={(v) => setFilters({...filters, priceMin: v[0]})} max={2000} step={50} />
+                <Slider
+                  value={[filters.priceMin]}
+                  onValueChange={(v) => setFilters({ ...filters, priceMin: v[0] })}
+                  max={10000}
+                  step={100}
+                />
               </div>
               <div className="space-y-2">
                 <Label>Max Price: ${filters.priceMax}</Label>
-                <Slider value={[filters.priceMax]} onValueChange={(v) => setFilters({...filters, priceMax: v[0]})} max={2000} step={50} />
+                <Slider
+                  value={[filters.priceMax]}
+                  onValueChange={(v) => setFilters({ ...filters, priceMax: v[0] })}
+                  max={10000}
+                  step={100}
+                />
               </div>
             </div>
 

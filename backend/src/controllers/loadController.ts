@@ -157,6 +157,8 @@ export async function createLoad(req: Request, res: Response) {
       offer_price,
       description,
       additional_comments,
+      price_offer_amount,
+      price_currency,
     } = req.body;
 
     const normalizedSpecies = species?.trim();
@@ -219,12 +221,30 @@ export async function createLoad(req: Request, res: Response) {
       return null;
     })();
 
-    const priceOffer =
-      typeof rate_per_mile === "number"
-        ? rate_per_mile
-        : typeof offer_price === "number"
-        ? offer_price
-        : null;
+    let priceOffer: number | null = null;
+    if (
+      price_offer_amount !== undefined &&
+      price_offer_amount !== null &&
+      price_offer_amount !== ""
+    ) {
+      const parsed = Number(price_offer_amount);
+      if (Number.isNaN(parsed) || parsed <= 0) {
+        return res.status(400).json({
+          status: "ERROR",
+          message: "price_offer_amount must be a positive number",
+        });
+      }
+      priceOffer = parsed;
+    } else if (typeof rate_per_mile === "number" && rate_per_mile > 0) {
+      priceOffer = rate_per_mile;
+    } else if (typeof offer_price === "number" && offer_price > 0) {
+      priceOffer = offer_price;
+    }
+
+    const priceCurrency =
+      typeof price_currency === "string" && price_currency.trim()
+        ? price_currency.trim().toUpperCase()
+        : "USD";
 
     const notes =
       description ??
@@ -250,7 +270,7 @@ export async function createLoad(req: Request, res: Response) {
         notes
       )
       VALUES (
-        $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,'USD','posted','public',$11
+        $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,'posted','public',$12
       )
       RETURNING
         id,
@@ -278,6 +298,7 @@ export async function createLoad(req: Request, res: Response) {
       pickupWindowStart,
       pickupWindowEnd,
       priceOffer,
+      priceCurrency,
       notes,
     ];
 

@@ -3,7 +3,7 @@ import { pool } from "../config/database";
 import {
   createPaymentForTrip,
   getPaymentByTripId,
-  releasePayment,
+  releasePaymentForTrip,
 } from "../services/paymentsService";
 import { PoolClient } from "pg";
 
@@ -649,11 +649,11 @@ router.post("/:id/epod", async (req: Request, res: Response) => {
       [tripId]
     );
 
-    let releasedPayment = null;
-    const payment = await getPaymentByTripId(tripId, client);
-    if (payment) {
-      releasedPayment = await releasePayment(payment.id, client);
-    }
+    const authUserIdRaw = (req as any)?.user?.id;
+    const releasedPayment = await releasePaymentForTrip(tripId, {
+      client,
+      releasedByUserId: authUserIdRaw ? Number(authUserIdRaw) : null,
+    });
 
     await client.query("COMMIT");
 

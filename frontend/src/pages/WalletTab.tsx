@@ -91,6 +91,24 @@ export default function WalletTab() {
     );
   }
 
+  const paymentStatusMeta: Record<
+    string,
+    { label: string; badgeClass: string }
+  > = {
+    PENDING_FUNDING: {
+      label: "Pending",
+      badgeClass: "bg-amber-50 text-amber-700 border border-amber-200",
+    },
+    FUNDED: {
+      label: "Funded",
+      badgeClass: "bg-sky-50 text-sky-700 border border-sky-200",
+    },
+    RELEASED: {
+      label: "Released",
+      badgeClass: "bg-emerald-50 text-emerald-700 border border-emerald-200",
+    },
+  };
+
   return (
     <div className="p-4 space-y-6">
       <div className="flex items-baseline justify-between gap-2">
@@ -192,8 +210,16 @@ export default function WalletTab() {
                           </span>
                         )}
                       </td>
-                      <td className="px-4 py-2 capitalize text-gray-600">
-                        {p.status}
+                      <td className="px-4 py-2">
+                        <span
+                          className={[
+                            "inline-flex rounded-full px-2 py-[1px] text-[10px] font-medium capitalize",
+                            paymentStatusMeta[p.status]?.badgeClass ||
+                              "bg-gray-100 text-gray-600 border border-gray-200",
+                          ].join(" ")}
+                        >
+                          {paymentStatusMeta[p.status]?.label || p.status}
+                        </span>
                       </td>
                     </tr>
                   );

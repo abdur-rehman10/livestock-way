@@ -544,11 +544,11 @@ router.post("/:id/epod", async (req, res) => {
             epodResult = await client.query(insertQuery, values);
         }
         const tripUpdate = await client.query(`UPDATE trips SET status = 'completed', updated_at = NOW() WHERE id = $1 RETURNING *`, [tripId]);
-        let releasedPayment = null;
-        const payment = await (0, paymentsService_1.getPaymentByTripId)(tripId, client);
-        if (payment) {
-            releasedPayment = await (0, paymentsService_1.releasePayment)(payment.id, client);
-        }
+        const authUserIdRaw = req?.user?.id;
+        const releasedPayment = await (0, paymentsService_1.releasePaymentForTrip)(tripId, {
+            client,
+            releasedByUserId: authUserIdRaw ? Number(authUserIdRaw) : null,
+        });
         await client.query("COMMIT");
         return res.json({
             epod: epodResult.rows[0],

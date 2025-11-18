@@ -22,7 +22,10 @@ export interface PaymentRecord {
     status: PaymentStatus;
     created_at: string;
     updated_at: string | null;
+    funded_at: string | null;
+    funded_by_user_id?: string | null;
     released_at: string | null;
+    released_by_user_id?: string | null;
     platform_commission_amount: number;
     commission_percent: number;
     hauler_payout_amount: number;
@@ -33,7 +36,12 @@ export declare function mapPaymentRow(row: any): PaymentRecord;
 export declare function createPaymentForTrip(args: CreatePaymentArgs): Promise<PaymentRecord>;
 export declare function getPaymentById(paymentId: number, client?: PoolClient): Promise<PaymentRecord | null>;
 export declare function getPaymentByTripId(tripId: number, client?: PoolClient): Promise<PaymentRecord | null>;
-export declare function fundPayment(paymentId: number, client?: PoolClient): Promise<PaymentRecord | null>;
-export declare function releasePayment(paymentId: number, client?: PoolClient): Promise<PaymentRecord | null>;
+export declare function fundPayment(paymentId: number, fundedByUserId: number, client?: PoolClient): Promise<PaymentRecord | null>;
+export declare function releasePayment(paymentId: number, client?: PoolClient, releasedByUserId?: number | null): Promise<PaymentRecord | null>;
+export declare function releasePaymentForTrip(tripId: number, options?: {
+    defaultCommissionPercent?: number;
+    releasedByUserId?: number | null;
+    client?: PoolClient;
+}): Promise<PaymentRecord | null>;
 export {};
 //# sourceMappingURL=paymentsService.d.ts.map

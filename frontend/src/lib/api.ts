@@ -37,6 +37,8 @@ export interface CreateLoadPayload {
   dropoff_location: string;
   pickup_date: string;
   offer_price?: number | null;
+  price_offer_amount?: number | null;
+  price_currency?: string | null;
   created_by?: string | null;
 }
 
@@ -252,6 +254,44 @@ export async function createSupportTicket(
     );
   }
   return (await response.json()) as SupportTicket;
+}
+
+export async function fetchPaymentByTripId(
+  tripId: number
+): Promise<Payment | null> {
+  const response = await fetch(
+    `${API_BASE_URL}/api/payments/by-trip/${tripId}`,
+    {
+      headers: getAuthHeaders(),
+    }
+  );
+  if (response.status === 404) {
+    return null;
+  }
+  if (!response.ok) {
+    const text = await response.text();
+    throw new Error(
+      `Failed to fetch payment for trip (${response.status}): ${text || ""}`
+    );
+  }
+  return (await response.json()) as Payment;
+}
+
+export async function fundPayment(paymentId: number): Promise<Payment> {
+  const response = await fetch(
+    `${API_BASE_URL}/api/payments/${paymentId}/fund`,
+    {
+      method: "POST",
+      headers: getAuthHeaders({ "Content-Type": "application/json" }),
+    }
+  );
+  if (!response.ok) {
+    const text = await response.text();
+    throw new Error(
+      `Failed to fund payment (${response.status}): ${text || ""}`
+    );
+  }
+  return (await response.json()) as Payment;
 }
 
 export async function fetchTripExpenses(
