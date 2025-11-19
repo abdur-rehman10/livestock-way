@@ -1,3 +1,4 @@
+import http from "http";
 import express from "express";
 import cors from "cors";
 import dotenv from "dotenv";
@@ -13,6 +14,7 @@ import loadboardRoutes from "./routes/loadboardRoutes";
 import driverRoutes from "./routes/driverRoutes";
 import tripRoutes from "./routes/tripRoutes";
 import marketplaceRoutes from "./routes/marketplaceRoutes";
+import { initSocket } from "./socket";
 
 dotenv.config();
 
@@ -65,6 +67,12 @@ app.use("/api/trips", tripRoutes);
 app.use("/api/marketplace", marketplaceRoutes);
 
 const PORT = Number(process.env.PORT) || 4000;
-app.listen(PORT, () => {
+const server = http.createServer(app);
+
+initSocket(server);
+
+server.listen(PORT, () => {
   console.log(`✅ Server running on http://localhost:${PORT}`);
 });
+
+export { app };

@@ -20,7 +20,7 @@ router.get("/:id", getLoadById);
 router.post("/", authRequired, createLoad);
 
 // POST /api/loads/:id/assign
-router.post("/:id/assign", assignLoad);
+router.post("/:id/assign", authRequired, assignLoad);
 
 // POST /api/loads/:id/start
 router.post("/:id/start", startLoad);

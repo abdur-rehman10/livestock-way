@@ -7,6 +7,7 @@ import { PostLoadDialog } from './PostLoadDialog';
 import MyLoadsTab from './MyLoadsTab';
 import WalletTab from './WalletTab';
 import SupportTab from './SupportTab';
+import ShipperOffersTab from './ShipperOffersTab';
 import { 
   Package, 
   Menu, 
@@ -20,7 +21,8 @@ import {
   MapPin,
   Truck,
   Clock,
-  Filter
+  Filter,
+  MessageSquare
 } from 'lucide-react';
 import logo from '../assets/livestockway-logo.svg';
 
@@ -315,6 +317,7 @@ export function ShipperDashboard({ onLogout, onRoleSwitch }: ShipperDashboardPro
         )}
 
         {activeTab === 'loads' && <MyLoadsTab />}
+        {activeTab === 'offers' && <ShipperOffersTab />}
         {activeTab === 'wallet' && <WalletTab />}
         {activeTab === 'support' && <SupportTab />}
       </main>
@@ -325,9 +328,9 @@ export function ShipperDashboard({ onLogout, onRoleSwitch }: ShipperDashboardPro
           {[
             { id: 'home', icon: Home, label: 'Home' },
             { id: 'loads', icon: Package, label: 'My Loads' },
+            { id: 'offers', icon: MessageSquare, label: 'Offers' },
             { id: 'wallet', icon: Wallet, label: 'Wallet' },
             { id: 'support', icon: HelpCircle, label: 'Support' },
-            { id: 'profile', icon: User, label: 'Profile' },
           ].map((tab) => {
             const Icon = tab.icon;
             const isActive = activeTab === tab.id;

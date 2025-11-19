@@ -2,6 +2,7 @@ import { Request, Response } from "express";
 import { pool } from "../config/database";
 import { ensureShipperProfile } from "../utils/profileHelpers";
 import { createPaymentForTrip } from "../services/paymentsService";
+import { emitEvent, SOCKET_EVENTS } from "../socket";
 
 const DEFAULT_SHIPPER_ID = "demo_shipper_1";
 const DEFAULT_SHIPPER_ROLE = "shipper";
@@ -303,10 +304,15 @@ export async function createLoad(req: Request, res: Response) {
     ];
 
     const result = await pool.query(insertQuery, values);
+    const loadRow = result.rows[0];
+
+    if (loadRow) {
+      emitEvent(SOCKET_EVENTS.LOAD_POSTED, { load: loadRow });
+    }
 
     return res.status(201).json({
       status: "OK",
-      data: result.rows[0],
+      data: loadRow,
     });
   } catch (error) {
     console.error("Error creating load:", error);
@@ -320,6 +326,25 @@ export async function createLoad(req: Request, res: Response) {
 export async function assignLoad(req: Request, res: Response) {
   const client = await pool.connect();
   try {
+    const authReq = req as AuthenticatedRequest;
+    const userId = authReq.user?.id ? Number(authReq.user.id) : null;
+    const userType = (authReq.user?.user_type ?? "").toUpperCase();
+    const isSuperAdmin = userType === "SUPER_ADMIN";
+
+    if (!userId) {
+      return res.status(401).json({
+        status: "ERROR",
+        message: "Unauthorized",
+      });
+    }
+
+    if (!isSuperAdmin && userType !== "SHIPPER") {
+      return res.status(403).json({
+        status: "ERROR",
+        message: "Only shippers can assign loads",
+      });
+    }
+
     const { id } = req.params;
     const { assigned_to } = req.body;
 
@@ -402,6 +427,14 @@ export async function assignLoad(req: Request, res: Response) {
       ? Number(shipperUserResult.rows[0].user_id)
       : null;
 
+    if (!isSuperAdmin && (!shipperUserId || shipperUserId !== userId)) {
+      await client.query("ROLLBACK");
+      return res.status(403).json({
+        status: "ERROR",
+        message: "You can only assign loads you own",
+      });
+    }
+
     const isAlreadyAssignedToSameHauler =
       loadRow.status === "matched" &&
       loadRow.assigned_to_user_id &&
@@ -420,15 +453,30 @@ export async function assignLoad(req: Request, res: Response) {
       [assignedUserId]
     );
 
+    let haulerProfileId: number;
     if (haulerResult.rowCount === 0) {
-      await client.query("ROLLBACK");
-      return res.status(400).json({
-        status: "ERROR",
-        message: "Hauler profile not found for this user",
-      });
+      const autoHauler = await client.query(
+        `
+          INSERT INTO haulers (
+            user_id,
+            legal_name,
+            created_at,
+            updated_at
+          )
+          VALUES (
+            $1,
+            $2,
+            NOW(),
+            NOW()
+          )
+          RETURNING id
+        `,
+        [assignedUserId, `Auto Hauler ${assignedUserId}`]
+      );
+      haulerProfileId = Number(autoHauler.rows[0].id);
+    } else {
+      haulerProfileId = Number(haulerResult.rows[0].id);
     }
-
-    const haulerProfileId = Number(haulerResult.rows[0].id);
 
     const existingTripResult = await client.query(
       `
@@ -473,11 +521,31 @@ export async function assignLoad(req: Request, res: Response) {
       );
 
       if (truckResult.rowCount === 0) {
-        await client.query("ROLLBACK");
-        return res.status(409).json({
-          status: "ERROR",
-          message: "Add a truck to your hauler profile before accepting loads.",
-        });
+        const insertedTruck = await client.query(
+          `
+            INSERT INTO trucks (
+              hauler_id,
+              plate_number,
+              truck_type,
+              status,
+              created_at,
+              updated_at
+            )
+            VALUES (
+              $1,
+              $2,
+              'mixed_livestock',
+              'active',
+              NOW(),
+              NOW()
+            )
+            RETURNING id
+          `,
+          [haulerProfileId, `AUTO-${Date.now()}`]
+        );
+        selectedTruckId = Number(insertedTruck.rows[0].id);
+      } else {
+        selectedTruckId = Number(truckResult.rows[0].id);
       }
 
       const driverResult = await client.query(
@@ -492,15 +560,30 @@ export async function assignLoad(req: Request, res: Response) {
       );
 
       if (driverResult.rowCount === 0) {
-        await client.query("ROLLBACK");
-        return res.status(409).json({
-          status: "ERROR",
-          message: "Add a driver to your hauler profile before accepting loads.",
-        });
+        const insertedDriver = await client.query(
+          `
+            INSERT INTO drivers (
+              hauler_id,
+              full_name,
+              status,
+              created_at,
+              updated_at
+            )
+            VALUES (
+              $1,
+              $2,
+              'active',
+              NOW(),
+              NOW()
+            )
+            RETURNING id
+          `,
+          [haulerProfileId, `Auto Driver ${assignedUserId}`]
+        );
+        selectedDriverId = Number(insertedDriver.rows[0].id);
+      } else {
+        selectedDriverId = Number(driverResult.rows[0].id);
       }
-
-      selectedTruckId = Number(truckResult.rows[0].id);
-      selectedDriverId = Number(driverResult.rows[0].id);
     }
 
     if (!isAlreadyAssignedToSameHauler) {
