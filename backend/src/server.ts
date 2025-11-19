@@ -12,6 +12,7 @@ import truckRoutes from "./routes/truckRoutes";
 import loadboardRoutes from "./routes/loadboardRoutes";
 import driverRoutes from "./routes/driverRoutes";
 import tripRoutes from "./routes/tripRoutes";
+import marketplaceRoutes from "./routes/marketplaceRoutes";
 
 dotenv.config();
 
@@ -61,6 +62,7 @@ app.use("/api/trucks", truckRoutes);
 app.use("/api/loadboard", loadboardRoutes);
 app.use("/api/drivers", driverRoutes);
 app.use("/api/trips", tripRoutes);
+app.use("/api/marketplace", marketplaceRoutes);
 
 const PORT = Number(process.env.PORT) || 4000;
 app.listen(PORT, () => {
