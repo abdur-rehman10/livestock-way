@@ -1,0 +1,941 @@
+"use strict";
+var __importDefault = (this && this.__importDefault) || function (mod) {
+    return (mod && mod.__esModule) ? mod : { "default": mod };
+};
+Object.defineProperty(exports, "__esModule", { value: true });
+const express_1 = require("express");
+const auth_1 = __importDefault(require("../middlewares/auth"));
+const marketplaceService_1 = require("../services/marketplaceService");
+function getAuthUser(req) {
+    return req.user ?? {};
+}
+const router = (0, express_1.Router)();
+router.post("/loads/:loadId/offers", auth_1.default, async (req, res) => {
+    try {
+        const authUser = getAuthUser(req);
+        const loadId = req.params.loadId;
+        if (!loadId) {
+            return res.status(400).json({ error: "Missing loadId" });
+        }
+        const derivedHaulerId = req.body?.hauler_id !== undefined && req.body?.hauler_id !== null
+            ? String(req.body.hauler_id)
+            : authUser.company_id !== undefined && authUser.company_id !== null
+                ? String(authUser.company_id)
+                : "";
+        if (!derivedHaulerId) {
+            return res.status(400).json({ error: "hauler_id is required" });
+        }
+        const offer = await (0, marketplaceService_1.createLoadOffer)({
+            loadId,
+            haulerId: derivedHaulerId,
+            createdByUserId: String(authUser.id ?? ""),
+            offeredAmount: Number(req.body.offered_amount),
+            currency: req.body.currency,
+            message: req.body.message,
+            expiresAt: req.body.expires_at,
+        });
+        res.status(201).json({ offer });
+    }
+    catch (err) {
+        console.error("createLoadOffer error", err);
+        res.status(500).json({ error: "Failed to create offer" });
+    }
+});
+router.get("/loads/:loadId/offers", auth_1.default, async (req, res) => {
+    try {
+        const loadId = req.params.loadId;
+        if (!loadId) {
+            return res.status(400).json({ error: "Missing loadId" });
+        }
+        const page = Number(req.query.page ?? 1);
+        const pageSize = Number(req.query.pageSize ?? 20);
+        const result = await (0, marketplaceService_1.listLoadOffers)(loadId, {
+            limit: pageSize,
+            offset: (page - 1) * pageSize,
+        });
+        res.json({ items: result.items, total: result.total, page, pageSize });
+    }
+    catch (err) {
+        console.error("listLoadOffers error", err);
+        res.status(500).json({ error: "Failed to fetch offers" });
+    }
+});
+router.post("/load-offers/:offerId/withdraw", auth_1.default, async (req, res) => {
+    try {
+        const authUser = getAuthUser(req);
+        const offerId = req.params.offerId;
+        if (!offerId) {
+            return res.status(400).json({ error: "Missing offerId" });
+        }
+        const offer = await (0, marketplaceService_1.getLoadOfferById)(offerId);
+        if (!offer) {
+            return res.status(404).json({ error: "Offer not found" });
+        }
+        const companyId = String(authUser.company_id ?? "");
+        if (!companyId || offer.hauler_id !== companyId) {
+            return res.status(403).json({ error: "Forbidden" });
+        }
+        if (offer.status !== marketplaceService_1.LoadOfferStatus.PENDING) {
+            return res.status(400).json({ error: "Offer is not pending" });
+        }
+        const updated = await (0, marketplaceService_1.updateOfferStatus)(offer.id, marketplaceService_1.LoadOfferStatus.WITHDRAWN);
+        return res.json({ offer: updated });
+    }
+    catch (err) {
+        console.error("withdrawOffer error", err);
+        res.status(500).json({ error: "Failed to withdraw offer" });
+    }
+});
+router.post("/load-offers/:offerId/reject", auth_1.default, async (req, res) => {
+    try {
+        const authUser = getAuthUser(req);
+        const offerId = req.params.offerId;
+        if (!offerId) {
+            return res.status(400).json({ error: "Missing offerId" });
+        }
+        const offer = await (0, marketplaceService_1.getLoadOfferById)(offerId);
+        if (!offer) {
+            return res.status(404).json({ error: "Offer not found" });
+        }
+        const load = await (0, marketplaceService_1.getLoadById)(offer.load_id);
+        if (!load) {
+            return res.status(404).json({ error: "Load not found" });
+        }
+        if (load.shipper_id !== String(authUser.company_id ?? "")) {
+            return res.status(403).json({ error: "Forbidden" });
+        }
+        if (offer.status !== marketplaceService_1.LoadOfferStatus.PENDING) {
+            return res.status(400).json({ error: "Offer is not pending" });
+        }
+        const updated = await (0, marketplaceService_1.updateOfferStatus)(offer.id, marketplaceService_1.LoadOfferStatus.REJECTED, {
+            rejected_at: new Date().toISOString(),
+        });
+        return res.json({ offer: updated });
+    }
+    catch (err) {
+        console.error("rejectOffer error", err);
+        res.status(500).json({ error: "Failed to reject offer" });
+    }
+});
+router.post("/load-offers/:offerId/accept", auth_1.default, async (req, res) => {
+    try {
+        const authUser = getAuthUser(req);
+        const offerId = req.params.offerId;
+        if (!offerId) {
+            return res.status(400).json({ error: "Missing offerId" });
+        }
+        const offer = await (0, marketplaceService_1.getLoadOfferById)(offerId);
+        if (!offer) {
+            return res.status(404).json({ error: "Offer not found" });
+        }
+        const load = await (0, marketplaceService_1.getLoadById)(offer.load_id);
+        if (!load) {
+            return res.status(404).json({ error: "Load not found" });
+        }
+        if (load.shipper_id !== String(authUser.company_id ?? "")) {
+            return res.status(403).json({ error: "Forbidden" });
+        }
+        if (load.status !== marketplaceService_1.LoadStatus.PUBLISHED) {
+            return res.status(400).json({ error: "Load is not open for offers" });
+        }
+        if (offer.status !== marketplaceService_1.LoadOfferStatus.PENDING) {
+            return res.status(400).json({ error: "Offer is not pending" });
+        }
+        const result = await (0, marketplaceService_1.acceptOfferAndCreateTrip)({
+            offerId: offer.id,
+            loadId: offer.load_id,
+            haulerId: offer.hauler_id,
+            shipperId: load.shipper_id,
+            shipperUserId: load.shipper_user_id,
+            haulerUserId: offer.created_by_user_id,
+            amount: Number(offer.offered_amount),
+            currency: offer.currency,
+        });
+        const acceptedOffer = await (0, marketplaceService_1.getLoadOfferById)(offer.id);
+        res.status(201).json({
+            offer: acceptedOffer,
+            trip: result.trip,
+            payment: result.payment,
+        });
+    }
+    catch (err) {
+        console.error("acceptOffer error", err);
+        res.status(500).json({ error: "Failed to accept offer" });
+    }
+});
+// helper to check offer access
+async function getOfferAccess(offerId, userId, userRole) {
+    const offer = await (0, marketplaceService_1.getLoadOfferById)(offerId);
+    if (!offer) {
+        return { offer: null, load: null, allowed: false, isShipper: false, isHauler: false, isAdmin: false };
+    }
+    const load = await (0, marketplaceService_1.getLoadById)(offer.load_id);
+    const shipperUserId = load?.shipper_user_id ?? null;
+    const isShipper = shipperUserId !== null && shipperUserId === String(userId ?? "");
+    const isHauler = offer.created_by_user_id === String(userId ?? "");
+    const isAdmin = (userRole ?? "").toUpperCase() === "SUPER_ADMIN";
+    return { offer, load, allowed: isShipper || isHauler || isAdmin, isShipper, isHauler, isAdmin };
+}
+function normalizeRole(role) {
+    return (role ?? "").toUpperCase();
+}
+function getCompanyId(user) {
+    if (user?.company_id === undefined || user?.company_id === null) {
+        return null;
+    }
+    return String(user.company_id);
+}
+function isSuperAdminUser(user) {
+    return normalizeRole(user?.user_type) === "SUPER_ADMIN";
+}
+function isShipperForLoad(user, load) {
+    const companyId = getCompanyId(user);
+    const userId = user?.id ? String(user.id) : null;
+    return companyId === load.shipper_id || userId === load.shipper_user_id;
+}
+function isHaulerForTripUser(user, trip) {
+    const companyId = getCompanyId(user);
+    return !!companyId && !!trip.hauler_id && companyId === trip.hauler_id;
+}
+async function isDriverForTripUser(userId, trip) {
+    if (!userId)
+        return false;
+    return (0, marketplaceService_1.driverMatchesUser)(trip.assigned_driver_id, String(userId));
+}
+async function getDisputeContext(disputeId) {
+    const dispute = await (0, marketplaceService_1.getDisputeById)(disputeId);
+    if (!dispute)
+        return null;
+    const trip = await (0, marketplaceService_1.getTripById)(dispute.trip_id);
+    const load = trip ? await (0, marketplaceService_1.getLoadById)(trip.load_id) : null;
+    const payment = await (0, marketplaceService_1.getPaymentById)(dispute.payment_id);
+    return { dispute, trip, load, payment };
+}
+// List offer messages
+router.get("/load-offers/:offerId/messages", auth_1.default, async (req, res) => {
+    try {
+        const offerId = req.params.offerId;
+        if (!offerId) {
+            return res.status(400).json({ error: "Missing offerId" });
+        }
+        const authUser = getAuthUser(req);
+        const access = await getOfferAccess(offerId, authUser.id, authUser.user_type);
+        if (!access.offer) {
+            return res.status(404).json({ error: "Offer not found" });
+        }
+        if (!access.allowed) {
+            return res.status(403).json({ error: "Forbidden" });
+        }
+        const messages = await (0, marketplaceService_1.listOfferMessages)(access.offer.id);
+        return res.json({ items: messages });
+    }
+    catch (err) {
+        console.error("listOfferMessages error", err);
+        res.status(500).json({ error: "Failed to fetch offer messages" });
+    }
+});
+// Post offer message
+router.post("/load-offers/:offerId/messages", auth_1.default, async (req, res) => {
+    try {
+        const offerId = req.params.offerId;
+        if (!offerId) {
+            return res.status(400).json({ error: "Missing offerId" });
+        }
+        const authUser = getAuthUser(req);
+        const access = await getOfferAccess(offerId, authUser.id, authUser.user_type);
+        if (!access.offer) {
+            return res.status(404).json({ error: "Offer not found" });
+        }
+        if (!access.allowed) {
+            return res.status(403).json({ error: "Forbidden" });
+        }
+        if (access.offer.status === marketplaceService_1.LoadOfferStatus.EXPIRED ||
+            access.offer.status === marketplaceService_1.LoadOfferStatus.REJECTED ||
+            access.offer.status === marketplaceService_1.LoadOfferStatus.WITHDRAWN) {
+            return res.status(400).json({ error: "Cannot message on closed offer" });
+        }
+        const message = await (0, marketplaceService_1.createOfferMessage)({
+            offerId: access.offer.id,
+            senderUserId: String(authUser.id ?? ""),
+            senderRole: String(authUser.user_type ?? "unknown"),
+            text: req.body.text,
+            attachments: req.body.attachments,
+        });
+        return res.status(201).json({ message });
+    }
+    catch (err) {
+        console.error("createOfferMessage error", err);
+        res.status(500).json({ error: "Failed to send offer message" });
+    }
+});
+/**
+ * ==========================
+ * TRIPS & LIFECYCLE
+ * ==========================
+ */
+router.get("/trips/:tripId", auth_1.default, async (req, res) => {
+    try {
+        const tripId = req.params.tripId;
+        if (!tripId) {
+            return res.status(400).json({ error: "Missing tripId" });
+        }
+        const context = await (0, marketplaceService_1.getTripAndLoad)(tripId);
+        if (!context) {
+            return res.status(404).json({ error: "Trip not found" });
+        }
+        const user = getAuthUser(req);
+        const isShipper = isShipperForLoad(user, context.load);
+        const isHauler = isHaulerForTripUser(user, context.trip);
+        const isDriver = await isDriverForTripUser(user.id, context.trip);
+        if (!isShipper && !isHauler && !isDriver && !isSuperAdminUser(user)) {
+            return res.status(403).json({ error: "Forbidden" });
+        }
+        const payment = await (0, marketplaceService_1.getPaymentForTrip)(context.trip.id);
+        return res.json({ trip: context.trip, load: context.load, payment });
+    }
+    catch (err) {
+        console.error("getTrip error", err);
+        res.status(500).json({ error: "Failed to load trip" });
+    }
+});
+router.patch("/trips/:tripId/assign-driver", auth_1.default, async (req, res) => {
+    try {
+        const tripId = req.params.tripId;
+        if (!tripId) {
+            return res.status(400).json({ error: "Missing tripId" });
+        }
+        const trip = await (0, marketplaceService_1.getTripById)(tripId);
+        if (!trip) {
+            return res.status(404).json({ error: "Trip not found" });
+        }
+        const user = getAuthUser(req);
+        if (!isHaulerForTripUser(user, trip) && !isSuperAdminUser(user)) {
+            return res.status(403).json({ error: "Forbidden" });
+        }
+        if (![marketplaceService_1.TripStatus.PENDING_ESCROW, marketplaceService_1.TripStatus.READY_TO_START].includes(trip.status)) {
+            return res.status(400).json({ error: "Cannot assign driver in current status" });
+        }
+        const driverId = req.body?.driver_id;
+        if (!driverId) {
+            return res.status(400).json({ error: "driver_id is required" });
+        }
+        if (!(await (0, marketplaceService_1.driverBelongsToHauler)(driverId, trip.hauler_id ?? ""))) {
+            return res.status(400).json({ error: "Driver must belong to hauler" });
+        }
+        const updated = await (0, marketplaceService_1.updateTripAssignment)({ tripId: trip.id, driverId });
+        return res.json({ trip: updated });
+    }
+    catch (err) {
+        console.error("assignDriver error", err);
+        res.status(500).json({ error: "Failed to assign driver" });
+    }
+});
+router.patch("/trips/:tripId/assign-vehicle", auth_1.default, async (req, res) => {
+    try {
+        const tripId = req.params.tripId;
+        if (!tripId) {
+            return res.status(400).json({ error: "Missing tripId" });
+        }
+        const trip = await (0, marketplaceService_1.getTripById)(tripId);
+        if (!trip) {
+            return res.status(404).json({ error: "Trip not found" });
+        }
+        const user = getAuthUser(req);
+        if (!isHaulerForTripUser(user, trip) && !isSuperAdminUser(user)) {
+            return res.status(403).json({ error: "Forbidden" });
+        }
+        if (![marketplaceService_1.TripStatus.PENDING_ESCROW, marketplaceService_1.TripStatus.READY_TO_START].includes(trip.status)) {
+            return res.status(400).json({ error: "Cannot assign vehicle in current status" });
+        }
+        const vehicleId = req.body?.vehicle_id;
+        if (!vehicleId) {
+            return res.status(400).json({ error: "vehicle_id is required" });
+        }
+        if (!(await (0, marketplaceService_1.vehicleBelongsToHauler)(vehicleId, trip.hauler_id ?? ""))) {
+            return res.status(400).json({ error: "Vehicle must belong to hauler" });
+        }
+        const updated = await (0, marketplaceService_1.updateTripAssignment)({ tripId: trip.id, vehicleId });
+        return res.json({ trip: updated });
+    }
+    catch (err) {
+        console.error("assignVehicle error", err);
+        res.status(500).json({ error: "Failed to assign vehicle" });
+    }
+});
+router.post("/trips/:tripId/start", auth_1.default, async (req, res) => {
+    try {
+        const tripId = req.params.tripId;
+        if (!tripId) {
+            return res.status(400).json({ error: "Missing tripId" });
+        }
+        const context = await (0, marketplaceService_1.getTripAndLoad)(tripId);
+        if (!context) {
+            return res.status(404).json({ error: "Trip not found" });
+        }
+        const user = getAuthUser(req);
+        const isHauler = isHaulerForTripUser(user, context.trip);
+        const isDriver = await isDriverForTripUser(user.id, context.trip);
+        const isShipper = isShipperForLoad(user, context.load);
+        if (!isHauler && !isDriver && !isShipper && !isSuperAdminUser(user)) {
+            return res.status(403).json({ error: "Forbidden" });
+        }
+        if (context.trip.status !== marketplaceService_1.TripStatus.READY_TO_START) {
+            return res.status(400).json({ error: "Trip must be READY_TO_START" });
+        }
+        const payment = await (0, marketplaceService_1.getPaymentForTrip)(context.trip.id);
+        if (!payment || payment.status !== marketplaceService_1.PaymentStatus.ESCROW_FUNDED) {
+            return res.status(400).json({ error: "Escrow not funded" });
+        }
+        const now = new Date().toISOString();
+        const updatedTrip = await (0, marketplaceService_1.updateTripStatus)(context.trip.id, marketplaceService_1.TripStatus.IN_PROGRESS, {
+            started_at: now,
+        });
+        const updatedLoad = await (0, marketplaceService_1.updateLoadStatus)(context.load.id, marketplaceService_1.LoadStatus.IN_TRANSIT);
+        return res.json({ trip: updatedTrip, load: updatedLoad });
+    }
+    catch (err) {
+        console.error("startTrip error", err);
+        res.status(500).json({ error: "Failed to start trip" });
+    }
+});
+router.post("/trips/:tripId/mark-delivered", auth_1.default, async (req, res) => {
+    try {
+        const tripId = req.params.tripId;
+        if (!tripId) {
+            return res.status(400).json({ error: "Missing tripId" });
+        }
+        const context = await (0, marketplaceService_1.getTripAndLoad)(tripId);
+        if (!context) {
+            return res.status(404).json({ error: "Trip not found" });
+        }
+        const user = getAuthUser(req);
+        const isHauler = isHaulerForTripUser(user, context.trip);
+        const isDriver = await isDriverForTripUser(user.id, context.trip);
+        if (!isHauler && !isDriver && !isSuperAdminUser(user)) {
+            return res.status(403).json({ error: "Forbidden" });
+        }
+        if (context.trip.status !== marketplaceService_1.TripStatus.IN_PROGRESS) {
+            return res.status(400).json({ error: "Trip must be IN_PROGRESS" });
+        }
+        const now = new Date().toISOString();
+        const updatedTrip = await (0, marketplaceService_1.updateTripStatus)(context.trip.id, marketplaceService_1.TripStatus.DELIVERED_AWAITING_CONFIRMATION, { delivered_at: now });
+        const updatedLoad = await (0, marketplaceService_1.updateLoadStatus)(context.load.id, marketplaceService_1.LoadStatus.DELIVERED);
+        return res.json({ trip: updatedTrip, load: updatedLoad });
+    }
+    catch (err) {
+        console.error("markDelivered error", err);
+        res.status(500).json({ error: "Failed to mark delivered" });
+    }
+});
+router.post("/trips/:tripId/confirm-delivery", auth_1.default, async (req, res) => {
+    try {
+        const tripId = req.params.tripId;
+        if (!tripId) {
+            return res.status(400).json({ error: "Missing tripId" });
+        }
+        const context = await (0, marketplaceService_1.getTripAndLoad)(tripId);
+        if (!context) {
+            return res.status(404).json({ error: "Trip not found" });
+        }
+        const user = getAuthUser(req);
+        if (!isShipperForLoad(user, context.load) && !isSuperAdminUser(user)) {
+            return res.status(403).json({ error: "Only shipper can confirm delivery" });
+        }
+        if (context.trip.status !== marketplaceService_1.TripStatus.DELIVERED_AWAITING_CONFIRMATION) {
+            return res.status(400).json({ error: "Trip not awaiting confirmation" });
+        }
+        const payment = await (0, marketplaceService_1.getPaymentForTrip)(context.trip.id);
+        if (!payment || payment.status !== marketplaceService_1.PaymentStatus.ESCROW_FUNDED) {
+            return res.status(400).json({ error: "Escrow must be funded" });
+        }
+        const now = new Date().toISOString();
+        const updatedTrip = await (0, marketplaceService_1.updateTripStatus)(context.trip.id, marketplaceService_1.TripStatus.DELIVERED_CONFIRMED, { delivered_confirmed_at: now });
+        const releaseAt = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString();
+        const updatedPayment = await (0, marketplaceService_1.scheduleAutoRelease)({ tripId: context.trip.id, releaseAt });
+        const updatedLoad = await (0, marketplaceService_1.updateLoadStatus)(context.load.id, marketplaceService_1.LoadStatus.DELIVERED);
+        return res.json({ trip: updatedTrip, payment: updatedPayment, load: updatedLoad });
+    }
+    catch (err) {
+        console.error("confirmDelivery error", err);
+        res.status(500).json({ error: "Failed to confirm delivery" });
+    }
+});
+/**
+ * ==========================
+ * ESCROW
+ * ==========================
+ */
+router.post("/trips/:tripId/escrow/payment-intent", auth_1.default, async (req, res) => {
+    try {
+        const tripId = req.params.tripId;
+        if (!tripId) {
+            return res.status(400).json({ error: "Missing tripId" });
+        }
+        const context = await (0, marketplaceService_1.getTripAndLoad)(tripId);
+        if (!context) {
+            return res.status(404).json({ error: "Trip not found" });
+        }
+        const user = getAuthUser(req);
+        if (!isShipperForLoad(user, context.load) && !isSuperAdminUser(user)) {
+            return res.status(403).json({ error: "Forbidden" });
+        }
+        if (context.trip.status !== marketplaceService_1.TripStatus.PENDING_ESCROW) {
+            return res.status(400).json({ error: "Trip must be PENDING_ESCROW" });
+        }
+        const provider = req.body?.provider || "dummy";
+        const externalIntentId = req.body?.external_intent_id || `pi_${context.trip.id}_${Date.now()}`;
+        const payment = await (0, marketplaceService_1.attachEscrowPaymentIntent)({
+            tripId: context.trip.id,
+            provider,
+            externalIntentId,
+        });
+        const clientSecret = payment?.external_intent_id
+            ? `secret_${payment.external_intent_id}`
+            : null;
+        return res.json({ payment, client_secret: clientSecret });
+    }
+    catch (err) {
+        console.error("paymentIntent error", err);
+        res.status(500).json({ error: "Failed to create payment intent" });
+    }
+});
+router.get("/trips/:tripId/payment", auth_1.default, async (req, res) => {
+    try {
+        const tripId = req.params.tripId;
+        if (!tripId) {
+            return res.status(400).json({ error: "Missing tripId" });
+        }
+        const context = await (0, marketplaceService_1.getTripAndLoad)(tripId);
+        if (!context) {
+            return res.status(404).json({ error: "Trip not found" });
+        }
+        const user = getAuthUser(req);
+        const isShipper = isShipperForLoad(user, context.load);
+        const isHauler = isHaulerForTripUser(user, context.trip);
+        if (!isShipper && !isHauler && !isSuperAdminUser(user)) {
+            return res.status(403).json({ error: "Forbidden" });
+        }
+        const payment = await (0, marketplaceService_1.getPaymentForTrip)(context.trip.id);
+        if (!payment) {
+            return res.status(404).json({ error: "Payment not found" });
+        }
+        return res.json({ payment });
+    }
+    catch (err) {
+        console.error("getPayment error", err);
+        res.status(500).json({ error: "Failed to load payment" });
+    }
+});
+router.post("/webhooks/payment-provider", async (req, res) => {
+    try {
+        const { external_intent_id, event } = req.body ?? {};
+        if (!external_intent_id || !event) {
+            return res.status(400).json({ error: "external_intent_id and event are required" });
+        }
+        const payment = await (0, marketplaceService_1.getPaymentByIntentId)(external_intent_id);
+        if (!payment) {
+            return res.status(200).json({ ok: true });
+        }
+        if (event === "payment_succeeded" && payment.trip_id) {
+            await (0, marketplaceService_1.markPaymentFunded)(payment.trip_id);
+        }
+        else if (event === "payment_failed") {
+            await (0, marketplaceService_1.updatePaymentStatus)(payment.id, marketplaceService_1.PaymentStatus.AWAITING_FUNDING);
+        }
+        return res.status(200).json({ ok: true });
+    }
+    catch (err) {
+        console.error("payment webhook error", err);
+        res.status(500).json({ error: "Webhook processing failed" });
+    }
+});
+/**
+ * ==========================
+ * DISPUTES
+ * ==========================
+ */
+router.post("/trips/:tripId/disputes", auth_1.default, async (req, res) => {
+    try {
+        const tripId = req.params.tripId;
+        if (!tripId) {
+            return res.status(400).json({ error: "Missing tripId" });
+        }
+        const context = await (0, marketplaceService_1.getTripAndLoad)(tripId);
+        if (!context) {
+            return res.status(404).json({ error: "Trip not found" });
+        }
+        const user = getAuthUser(req);
+        const isShipper = isShipperForLoad(user, context.load);
+        const isHauler = isHaulerForTripUser(user, context.trip);
+        if (!isShipper && !isHauler && !isSuperAdminUser(user)) {
+            return res.status(403).json({ error: "Forbidden" });
+        }
+        const payment = await (0, marketplaceService_1.getPaymentForTrip)(context.trip.id);
+        if (!payment || payment.status !== marketplaceService_1.PaymentStatus.ESCROW_FUNDED) {
+            return res.status(400).json({ error: "Disputes require funded escrow" });
+        }
+        if (![
+            marketplaceService_1.TripStatus.DELIVERED_AWAITING_CONFIRMATION,
+            marketplaceService_1.TripStatus.DELIVERED_CONFIRMED,
+        ].includes(context.trip.status)) {
+            return res.status(400).json({ error: "Trip must be delivered" });
+        }
+        const openDisputes = await (0, marketplaceService_1.listDisputesByPayment)(payment.id, [
+            marketplaceService_1.DisputeStatus.OPEN,
+            marketplaceService_1.DisputeStatus.UNDER_REVIEW,
+        ]);
+        if (openDisputes.length > 0) {
+            return res.status(400).json({ error: "Dispute already open" });
+        }
+        const reasonCode = req.body?.reason_code;
+        if (!reasonCode) {
+            return res.status(400).json({ error: "reason_code is required" });
+        }
+        const dispute = await (0, marketplaceService_1.createPaymentDispute)({
+            tripId: context.trip.id,
+            paymentId: payment.id,
+            openedByUserId: String(user.id ?? ""),
+            openedByRole: normalizeRole(user.user_type),
+            reasonCode,
+            description: req.body?.description,
+            requestedAction: req.body?.requested_action,
+        });
+        await (0, marketplaceService_1.updateTripStatus)(context.trip.id, marketplaceService_1.TripStatus.DISPUTED);
+        if (payment.id) {
+            await (0, marketplaceService_1.clearAutoReleaseForPayment)(payment.id);
+        }
+        return res.status(201).json({ dispute });
+    }
+    catch (err) {
+        console.error("createDispute error", err);
+        res.status(500).json({ error: "Failed to create dispute" });
+    }
+});
+router.get("/trips/:tripId/disputes", auth_1.default, async (req, res) => {
+    try {
+        const tripId = req.params.tripId;
+        if (!tripId) {
+            return res.status(400).json({ error: "Missing tripId" });
+        }
+        const context = await (0, marketplaceService_1.getTripAndLoad)(tripId);
+        if (!context) {
+            return res.status(404).json({ error: "Trip not found" });
+        }
+        const user = getAuthUser(req);
+        const isShipper = isShipperForLoad(user, context.load);
+        const isHauler = isHaulerForTripUser(user, context.trip);
+        if (!isShipper && !isHauler && !isSuperAdminUser(user)) {
+            return res.status(403).json({ error: "Forbidden" });
+        }
+        const disputes = await (0, marketplaceService_1.listDisputesByTrip)(context.trip.id);
+        return res.json({ items: disputes });
+    }
+    catch (err) {
+        console.error("listTripDisputes error", err);
+        res.status(500).json({ error: "Failed to list disputes" });
+    }
+});
+router.get("/disputes/:disputeId", auth_1.default, async (req, res) => {
+    try {
+        const disputeId = req.params.disputeId;
+        if (!disputeId) {
+            return res.status(400).json({ error: "Missing disputeId" });
+        }
+        const context = await getDisputeContext(disputeId);
+        if (!context || !context.trip || !context.load) {
+            return res.status(404).json({ error: "Dispute not found" });
+        }
+        const user = getAuthUser(req);
+        const isShipper = isShipperForLoad(user, context.load);
+        const isHauler = isHaulerForTripUser(user, context.trip);
+        if (!isShipper && !isHauler && !isSuperAdminUser(user)) {
+            return res.status(403).json({ error: "Forbidden" });
+        }
+        return res.json({ dispute: context.dispute });
+    }
+    catch (err) {
+        console.error("getDispute error", err);
+        res.status(500).json({ error: "Failed to fetch dispute" });
+    }
+});
+router.post("/disputes/:disputeId/messages", auth_1.default, async (req, res) => {
+    try {
+        const disputeId = req.params.disputeId;
+        if (!disputeId) {
+            return res.status(400).json({ error: "Missing disputeId" });
+        }
+        const context = await getDisputeContext(disputeId);
+        if (!context || !context.trip || !context.load) {
+            return res.status(404).json({ error: "Dispute not found" });
+        }
+        const user = getAuthUser(req);
+        const isShipper = isShipperForLoad(user, context.load);
+        const isHauler = isHaulerForTripUser(user, context.trip);
+        if (!isShipper && !isHauler && !isSuperAdminUser(user)) {
+            return res.status(403).json({ error: "Forbidden" });
+        }
+        const message = await (0, marketplaceService_1.addDisputeMessage)({
+            disputeId: context.dispute.id,
+            senderUserId: String(user.id ?? ""),
+            senderRole: normalizeRole(user.user_type),
+            text: req.body?.text,
+            attachments: req.body?.attachments,
+        });
+        return res.status(201).json({ message });
+    }
+    catch (err) {
+        console.error("addDisputeMessage error", err);
+        res.status(500).json({ error: "Failed to send dispute message" });
+    }
+});
+router.get("/disputes/:disputeId/messages", auth_1.default, async (req, res) => {
+    try {
+        const disputeId = req.params.disputeId;
+        if (!disputeId) {
+            return res.status(400).json({ error: "Missing disputeId" });
+        }
+        const context = await getDisputeContext(disputeId);
+        if (!context || !context.trip || !context.load) {
+            return res.status(404).json({ error: "Dispute not found" });
+        }
+        const user = getAuthUser(req);
+        const isShipper = isShipperForLoad(user, context.load);
+        const isHauler = isHaulerForTripUser(user, context.trip);
+        if (!isShipper && !isHauler && !isSuperAdminUser(user)) {
+            return res.status(403).json({ error: "Forbidden" });
+        }
+        const messages = await (0, marketplaceService_1.listDisputeMessages)(context.dispute.id);
+        return res.json({ items: messages });
+    }
+    catch (err) {
+        console.error("listDisputeMessages error", err);
+        res.status(500).json({ error: "Failed to fetch messages" });
+    }
+});
+router.post("/disputes/:disputeId/cancel", auth_1.default, async (req, res) => {
+    try {
+        const disputeId = req.params.disputeId;
+        if (!disputeId) {
+            return res.status(400).json({ error: "Missing disputeId" });
+        }
+        const context = await getDisputeContext(disputeId);
+        if (!context || !context.trip || !context.load || !context.payment) {
+            return res.status(404).json({ error: "Dispute not found" });
+        }
+        if (context.dispute.status !== marketplaceService_1.DisputeStatus.OPEN) {
+            return res.status(400).json({ error: "Only OPEN disputes can be cancelled" });
+        }
+        const user = getAuthUser(req);
+        const isOpener = String(user.id ?? "") === context.dispute.opened_by_user_id;
+        if (!isOpener && !isSuperAdminUser(user)) {
+            return res.status(403).json({ error: "Forbidden" });
+        }
+        const updatedDispute = await (0, marketplaceService_1.updateDisputeStatus)(context.dispute.id, marketplaceService_1.DisputeStatus.CANCELLED);
+        const otherOpen = await (0, marketplaceService_1.listDisputesByPayment)(context.payment.id, [
+            marketplaceService_1.DisputeStatus.OPEN,
+            marketplaceService_1.DisputeStatus.UNDER_REVIEW,
+        ]);
+        let updatedTrip = context.trip;
+        let updatedPayment = context.payment;
+        if (otherOpen.length === 0) {
+            if (context.trip.status === marketplaceService_1.TripStatus.DISPUTED) {
+                const nextTrip = await (0, marketplaceService_1.updateTripStatus)(context.trip.id, marketplaceService_1.TripStatus.DELIVERED_CONFIRMED);
+                if (nextTrip) {
+                    updatedTrip = nextTrip;
+                }
+            }
+            if (context.payment.status === marketplaceService_1.PaymentStatus.ESCROW_FUNDED) {
+                const releaseAt = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString();
+                const nextPayment = await (0, marketplaceService_1.scheduleAutoRelease)({
+                    tripId: context.trip.id,
+                    releaseAt,
+                });
+                if (nextPayment) {
+                    updatedPayment = nextPayment;
+                }
+            }
+        }
+        return res.json({ dispute: updatedDispute, trip: updatedTrip, payment: updatedPayment });
+    }
+    catch (err) {
+        console.error("cancelDispute error", err);
+        res.status(500).json({ error: "Failed to cancel dispute" });
+    }
+});
+/**
+ * ==========================
+ * ADMIN
+ * ==========================
+ */
+router.post("/admin/disputes/:disputeId/start-review", auth_1.default, async (req, res) => {
+    try {
+        const user = getAuthUser(req);
+        if (!isSuperAdminUser(user)) {
+            return res.status(403).json({ error: "Admin only" });
+        }
+        const disputeId = req.params.disputeId;
+        if (!disputeId) {
+            return res.status(400).json({ error: "Missing disputeId" });
+        }
+        const dispute = await (0, marketplaceService_1.updateDisputeStatus)(disputeId, marketplaceService_1.DisputeStatus.UNDER_REVIEW);
+        if (!dispute) {
+            return res.status(404).json({ error: "Dispute not found" });
+        }
+        return res.json({ dispute });
+    }
+    catch (err) {
+        console.error("startReview error", err);
+        res.status(500).json({ error: "Failed to update dispute" });
+    }
+});
+router.post("/admin/disputes/:disputeId/resolve-release", auth_1.default, async (req, res) => {
+    try {
+        const user = getAuthUser(req);
+        if (!isSuperAdminUser(user)) {
+            return res.status(403).json({ error: "Admin only" });
+        }
+        const disputeId = req.params.disputeId;
+        if (!disputeId) {
+            return res.status(400).json({ error: "Missing disputeId" });
+        }
+        const result = await (0, marketplaceService_1.resolveDisputeLifecycle)({
+            disputeId,
+            disputeStatus: marketplaceService_1.DisputeStatus.RESOLVED_RELEASE_TO_HAULER,
+            paymentStatus: marketplaceService_1.PaymentStatus.RELEASED_TO_HAULER,
+            resolvedBy: String(user.id ?? ""),
+        });
+        return res.json(result);
+    }
+    catch (err) {
+        console.error("resolveRelease error", err);
+        res.status(500).json({ error: "Failed to resolve dispute" });
+    }
+});
+router.post("/admin/disputes/:disputeId/resolve-refund", auth_1.default, async (req, res) => {
+    try {
+        const user = getAuthUser(req);
+        if (!isSuperAdminUser(user)) {
+            return res.status(403).json({ error: "Admin only" });
+        }
+        const disputeId = req.params.disputeId;
+        if (!disputeId) {
+            return res.status(400).json({ error: "Missing disputeId" });
+        }
+        const result = await (0, marketplaceService_1.resolveDisputeLifecycle)({
+            disputeId,
+            disputeStatus: marketplaceService_1.DisputeStatus.RESOLVED_REFUND_TO_SHIPPER,
+            paymentStatus: marketplaceService_1.PaymentStatus.REFUNDED_TO_SHIPPER,
+            resolvedBy: String(user.id ?? ""),
+        });
+        return res.json(result);
+    }
+    catch (err) {
+        console.error("resolveRefund error", err);
+        res.status(500).json({ error: "Failed to resolve dispute" });
+    }
+});
+router.post("/admin/disputes/:disputeId/resolve-split", auth_1.default, async (req, res) => {
+    try {
+        const user = getAuthUser(req);
+        if (!isSuperAdminUser(user)) {
+            return res.status(403).json({ error: "Admin only" });
+        }
+        const disputeId = req.params.disputeId;
+        if (!disputeId) {
+            return res.status(400).json({ error: "Missing disputeId" });
+        }
+        const context = await getDisputeContext(disputeId);
+        if (!context || !context.payment) {
+            return res.status(404).json({ error: "Dispute not found" });
+        }
+        const amountToHauler = Number(req.body?.amount_to_hauler ?? 0);
+        const amountToShipper = Number(req.body?.amount_to_shipper ?? 0);
+        const total = Number(context.payment.amount ?? 0);
+        if (Math.round((amountToHauler + amountToShipper) * 100) !== Math.round(total * 100)) {
+            return res.status(400).json({ error: "Split amounts must equal payment amount" });
+        }
+        const result = await (0, marketplaceService_1.resolveDisputeLifecycle)({
+            disputeId,
+            disputeStatus: marketplaceService_1.DisputeStatus.RESOLVED_SPLIT,
+            paymentStatus: marketplaceService_1.PaymentStatus.SPLIT_BETWEEN_PARTIES,
+            resolvedBy: String(user.id ?? ""),
+            resolutionAmounts: {
+                amountToHauler: amountToHauler.toFixed(2),
+                amountToShipper: amountToShipper.toFixed(2),
+            },
+        });
+        return res.json(result);
+    }
+    catch (err) {
+        console.error("resolveSplit error", err);
+        res.status(500).json({ error: "Failed to resolve dispute" });
+    }
+});
+router.post("/admin/payments/:paymentId/force-release", auth_1.default, async (req, res) => {
+    try {
+        const user = getAuthUser(req);
+        if (!isSuperAdminUser(user)) {
+            return res.status(403).json({ error: "Admin only" });
+        }
+        const paymentId = req.params.paymentId;
+        if (!paymentId) {
+            return res.status(400).json({ error: "Missing paymentId" });
+        }
+        const result = await (0, marketplaceService_1.finalizePaymentLifecycle)({
+            paymentId,
+            paymentStatus: marketplaceService_1.PaymentStatus.RELEASED_TO_HAULER,
+            tripStatus: marketplaceService_1.TripStatus.CLOSED,
+            loadStatus: marketplaceService_1.LoadStatus.COMPLETED,
+        });
+        return res.json(result);
+    }
+    catch (err) {
+        console.error("forceRelease error", err);
+        res.status(500).json({ error: "Failed to update payment" });
+    }
+});
+router.post("/admin/payments/:paymentId/force-refund", auth_1.default, async (req, res) => {
+    try {
+        const user = getAuthUser(req);
+        if (!isSuperAdminUser(user)) {
+            return res.status(403).json({ error: "Admin only" });
+        }
+        const paymentId = req.params.paymentId;
+        if (!paymentId) {
+            return res.status(400).json({ error: "Missing paymentId" });
+        }
+        const result = await (0, marketplaceService_1.finalizePaymentLifecycle)({
+            paymentId,
+            paymentStatus: marketplaceService_1.PaymentStatus.REFUNDED_TO_SHIPPER,
+            tripStatus: marketplaceService_1.TripStatus.CLOSED,
+            loadStatus: marketplaceService_1.LoadStatus.COMPLETED,
+        });
+        return res.json(result);
+    }
+    catch (err) {
+        console.error("forceRefund error", err);
+        res.status(500).json({ error: "Failed to update payment" });
+    }
+});
+router.post("/admin/payments/run-auto-release", auth_1.default, async (req, res) => {
+    try {
+        const user = getAuthUser(req);
+        if (!isSuperAdminUser(user)) {
+            return res.status(403).json({ error: "Admin only" });
+        }
+        const results = await (0, marketplaceService_1.autoReleaseReadyPayments)();
+        return res.json({
+            processed: results.map((r) => ({
+                payment_id: r.payment.id,
+                trip_id: r.trip?.id ?? null,
+                load_id: r.load?.id ?? null,
+            })),
+        });
+    }
+    catch (err) {
+        console.error("autoReleaseJob error", err);
+        res.status(500).json({ error: "Auto-release job failed" });
+    }
+});
+exports.default = router;
+//# sourceMappingURL=marketplaceRoutes.js.map

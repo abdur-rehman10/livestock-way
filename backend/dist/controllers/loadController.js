@@ -93,7 +93,7 @@ async function getLoads(req, res) {
             params.push(status);
         }
         else if (!shipperFilter && !assignedFilter) {
-            sql += ` AND status = 'open'`;
+            sql += ` AND status = 'posted'`;
         }
         if (shipperFilter) {
             sql += ` AND shipper_id = $${index++}`;
@@ -214,7 +214,7 @@ async function createLoad(req, res) {
         notes
       )
       VALUES (
-        $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,'open','public',$12
+        $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,'posted','public',$12
       )
       RETURNING
         id,
@@ -329,7 +329,7 @@ async function assignLoad(req, res) {
         const isAlreadyAssignedToSameHauler = loadRow.status === "matched" &&
             loadRow.assigned_to_user_id &&
             Number(loadRow.assigned_to_user_id) === assignedUserId;
-        if (loadRow.status !== "open" && !isAlreadyAssignedToSameHauler) {
+        if (loadRow.status !== "posted" && !isAlreadyAssignedToSameHauler) {
             await client.query("ROLLBACK");
             return res.status(409).json({
                 status: "ERROR",
@@ -408,7 +408,7 @@ async function assignLoad(req, res) {
           assigned_to_user_id = $1,
           assigned_at = NOW(),
           status = 'matched'
-        WHERE id = $2 AND status = 'open'
+        WHERE id = $2 AND status = 'posted'
       `, [assignedUserId, loadId]);
             if (updateResult.rowCount === 0) {
                 await client.query("ROLLBACK");
