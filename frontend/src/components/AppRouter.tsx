@@ -33,6 +33,7 @@ import { Toaster } from './ui/sonner';
 import { storage, STORAGE_KEYS, getPreferences, updatePreferences } from '../lib/storage';
 import { toast } from 'sonner';
 import { NotFound } from '../pages/ErrorPages';
+import MarketplaceDevLab from '../pages/MarketplaceDevLab';
 
 type UserRole = 'shipper' | 'driver' | 'hauler' | 'stakeholder' | 'super-admin' | null;
 type LandingRole = 'hauler' | 'shipper' | 'stakeholder';
@@ -204,6 +205,8 @@ export function AppRouter({ showKeyboardShortcuts, onKeyboardShortcutsToggle }: 
             />
           </AuthRoute>
         } />
+
+        <Route path="/dev/marketplace" element={<MarketplaceDevLab />} />
 
         <Route path="/admin/login" element={
           <AuthRoute>

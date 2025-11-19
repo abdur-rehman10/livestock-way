@@ -86,11 +86,13 @@ export function filterLoads<T extends Record<string, any>>(
   }
 
   // Price range filter
-  if (filters.priceMin !== undefined || filters.priceMax !== undefined) {
-    filtered = filtered.filter(load => {
-      const price = parseFloat(load.price?.replace(/[^0-9.]/g, '') || '0');
-      const min = filters.priceMin ?? 0;
-      const max = filters.priceMax ?? Infinity;
+  const hasMin = typeof filters.priceMin === "number" && filters.priceMin > 0;
+  const hasMax = typeof filters.priceMax === "number" && filters.priceMax > 0;
+  if (hasMin || hasMax) {
+    filtered = filtered.filter((load) => {
+      const price = parseFloat(load.price?.replace(/[^0-9.]/g, "") || "0");
+      const min = hasMin ? filters.priceMin! : 0;
+      const max = hasMax ? filters.priceMax! : Infinity;
       return price >= min && price <= max;
     });
   }

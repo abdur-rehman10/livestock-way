@@ -2,14 +2,17 @@
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.DisputeStatus = exports.PaymentStatus = exports.TripStatus = exports.LoadOfferStatus = exports.LoadStatus = void 0;
 exports.getLoadOfferById = getLoadOfferById;
+exports.getLatestOfferForHauler = getLatestOfferForHauler;
 exports.getLoadById = getLoadById;
 exports.createLoadOffer = createLoadOffer;
 exports.listLoadOffers = listLoadOffers;
 exports.updateOfferStatus = updateOfferStatus;
+exports.updateOfferDetails = updateOfferDetails;
 exports.expireOtherOffers = expireOtherOffers;
 exports.acceptOfferAndCreateTrip = acceptOfferAndCreateTrip;
 exports.createOfferMessage = createOfferMessage;
 exports.listOfferMessages = listOfferMessages;
+exports.offerHasShipperMessage = offerHasShipperMessage;
 exports.getTripById = getTripById;
 exports.getTripAndLoad = getTripAndLoad;
 exports.updateTripAssignment = updateTripAssignment;
@@ -27,6 +30,7 @@ exports.getPaymentByIntentId = getPaymentByIntentId;
 exports.updatePaymentStatus = updatePaymentStatus;
 exports.clearAutoReleaseForPayment = clearAutoReleaseForPayment;
 exports.finalizePaymentLifecycle = finalizePaymentLifecycle;
+exports.getHaulerSummary = getHaulerSummary;
 exports.autoReleaseReadyPayments = autoReleaseReadyPayments;
 exports.resolveDisputeLifecycle = resolveDisputeLifecycle;
 exports.createPaymentDispute = createPaymentDispute;
@@ -192,6 +196,17 @@ async function getLoadOfferById(offerId) {
     `, [offerId]);
     return result.rows[0] ?? null;
 }
+async function getLatestOfferForHauler(loadId, haulerId) {
+    const result = await database_1.pool.query(`
+      SELECT *
+      FROM load_offers
+      WHERE load_id = $1
+        AND hauler_id = $2
+      ORDER BY created_at DESC
+      LIMIT 1
+    `, [loadId, haulerId]);
+    return result.rows[0] ?? null;
+}
 function mapLoadRow(row) {
     return {
         ...row,
@@ -233,7 +248,8 @@ async function getLoadById(loadId) {
              l.status::text     AS status,
              l.asking_currency  AS currency,
              l.asking_amount::text AS asking_amount,
-             l.awarded_offer_id::text AS awarded_offer_id
+             l.awarded_offer_id::text AS awarded_offer_id,
+             l.assigned_to_user_id::text AS assigned_to_user_id
       FROM loads l
       JOIN shippers s ON s.id = l.shipper_id
       WHERE l.id = $1
@@ -311,6 +327,37 @@ async function updateOfferStatus(offerId, status, patch = {}) {
     const result = await database_1.pool.query(query, [offerId, ...values]);
     return result.rows[0] ?? null;
 }
+async function updateOfferDetails(offerId, patch) {
+    const sets = [];
+    const values = [];
+    if (patch.offeredAmount !== undefined) {
+        sets.push(`offered_amount = $${values.length + 2}`);
+        values.push(patch.offeredAmount);
+    }
+    if (patch.currency !== undefined) {
+        sets.push(`currency = $${values.length + 2}`);
+        values.push(patch.currency);
+    }
+    if (patch.message !== undefined) {
+        sets.push(`message = $${values.length + 2}`);
+        values.push(patch.message);
+    }
+    if (patch.expiresAt !== undefined) {
+        sets.push(`expires_at = $${values.length + 2}`);
+        values.push(patch.expiresAt);
+    }
+    if (sets.length === 0) {
+        return getLoadOfferById(offerId);
+    }
+    sets.push(`updated_at = NOW()`);
+    const result = await database_1.pool.query(`
+      UPDATE load_offers
+      SET ${sets.join(", ")}
+      WHERE id = $1
+      RETURNING *
+    `, [offerId, ...values]);
+    return result.rows[0] ?? null;
+}
 async function expireOtherOffers(loadId, acceptedOfferId, client) {
     const runner = client ?? database_1.pool;
     await runner.query(`
@@ -324,6 +371,68 @@ async function expireOtherOffers(loadId, acceptedOfferId, client) {
 }
 async function acceptOfferAndCreateTrip(params) {
     const client = await database_1.pool.connect();
+    async function ensureTruckId() {
+        const existing = await client.query(`
+        SELECT id::text
+        FROM trucks
+        WHERE hauler_id = $1
+        ORDER BY updated_at DESC
+        LIMIT 1
+      `, [params.haulerId]);
+        if (existing.rowCount && existing.rows[0]?.id) {
+            return existing.rows[0].id;
+        }
+        const inserted = await client.query(`
+        INSERT INTO trucks (
+          hauler_id,
+          plate_number,
+          truck_type,
+          status,
+          created_at,
+          updated_at
+        )
+        VALUES (
+          $1,
+          $2,
+          'mixed_livestock',
+          'active',
+          NOW(),
+          NOW()
+        )
+        RETURNING id::text
+      `, [params.haulerId, `AUTO-${Date.now()}`]);
+        return inserted.rows[0].id;
+    }
+    async function ensureDriverId() {
+        const existing = await client.query(`
+        SELECT id::text
+        FROM drivers
+        WHERE hauler_id = $1
+        ORDER BY updated_at DESC
+        LIMIT 1
+      `, [params.haulerId]);
+        if (existing.rowCount && existing.rows[0]?.id) {
+            return existing.rows[0].id;
+        }
+        const inserted = await client.query(`
+        INSERT INTO drivers (
+          hauler_id,
+          full_name,
+          status,
+          created_at,
+          updated_at
+        )
+        VALUES (
+          $1,
+          $2,
+          'active',
+          NOW(),
+          NOW()
+        )
+        RETURNING id::text
+      `, [params.haulerId, `Auto Driver ${params.haulerUserId ?? ""}`]);
+        return inserted.rows[0]?.id ?? null;
+    }
     try {
         await client.query("BEGIN");
         await client.query(`
@@ -334,17 +443,27 @@ async function acceptOfferAndCreateTrip(params) {
         WHERE id = $2
       `, [LoadOfferStatus.ACCEPTED, params.offerId]);
         await expireOtherOffers(params.loadId, params.offerId, client);
+        const truckId = await ensureTruckId();
+        const driverId = await ensureDriverId();
         const tripResult = await client.query(`
         INSERT INTO trips (
           load_id,
           hauler_id,
+          truck_id,
+          driver_id,
           status
         )
         VALUES (
-          $1,$2,$3
+          $1,$2,$3,$4,$5
         )
         RETURNING *
-      `, [params.loadId, params.haulerId, mapTripStatusToDb(TripStatus.PENDING_ESCROW)]);
+      `, [
+            params.loadId,
+            params.haulerId,
+            truckId,
+            driverId,
+            mapTripStatusToDb(TripStatus.PENDING_ESCROW),
+        ]);
         const tripRow = tripResult.rows[0];
         if (!tripRow) {
             throw new Error("Failed to create trip");
@@ -383,9 +502,16 @@ async function acceptOfferAndCreateTrip(params) {
         UPDATE loads
         SET awarded_offer_id = $1,
             status = $2,
+            assigned_to_user_id = $3,
+            assigned_at = NOW(),
             updated_at = NOW()
-        WHERE id = $3
-      `, [params.offerId, mapLoadStatusToDb(LoadStatus.AWAITING_ESCROW), params.loadId]);
+        WHERE id = $4
+      `, [
+            params.offerId,
+            mapLoadStatusToDb(LoadStatus.AWAITING_ESCROW),
+            params.haulerUserId,
+            params.loadId,
+        ]);
         await client.query("COMMIT");
         return { trip, payment };
     }
@@ -400,7 +526,6 @@ async function acceptOfferAndCreateTrip(params) {
 async function createOfferMessage(input) {
     const result = await database_1.pool.query(`
       INSERT INTO load_offer_messages (
-        id,
         offer_id,
         sender_user_id,
         sender_role,
@@ -408,7 +533,6 @@ async function createOfferMessage(input) {
         attachments
       )
       VALUES (
-        gen_random_uuid(),
         $1,$2,$3,$4,$5
       )
       RETURNING *
@@ -429,6 +553,16 @@ async function listOfferMessages(offerId) {
       ORDER BY created_at ASC
     `, [offerId]);
     return result.rows;
+}
+async function offerHasShipperMessage(offerId) {
+    const result = await database_1.pool.query(`
+      SELECT 1
+      FROM load_offer_messages
+      WHERE offer_id = $1
+        AND UPPER(sender_role) LIKE 'SHIPPER%'
+      LIMIT 1
+    `, [offerId]);
+    return (result.rowCount ?? 0) > 0;
 }
 async function getTripById(tripId) {
     const result = await database_1.pool.query(`
@@ -734,6 +868,36 @@ async function finalizePaymentLifecycle(params) {
     finally {
         client.release();
     }
+}
+async function getHaulerSummary(haulerId) {
+    const result = await database_1.pool.query(`
+      SELECT
+        h.id::text,
+        COALESCE(h.legal_name, u.full_name) AS name,
+        (
+          SELECT COUNT(*) FROM trucks t WHERE t.hauler_id = h.id
+        )::int AS fleet_count,
+        (
+          SELECT COUNT(*) FROM drivers d WHERE d.hauler_id = h.id
+        )::int AS driver_count,
+        (
+          SELECT COUNT(*) FROM trips tr WHERE tr.hauler_id = h.id
+        )::int AS completed_trips
+      FROM haulers h
+      LEFT JOIN app_users u ON u.id = h.user_id
+      WHERE h.id = $1
+    `, [haulerId]);
+    const row = result.rows[0];
+    if (!row)
+        return null;
+    return {
+        id: row.id,
+        name: row.name ?? null,
+        fleet_count: Number(row.fleet_count ?? 0),
+        driver_count: Number(row.driver_count ?? 0),
+        completed_trips: Number(row.completed_trips ?? 0),
+        rating: null,
+    };
 }
 async function autoReleaseReadyPayments() {
     const client = await database_1.pool.connect();

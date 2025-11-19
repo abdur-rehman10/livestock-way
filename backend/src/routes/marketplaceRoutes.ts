@@ -1,5 +1,6 @@
 import { Request, Router } from "express";
 import authRequired from "../middlewares/auth";
+import { ensureHaulerProfile } from "../utils/profileHelpers";
 import {
   createLoadOffer,
   listLoadOffers,
@@ -9,6 +10,7 @@ import {
   updateTripStatus,
   createOfferMessage,
   listOfferMessages,
+  offerHasShipperMessage,
   attachEscrowPaymentIntent,
   markPaymentFunded,
   scheduleAutoRelease,
@@ -26,7 +28,9 @@ import {
   acceptOfferAndCreateTrip,
   getLoadById,
   updateOfferStatus,
+  updateOfferDetails,
   getLoadOfferById,
+  getLatestOfferForHauler,
   getPaymentForTrip,
   getPaymentById,
   getPaymentByIntentId,
@@ -35,12 +39,19 @@ import {
   finalizePaymentLifecycle,
   autoReleaseReadyPayments,
   resolveDisputeLifecycle,
+  getHaulerSummary,
   PaymentStatus,
   LoadOfferStatus,
   TripStatus,
   DisputeStatus,
   LoadStatus,
+  LoadOfferRecord,
+  TripRecord,
+  LoadRecord,
+  PaymentRecord,
+  DisputeRecord,
 } from "../services/marketplaceService";
+import { emitEvent, SOCKET_EVENTS } from "../socket";
 
 type AuthUser = {
   id?: string;
@@ -66,14 +77,41 @@ router.post(
       if (!loadId) {
         return res.status(400).json({ error: "Missing loadId" });
       }
-      const derivedHaulerId =
-        req.body?.hauler_id !== undefined && req.body?.hauler_id !== null
-          ? String(req.body.hauler_id)
-          : authUser.company_id !== undefined && authUser.company_id !== null
-          ? String(authUser.company_id)
-          : "";
+      let derivedHaulerId = "";
+      if (req.body?.hauler_id !== undefined && req.body?.hauler_id !== null) {
+        derivedHaulerId = String(req.body.hauler_id);
+      } else if (authUser.company_id !== undefined && authUser.company_id !== null) {
+        derivedHaulerId = String(authUser.company_id);
+      } else if (authUser.id !== undefined && authUser.id !== null) {
+        const ensured = await ensureHaulerProfile(Number(authUser.id));
+        derivedHaulerId = String(ensured);
+      }
       if (!derivedHaulerId) {
         return res.status(400).json({ error: "hauler_id is required" });
+      }
+      const load = await getLoadById(loadId);
+      if (!load) {
+        return res.status(404).json({ error: "Load not found" });
+      }
+      if (isShipperForLoad(authUser, load)) {
+        return res.status(400).json({ error: "You cannot bid on your own load." });
+      }
+      if (load.status !== LoadStatus.PUBLISHED) {
+        return res.status(400).json({ error: "Offers can only be placed on published loads." });
+      }
+      const existingOffer = await getLatestOfferForHauler(loadId, derivedHaulerId);
+      if (
+        existingOffer &&
+        ![
+          LoadOfferStatus.WITHDRAWN,
+          LoadOfferStatus.REJECTED,
+          LoadOfferStatus.EXPIRED,
+        ].includes(existingOffer.status)
+      ) {
+        return res.status(400).json({
+          error:
+            "You already have an active offer on this load. Update or withdraw it before creating a new one.",
+        });
       }
       const offer = await createLoadOffer({
         loadId,
@@ -84,10 +122,32 @@ router.post(
         message: req.body.message,
         expiresAt: req.body.expires_at,
       });
+      emitOfferCreatedEvent(offer);
       res.status(201).json({ offer });
     } catch (err) {
       console.error("createLoadOffer error", err);
       res.status(500).json({ error: "Failed to create offer" });
+    }
+  }
+);
+
+router.get(
+  "/haulers/:haulerId/summary",
+  authRequired,
+  async (req, res) => {
+    try {
+      const haulerId = req.params.haulerId;
+      if (!haulerId) {
+        return res.status(400).json({ error: "Missing haulerId" });
+      }
+      const summary = await getHaulerSummary(haulerId);
+      if (!summary) {
+        return res.status(404).json({ error: "Hauler not found" });
+      }
+      res.json({ summary });
+    } catch (err) {
+      console.error("getHaulerSummary error", err);
+      res.status(500).json({ error: "Failed to load hauler profile" });
     }
   }
 );
@@ -137,10 +197,76 @@ router.post(
         return res.status(400).json({ error: "Offer is not pending" });
       }
       const updated = await updateOfferStatus(offer.id, LoadOfferStatus.WITHDRAWN);
+      emitOfferUpdatedEvent(updated);
       return res.json({ offer: updated });
     } catch (err) {
       console.error("withdrawOffer error", err);
       res.status(500).json({ error: "Failed to withdraw offer" });
+    }
+  }
+);
+
+router.patch(
+  "/load-offers/:offerId",
+  authRequired,
+  async (req, res) => {
+    try {
+      const authUser = getAuthUser(req);
+      const offerId = req.params.offerId;
+      if (!offerId) {
+        return res.status(400).json({ error: "Missing offerId" });
+      }
+      const offer = await getLoadOfferById(offerId);
+      if (!offer) {
+        return res.status(404).json({ error: "Offer not found" });
+      }
+      const companyId = getCompanyId(authUser);
+      const isHauler = companyId !== null && offer.hauler_id === companyId;
+      const isCreator = String(authUser.id ?? "") === offer.created_by_user_id;
+      if (!isHauler && !isCreator && !isSuperAdminUser(authUser)) {
+        return res.status(403).json({ error: "Forbidden" });
+      }
+      if (offer.status !== LoadOfferStatus.PENDING) {
+        return res.status(400).json({ error: "Only pending offers can be updated" });
+      }
+
+      const patch: {
+        offeredAmount?: number;
+        currency?: string;
+        message?: string | null;
+        expiresAt?: string | null;
+      } = {};
+      if (req.body?.offered_amount !== undefined) {
+        const amount = Number(req.body.offered_amount);
+        if (!Number.isFinite(amount) || amount <= 0) {
+          return res.status(400).json({ error: "offered_amount must be positive" });
+        }
+        patch.offeredAmount = amount;
+      }
+      if (req.body?.currency !== undefined) {
+        patch.currency = req.body.currency;
+      }
+      if (req.body?.message !== undefined) {
+        patch.message = req.body.message;
+      }
+      if (req.body?.expires_at !== undefined) {
+        patch.expiresAt = req.body.expires_at ?? null;
+      }
+      if (
+        patch.offeredAmount === undefined &&
+        patch.currency === undefined &&
+        patch.message === undefined &&
+        patch.expiresAt === undefined
+      ) {
+        return res.status(400).json({ error: "No fields provided to update" });
+      }
+
+      const updated = await updateOfferDetails(offer.id, patch);
+      emitOfferUpdatedEvent(updated);
+      return res.json({ offer: updated });
+    } catch (err) {
+      console.error("updateOffer error", err);
+      res.status(500).json({ error: "Failed to update offer" });
     }
   }
 );
@@ -163,7 +289,7 @@ router.post(
       if (!load) {
         return res.status(404).json({ error: "Load not found" });
       }
-      if (load.shipper_id !== String(authUser.company_id ?? "")) {
+      if (!isShipperForLoad(authUser, load)) {
         return res.status(403).json({ error: "Forbidden" });
       }
       if (offer.status !== LoadOfferStatus.PENDING) {
@@ -172,6 +298,7 @@ router.post(
       const updated = await updateOfferStatus(offer.id, LoadOfferStatus.REJECTED, {
         rejected_at: new Date().toISOString(),
       });
+      emitOfferUpdatedEvent(updated);
       return res.json({ offer: updated });
     } catch (err) {
       console.error("rejectOffer error", err);
@@ -198,7 +325,7 @@ router.post(
       if (!load) {
         return res.status(404).json({ error: "Load not found" });
       }
-      if (load.shipper_id !== String(authUser.company_id ?? "")) {
+      if (!isShipperForLoad(authUser, load)) {
         return res.status(403).json({ error: "Forbidden" });
       }
       if (load.status !== LoadStatus.PUBLISHED) {
@@ -220,6 +347,11 @@ router.post(
       });
 
       const acceptedOffer = await getLoadOfferById(offer.id);
+      const latestLoad = await getLoadById(offer.load_id);
+      emitOfferUpdatedEvent(acceptedOffer);
+      emitTripEvent(result.trip);
+      emitPaymentEvent(result.payment);
+      emitLoadEvent(latestLoad);
       res.status(201).json({
         offer: acceptedOffer,
         trip: result.trip,
@@ -292,6 +424,57 @@ async function getDisputeContext(disputeId: string) {
   return { dispute, trip, load, payment };
 }
 
+function emitOfferCreatedEvent(offer?: LoadOfferRecord | null) {
+  if (offer) {
+    emitEvent(SOCKET_EVENTS.OFFER_CREATED, { offer });
+  }
+}
+
+function emitOfferUpdatedEvent(offer?: LoadOfferRecord | null) {
+  if (offer) {
+    emitEvent(SOCKET_EVENTS.OFFER_UPDATED, { offer });
+  }
+}
+
+function emitOfferMessageEvent(message?: unknown) {
+  if (message) {
+    emitEvent(SOCKET_EVENTS.OFFER_MESSAGE, { message });
+  }
+}
+
+function emitTripEvent(trip?: TripRecord | null) {
+  if (trip) {
+    emitEvent(SOCKET_EVENTS.TRIP_UPDATED, { trip });
+  }
+}
+
+function emitLoadEvent(load?: LoadRecord | null) {
+  if (load) {
+    emitEvent(SOCKET_EVENTS.LOAD_UPDATED, { load });
+  }
+}
+
+function emitPaymentEvent(payment?: PaymentRecord | null) {
+  if (payment) {
+    emitEvent(SOCKET_EVENTS.PAYMENT_UPDATED, { payment });
+  }
+}
+
+function emitDisputeEvent(
+  event: typeof SOCKET_EVENTS.DISPUTE_CREATED | typeof SOCKET_EVENTS.DISPUTE_UPDATED,
+  dispute?: DisputeRecord | null
+) {
+  if (dispute) {
+    emitEvent(event, { dispute });
+  }
+}
+
+function emitDisputeMessageEvent(message?: unknown) {
+  if (message) {
+    emitEvent(SOCKET_EVENTS.DISPUTE_MESSAGE, { message });
+  }
+}
+
 // List offer messages
 router.get(
   "/load-offers/:offerId/messages",
@@ -303,6 +486,9 @@ router.get(
         return res.status(400).json({ error: "Missing offerId" });
       }
       const authUser = getAuthUser(req);
+      if (authUser.id === undefined || authUser.id === null) {
+        return res.status(401).json({ error: "Unauthorized" });
+      }
       const access = await getOfferAccess(
         offerId,
         authUser.id,
@@ -334,6 +520,9 @@ router.post(
         return res.status(400).json({ error: "Missing offerId" });
       }
       const authUser = getAuthUser(req);
+      if (authUser.id === undefined || authUser.id === null) {
+        return res.status(401).json({ error: "Unauthorized" });
+      }
       const access = await getOfferAccess(
         offerId,
         authUser.id,
@@ -346,6 +535,17 @@ router.post(
         return res.status(403).json({ error: "Forbidden" });
       }
       if (
+        access.isHauler &&
+        access.offer.status === LoadOfferStatus.PENDING
+      ) {
+        const hasShipperMessage = await offerHasShipperMessage(access.offer.id);
+        if (!hasShipperMessage) {
+          return res
+            .status(403)
+            .json({ error: "Shipper must start the conversation first." });
+        }
+      }
+      if (
         access.offer.status === LoadOfferStatus.EXPIRED ||
         access.offer.status === LoadOfferStatus.REJECTED ||
         access.offer.status === LoadOfferStatus.WITHDRAWN
@@ -354,11 +554,12 @@ router.post(
       }
       const message = await createOfferMessage({
         offerId: access.offer.id,
-        senderUserId: String(authUser.id ?? ""),
+        senderUserId: String(authUser.id),
         senderRole: String(authUser.user_type ?? "unknown"),
         text: req.body.text,
         attachments: req.body.attachments,
       });
+      emitOfferMessageEvent(message);
       return res.status(201).json({ message });
     } catch (err) {
       console.error("createOfferMessage error", err);
@@ -423,6 +624,7 @@ router.patch("/trips/:tripId/assign-driver", authRequired, async (req, res) => {
       return res.status(400).json({ error: "Driver must belong to hauler" });
     }
     const updated = await updateTripAssignment({ tripId: trip.id, driverId });
+    emitTripEvent(updated);
     return res.json({ trip: updated });
   } catch (err) {
     console.error("assignDriver error", err);
@@ -455,6 +657,7 @@ router.patch("/trips/:tripId/assign-vehicle", authRequired, async (req, res) => 
       return res.status(400).json({ error: "Vehicle must belong to hauler" });
     }
     const updated = await updateTripAssignment({ tripId: trip.id, vehicleId });
+    emitTripEvent(updated);
     return res.json({ trip: updated });
   } catch (err) {
     console.error("assignVehicle error", err);
@@ -491,6 +694,8 @@ router.post("/trips/:tripId/start", authRequired, async (req, res) => {
       started_at: now,
     });
     const updatedLoad = await updateLoadStatus(context.load.id, LoadStatus.IN_TRANSIT);
+    emitTripEvent(updatedTrip);
+    emitLoadEvent(updatedLoad);
     return res.json({ trip: updatedTrip, load: updatedLoad });
   } catch (err) {
     console.error("startTrip error", err);
@@ -524,6 +729,8 @@ router.post("/trips/:tripId/mark-delivered", authRequired, async (req, res) => {
       { delivered_at: now }
     );
     const updatedLoad = await updateLoadStatus(context.load.id, LoadStatus.DELIVERED);
+    emitTripEvent(updatedTrip);
+    emitLoadEvent(updatedLoad);
     return res.json({ trip: updatedTrip, load: updatedLoad });
   } catch (err) {
     console.error("markDelivered error", err);
@@ -561,6 +768,9 @@ router.post("/trips/:tripId/confirm-delivery", authRequired, async (req, res) =>
     const releaseAt = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString();
     const updatedPayment = await scheduleAutoRelease({ tripId: context.trip.id, releaseAt });
     const updatedLoad = await updateLoadStatus(context.load.id, LoadStatus.DELIVERED);
+    emitTripEvent(updatedTrip);
+    emitPaymentEvent(updatedPayment);
+    emitLoadEvent(updatedLoad);
     return res.json({ trip: updatedTrip, payment: updatedPayment, load: updatedLoad });
   } catch (err) {
     console.error("confirmDelivery error", err);
@@ -599,6 +809,7 @@ router.post("/trips/:tripId/escrow/payment-intent", authRequired, async (req, re
       provider,
       externalIntentId,
     });
+    emitPaymentEvent(payment);
     const clientSecret = payment?.external_intent_id
       ? `secret_${payment.external_intent_id}`
       : null;
@@ -646,11 +857,16 @@ router.post("/webhooks/payment-provider", async (req, res) => {
     if (!payment) {
       return res.status(200).json({ ok: true });
     }
+    let updatedPayment: PaymentRecord | null = null;
+    let relatedTrip: TripRecord | null = null;
     if (event === "payment_succeeded" && payment.trip_id) {
-      await markPaymentFunded(payment.trip_id);
+      updatedPayment = await markPaymentFunded(payment.trip_id);
+      relatedTrip = await getTripById(payment.trip_id);
     } else if (event === "payment_failed") {
-      await updatePaymentStatus(payment.id, PaymentStatus.AWAITING_FUNDING);
+      updatedPayment = await updatePaymentStatus(payment.id, PaymentStatus.AWAITING_FUNDING);
     }
+    emitPaymentEvent(updatedPayment);
+    emitTripEvent(relatedTrip);
     return res.status(200).json({ ok: true });
   } catch (err) {
     console.error("payment webhook error", err);
@@ -712,10 +928,14 @@ router.post("/trips/:tripId/disputes", authRequired, async (req, res) => {
       description: req.body?.description,
       requestedAction: req.body?.requested_action,
     });
-    await updateTripStatus(context.trip.id, TripStatus.DISPUTED);
+    const updatedTrip = await updateTripStatus(context.trip.id, TripStatus.DISPUTED);
+    let updatedPayment: PaymentRecord | null = payment;
     if (payment.id) {
-      await clearAutoReleaseForPayment(payment.id);
+      updatedPayment = await clearAutoReleaseForPayment(payment.id);
     }
+    emitDisputeEvent(SOCKET_EVENTS.DISPUTE_CREATED, dispute);
+    emitTripEvent(updatedTrip);
+    emitPaymentEvent(updatedPayment);
     return res.status(201).json({ dispute });
   } catch (err) {
     console.error("createDispute error", err);
@@ -793,6 +1013,7 @@ router.post("/disputes/:disputeId/messages", authRequired, async (req, res) => {
       text: req.body?.text,
       attachments: req.body?.attachments,
     });
+    emitDisputeMessageEvent(message);
     return res.status(201).json({ message });
   } catch (err) {
     console.error("addDisputeMessage error", err);
@@ -870,6 +1091,9 @@ router.post("/disputes/:disputeId/cancel", authRequired, async (req, res) => {
         }
       }
     }
+    emitDisputeEvent(SOCKET_EVENTS.DISPUTE_UPDATED, updatedDispute);
+    emitTripEvent(updatedTrip);
+    emitPaymentEvent(updatedPayment);
     return res.json({ dispute: updatedDispute, trip: updatedTrip, payment: updatedPayment });
   } catch (err) {
     console.error("cancelDispute error", err);
@@ -897,6 +1121,7 @@ router.post("/admin/disputes/:disputeId/start-review", authRequired, async (req,
     if (!dispute) {
       return res.status(404).json({ error: "Dispute not found" });
     }
+    emitDisputeEvent(SOCKET_EVENTS.DISPUTE_UPDATED, dispute);
     return res.json({ dispute });
   } catch (err) {
     console.error("startReview error", err);
@@ -920,6 +1145,10 @@ router.post("/admin/disputes/:disputeId/resolve-release", authRequired, async (r
       paymentStatus: PaymentStatus.RELEASED_TO_HAULER,
       resolvedBy: String(user.id ?? ""),
     });
+    emitDisputeEvent(SOCKET_EVENTS.DISPUTE_UPDATED, result.dispute);
+    emitPaymentEvent(result.payment);
+    emitTripEvent(result.trip);
+    emitLoadEvent(result.load);
     return res.json(result);
   } catch (err) {
     console.error("resolveRelease error", err);
@@ -943,6 +1172,10 @@ router.post("/admin/disputes/:disputeId/resolve-refund", authRequired, async (re
       paymentStatus: PaymentStatus.REFUNDED_TO_SHIPPER,
       resolvedBy: String(user.id ?? ""),
     });
+    emitDisputeEvent(SOCKET_EVENTS.DISPUTE_UPDATED, result.dispute);
+    emitPaymentEvent(result.payment);
+    emitTripEvent(result.trip);
+    emitLoadEvent(result.load);
     return res.json(result);
   } catch (err) {
     console.error("resolveRefund error", err);
@@ -980,6 +1213,10 @@ router.post("/admin/disputes/:disputeId/resolve-split", authRequired, async (req
         amountToShipper: amountToShipper.toFixed(2),
       },
     });
+    emitDisputeEvent(SOCKET_EVENTS.DISPUTE_UPDATED, result.dispute);
+    emitPaymentEvent(result.payment);
+    emitTripEvent(result.trip);
+    emitLoadEvent(result.load);
     return res.json(result);
   } catch (err) {
     console.error("resolveSplit error", err);
@@ -1003,6 +1240,9 @@ router.post("/admin/payments/:paymentId/force-release", authRequired, async (req
       tripStatus: TripStatus.CLOSED,
       loadStatus: LoadStatus.COMPLETED,
     });
+    emitPaymentEvent(result.payment);
+    emitTripEvent(result.trip);
+    emitLoadEvent(result.load);
     return res.json(result);
   } catch (err) {
     console.error("forceRelease error", err);
@@ -1026,6 +1266,9 @@ router.post("/admin/payments/:paymentId/force-refund", authRequired, async (req,
       tripStatus: TripStatus.CLOSED,
       loadStatus: LoadStatus.COMPLETED,
     });
+    emitPaymentEvent(result.payment);
+    emitTripEvent(result.trip);
+    emitLoadEvent(result.load);
     return res.json(result);
   } catch (err) {
     console.error("forceRefund error", err);
@@ -1040,6 +1283,11 @@ router.post("/admin/payments/run-auto-release", authRequired, async (req, res) =
       return res.status(403).json({ error: "Admin only" });
     }
     const results = await autoReleaseReadyPayments();
+    for (const result of results) {
+      emitPaymentEvent(result.payment);
+      emitTripEvent(result.trip);
+      emitLoadEvent(result.load);
+    }
     return res.json({
       processed: results.map((r) => ({
         payment_id: r.payment.id,

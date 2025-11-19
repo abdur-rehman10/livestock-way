@@ -48,6 +48,7 @@ export interface LoadRecord {
     currency: string | null;
     asking_amount: string | null;
     awarded_offer_id: string | null;
+    assigned_to_user_id?: string | null;
 }
 export interface LoadOfferRecord {
     id: string;
@@ -65,6 +66,7 @@ export interface LoadOfferRecord {
     updated_at: string;
 }
 export declare function getLoadOfferById(offerId: string): Promise<LoadOfferRecord | null>;
+export declare function getLatestOfferForHauler(loadId: string, haulerId: string): Promise<LoadOfferRecord | null>;
 export interface TripRecord {
     id: string;
     load_id: string;
@@ -114,6 +116,14 @@ export interface DisputeRecord {
     created_at: string;
     updated_at: string;
 }
+export interface HaulerSummary {
+    id: string;
+    name: string | null;
+    fleet_count: number;
+    driver_count: number;
+    completed_trips: number;
+    rating: number | null;
+}
 export interface CreateLoadOfferInput {
     loadId: string;
     haulerId: string;
@@ -133,6 +143,13 @@ export declare function listLoadOffers(loadId: string, options?: {
     total: number;
 }>;
 export declare function updateOfferStatus(offerId: string, status: LoadOfferStatus, patch?: Partial<LoadOfferRecord>): Promise<LoadOfferRecord | null>;
+export interface UpdateOfferDetailsInput {
+    offeredAmount?: number;
+    currency?: string;
+    message?: string | null;
+    expiresAt?: string | null;
+}
+export declare function updateOfferDetails(offerId: string, patch: UpdateOfferDetailsInput): Promise<LoadOfferRecord | null>;
 export declare function expireOtherOffers(loadId: string, acceptedOfferId: string, client?: PoolClient): Promise<void>;
 export declare function acceptOfferAndCreateTrip(params: {
     offerId: string;
@@ -156,6 +173,7 @@ export interface CreateOfferMessageInput {
 }
 export declare function createOfferMessage(input: CreateOfferMessageInput): Promise<any>;
 export declare function listOfferMessages(offerId: string): Promise<any[]>;
+export declare function offerHasShipperMessage(offerId: string): Promise<boolean>;
 export declare function getTripById(tripId: string): Promise<TripRecord | null>;
 export declare function getTripAndLoad(tripId: string): Promise<{
     trip: TripRecord;
@@ -199,6 +217,7 @@ export declare function finalizePaymentLifecycle(params: {
     trip: TripRecord | null;
     load: LoadRecord | null;
 }>;
+export declare function getHaulerSummary(haulerId: string): Promise<HaulerSummary | null>;
 export declare function autoReleaseReadyPayments(): Promise<Array<{
     payment: PaymentRecord;
     trip: TripRecord | null;

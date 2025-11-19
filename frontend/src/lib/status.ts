@@ -5,6 +5,8 @@ export function normalizeLoadStatus(status?: string | null): UiLoadStatus {
 
   switch (normalized) {
     case "matched":
+    case "awaiting_escrow":
+    case "pending_escrow":
       return "assigned";
     case "assigned":
       return "assigned";

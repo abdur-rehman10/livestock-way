@@ -1,21 +1,41 @@
-import React, { useState, useEffect } from "react";
-import { fetchLoads, assignLoad } from "../lib/api";
+import React, { useState, useEffect, useRef } from "react";
+import { fetchLoads } from "../lib/api";
 import type { Load as ApiLoad } from "../lib/api";
-import { Button } from '../components/ui/button';
-import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/card';
-import { Badge } from '../components/ui/badge';
-import { Input } from '../components/ui/input';
-import { Label } from '../components/ui/label';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../components/ui/select';
-import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '../components/ui/dialog';
-import { Slider } from '../components/ui/slider';
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '../components/ui/tabs';
-import { LoadCardSkeleton, TableSkeleton } from './LoadingSkeleton';
-import { 
-  Search, 
-  Filter, 
-  MapPin, 
-  DollarSign, 
+import { Button } from "../components/ui/button";
+import {
+  Card,
+  CardContent,
+  CardHeader,
+  CardTitle,
+  CardDescription,
+} from "../components/ui/card";
+import { Badge } from "../components/ui/badge";
+import { Input } from "../components/ui/input";
+import { Textarea } from "../components/ui/textarea";
+import { Label } from "../components/ui/label";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "../components/ui/select";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from "../components/ui/dialog";
+import { Slider } from "../components/ui/slider";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "../components/ui/tabs";
+import { ScrollArea } from "../components/ui/scroll-area";
+import { LoadCardSkeleton, TableSkeleton } from "./LoadingSkeleton";
+import {
+  Search,
+  Filter,
+  MapPin,
+  DollarSign,
   Truck,
   Calendar,
   TrendingUp,
@@ -23,14 +43,34 @@ import {
   Map as MapIcon,
   List,
   Save,
-  X
-} from 'lucide-react';
-import { toast } from 'sonner';
-import { filterLoads, searchFilter } from '../lib/filter-utils';
-import { storage as appStorage, STORAGE_KEYS, saveFilterPreset, getFilterPresets, deleteFilterPreset } from '../lib/storage';
-import { showUndoToast } from '../components/UndoToast';
-import { undoManager } from '../lib/undo-manager';
+  X,
+  MessageSquare,
+} from "lucide-react";
+import { toast } from "sonner";
+import { filterLoads, searchFilter } from "../lib/filter-utils";
+import {
+  storage as appStorage,
+  STORAGE_KEYS,
+  saveFilterPreset,
+  getFilterPresets,
+  deleteFilterPreset,
+} from "../lib/storage";
+import { showUndoToast } from "../components/UndoToast";
+import { undoManager } from "../lib/undo-manager";
 import { normalizeLoadStatus } from "../lib/status";
+import {
+  createLoadOfferRequest,
+  updateLoadOffer,
+  fetchLoadOffers,
+  fetchOfferMessages,
+  postOfferMessage,
+  type LoadOffer,
+  type OfferMessage,
+} from "../api/marketplace";
+import {
+  SOCKET_EVENTS,
+  subscribeToSocketEvent,
+} from "../lib/socket";
 
 interface Load {
   id: string;
@@ -89,35 +129,173 @@ export function Loadboard() {
   const [isBidOpen, setIsBidOpen] = useState(false);
   const [isAutoMatchOpen, setIsAutoMatchOpen] = useState(false);
   const [selectedLoad, setSelectedLoad] = useState<Load | null>(null);
-  const [bidAmount, setBidAmount] = useState('');
+  const [bidAmount, setBidAmount] = useState("");
+  const [offerDialogLoad, setOfferDialogLoad] = useState<Load | null>(null);
+  const [offerAmount, setOfferAmount] = useState("");
+  const [offerMessage, setOfferMessage] = useState("");
+  const [offerSubmitting, setOfferSubmitting] = useState(false);
+  const [offerDialogExistingOffer, setOfferDialogExistingOffer] = useState<LoadOffer | null>(null);
+  const [offerDialogCheckingExisting, setOfferDialogCheckingExisting] = useState(false);
+  const [activeHaulerOffer, setActiveHaulerOffer] = useState<LoadOffer | null>(null);
+  const [haulerChatMessages, setHaulerChatMessages] = useState<OfferMessage[]>([]);
+  const [haulerChatDraft, setHaulerChatDraft] = useState("");
+  const [haulerChatLoading, setHaulerChatLoading] = useState(false);
+  const [haulerChatAllowed, setHaulerChatAllowed] = useState(false);
   const [loads, setLoads] = useState<ApiLoad[]>([]);
   const [isLoading, setIsLoading] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [saveFilterName, setSaveFilterName] = useState('');
-  const [isAssigning, setIsAssigning] = useState<number | null>(null);
   const currentHaulerId = appStorage.get<string | null>(STORAGE_KEYS.USER_ID, null);
+  const isEditingOffer = !!offerDialogExistingOffer;
+  const activeOfferIdRef = useRef<string | null>(null);
+  const haulerChatAllowedRef = useRef(false);
+  useEffect(() => {
+    activeOfferIdRef.current = activeHaulerOffer?.id ?? null;
+  }, [activeHaulerOffer]);
+  useEffect(() => {
+    haulerChatAllowedRef.current = haulerChatAllowed;
+  }, [haulerChatAllowed]);
   
   // Filters with persistence
-  const [filters, setFilters] = useState(() => {
+type LoadboardFilters = {
+  species: string;
+  origin: string;
+  destination: string;
+  dateFrom: string;
+  dateTo: string;
+  priceMin: number;
+  priceMax: number | null;
+  distance: number;
+  status: string;
+};
+
+  const [filters, setFilters] = useState<LoadboardFilters>(() => {
     const saved = appStorage.get(STORAGE_KEYS.FILTERS, null);
-    return saved || {
-      species: '',
-      origin: '',
-      destination: '',
-      dateFrom: '',
-      dateTo: '',
-      priceMin: 0,
-      priceMax: 10000,
-      distance: 0,
-      status: 'open',
-    };
+    return (
+      saved || {
+        species: "",
+        origin: "",
+        destination: "",
+        dateFrom: "",
+        dateTo: "",
+        priceMin: 0,
+        priceMax: null,
+        distance: 0,
+        status: "open",
+      }
+    );
   });
+
+  const numericPriceMin =
+    typeof filters.priceMin === "number"
+      ? filters.priceMin
+      : Number(filters.priceMin) || 0;
+  const numericPriceMax =
+    typeof filters.priceMax === "number" ? filters.priceMax : 10000;
+  const numericDistance =
+    typeof filters.distance === "number"
+      ? filters.distance
+      : Number(filters.distance) || 0;
 
   // Persist filters
   useEffect(() => {
-    appStorage.set(STORAGE_KEYS.FILTERS, filters);
-  }, [filters]);
+    appStorage.set(STORAGE_KEYS.FILTERS, {
+      ...filters,
+      priceMin: numericPriceMin,
+      priceMax: numericPriceMax,
+      distance: numericDistance,
+    });
+  }, [filters, numericPriceMin, numericPriceMax, numericDistance]);
+
+  useEffect(() => {
+    const unsubscribeLoadPosted = subscribeToSocketEvent(
+      SOCKET_EVENTS.LOAD_POSTED,
+      ({ load }) => {
+        const normalizedId =
+          typeof load.id === "string" ? Number(load.id) : load.id;
+        if (!normalizedId || Number.isNaN(normalizedId)) {
+          return;
+        }
+        const normalizedLoad: ApiLoad = {
+          ...load,
+          id: normalizedId,
+        };
+        setLoads((prev) => {
+          if (prev.some((existing) => Number(existing.id) === normalizedId)) {
+            return prev;
+          }
+          return [normalizedLoad, ...prev];
+        });
+      }
+    );
+    const unsubscribeLoadUpdated = subscribeToSocketEvent(
+      SOCKET_EVENTS.LOAD_UPDATED,
+      ({ load }) => {
+        const normalizedId =
+          typeof load.id === "string" ? Number(load.id) : Number(load.id);
+        if (!normalizedId || Number.isNaN(normalizedId)) {
+          return;
+        }
+        setLoads((prev) =>
+          prev.map((existing) =>
+            Number(existing.id) === normalizedId
+              ? {
+                  ...existing,
+                  status: (typeof load.status === "string"
+                    ? load.status
+                    : existing.status) as ApiLoad["status"],
+                }
+              : existing
+          )
+        );
+      }
+    );
+    const unsubscribeOfferMessage = subscribeToSocketEvent(
+      SOCKET_EVENTS.OFFER_MESSAGE,
+      ({ message }) => {
+        if (message.offer_id !== activeOfferIdRef.current) {
+          return;
+        }
+        setHaulerChatMessages((prev) => {
+          if (prev.some((existing) => existing.id === message.id)) {
+            return prev;
+          }
+          return [...prev, message];
+        });
+        if (
+          !haulerChatAllowedRef.current &&
+          typeof message.sender_role === "string" &&
+          message.sender_role.toUpperCase().startsWith("SHIPPER")
+        ) {
+          setHaulerChatAllowed(true);
+        }
+      }
+    );
+    const unsubscribeOfferUpdated = subscribeToSocketEvent(
+      SOCKET_EVENTS.OFFER_UPDATED,
+      ({ offer }) => {
+        setActiveHaulerOffer((prev) => {
+          if (prev && prev.id === offer.id) {
+            return offer;
+          }
+          return prev;
+        });
+        if (
+          offer.id === activeOfferIdRef.current &&
+          offer.status === "ACCEPTED"
+        ) {
+          setHaulerChatAllowed(true);
+        }
+      }
+    );
+    return () => {
+      unsubscribeLoadPosted();
+      unsubscribeLoadUpdated();
+      unsubscribeOfferMessage();
+      unsubscribeOfferUpdated();
+    };
+  }, []);
 
   const handlePlaceBid = () => {
     if (!bidAmount) {
@@ -142,24 +320,168 @@ export function Loadboard() {
     toast.info(`Viewing ${load.bids || 0} bids for Load #${load.id}`);
   };
 
-  const handleAcceptLoad = async (loadId: number) => {
-    if (!currentHaulerId) {
-      toast.error("Log in as a hauler to accept loads.");
-      return;
-    }
+  const openOfferDialog = async (load: Load) => {
+    setOfferDialogLoad(load);
+    setOfferDialogExistingOffer(null);
+    const preset = load.price?.replace(/[^0-9.]/g, "");
+    setOfferAmount(preset || "");
+    setOfferMessage("");
+    if (!currentHaulerId) return;
+    setOfferDialogCheckingExisting(true);
+    let shouldClose = false;
     try {
-      setIsAssigning(loadId);
-      await assignLoad(loadId, currentHaulerId);
-      toast.success(`Load #${loadId} accepted`);
-      setLoads((prev) => prev.filter((load) => load.id !== loadId));
-    } catch (err: any) {
-      console.error("Failed to assign load:", err);
-      toast.error("Failed to accept load. Please try again.");
+      const existing = await loadUserOffer(load, { silent: true });
+      if (existing) {
+        if (existing.status === "PENDING") {
+          setOfferDialogExistingOffer(existing);
+          setOfferAmount(existing.offered_amount);
+          setOfferMessage(existing.message ?? "");
+        } else if (existing.status === "ACCEPTED") {
+          toast.error("This load already has an accepted offer from you.");
+          shouldClose = true;
+        }
+      }
     } finally {
-      setIsAssigning(null);
+      setOfferDialogCheckingExisting(false);
+      if (shouldClose) {
+        setOfferDialogLoad(null);
+        setOfferDialogExistingOffer(null);
+      }
     }
   };
 
+const submitOffer = async () => {
+    if (!offerDialogLoad) return;
+    const amountValue = Number(offerAmount);
+    if (!amountValue || Number.isNaN(amountValue)) {
+      toast.error("Enter a valid offer amount.");
+      return;
+    }
+    try {
+      setOfferSubmitting(true);
+      const loadIdNumeric = String(offerDialogLoad.rawId ?? offerDialogLoad.id).replace(/\D/g, "");
+      if (offerDialogExistingOffer) {
+        await updateLoadOffer(offerDialogExistingOffer.id, {
+          offered_amount: amountValue,
+          currency: "USD",
+          message: offerMessage || undefined,
+        });
+        toast.success("Offer updated.");
+      } else {
+        await createLoadOfferRequest(loadIdNumeric, {
+          offered_amount: amountValue,
+          currency: "USD",
+          message: offerMessage || undefined,
+        });
+        toast.success("Offer submitted to shipper.");
+      }
+      setOfferDialogLoad(null);
+      setOfferDialogExistingOffer(null);
+      setOfferAmount("");
+      setOfferMessage("");
+    } catch (err: any) {
+      toast.error(err?.message ?? "Failed to submit offer.");
+    } finally {
+      setOfferSubmitting(false);
+    }
+};
+
+const loadUserOffer = async (load: Load, options: { silent?: boolean } = {}) => {
+  if (!currentHaulerId) {
+    toast.error("Log in as a hauler to chat.");
+    return null;
+  }
+  try {
+      const result = await fetchLoadOffers(
+        String(load.rawId ?? load.id).replace(/\D/g, "")
+      );
+      return result.items.find(
+        (offer) => offer.created_by_user_id === String(currentHaulerId)
+      );
+    } catch (err: any) {
+      if (!options.silent) {
+        toast.error(err?.message ?? "Failed to fetch offers.");
+      }
+      return null;
+    }
+  };
+
+  const openHaulerChat = async (load: Load) => {
+    setHaulerChatLoading(true);
+    try {
+      let offer = await loadUserOffer(load);
+      if (!offer) {
+        toast.error("Submit an offer before starting a chat.");
+        return;
+      }
+      const resp = await fetchLoadOffers(
+        String(load.rawId ?? load.id).replace(/\D/g, "")
+      );
+      const refreshed = resp.items.find((o) => o.id === offer!.id);
+      if (refreshed) offer = refreshed;
+      const messagesResp = await fetchOfferMessages(offer.id);
+      const shipperInitiated = messagesResp.items.some((msg) =>
+        (msg.sender_role ?? "").toUpperCase().startsWith("SHIPPER")
+      );
+      const allowed = offer.status === "ACCEPTED" || shipperInitiated;
+      if (!allowed) {
+        toast.error("Chat opens after the shipper accepts or messages you.");
+        setActiveHaulerOffer(null);
+        setHaulerChatMessages([]);
+        setHaulerChatAllowed(false);
+        return;
+      }
+      setActiveHaulerOffer(offer);
+      setHaulerChatMessages(messagesResp.items);
+      setHaulerChatAllowed(true);
+
+      const poll = setInterval(async () => {
+        try {
+          const { items } = await fetchOfferMessages(offer!.id);
+          setHaulerChatMessages(items);
+        } catch {
+          /* ignore small polling errors */
+        }
+      }, 5000);
+
+      return () => clearInterval(poll);
+    } finally {
+      setHaulerChatLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    let pollId: ReturnType<typeof setInterval> | null = null;
+    if (!activeHaulerOffer) {
+      setHaulerChatMessages([]);
+      setHaulerChatAllowed(false);
+    } else {
+      pollId = setInterval(async () => {
+        try {
+          const { items } = await fetchOfferMessages(activeHaulerOffer.id);
+          setHaulerChatMessages(items);
+        } catch {
+          /* ignore */
+        }
+      }, 5000);
+    }
+    return () => {
+      if (pollId) clearInterval(pollId);
+    };
+  }, [activeHaulerOffer]);
+
+  const sendHaulerChatMessage = async () => {
+    if (!activeHaulerOffer || !haulerChatDraft.trim() || !haulerChatAllowed) return;
+    try {
+      const { message } = await postOfferMessage(activeHaulerOffer.id, {
+        text: haulerChatDraft.trim(),
+      });
+      setHaulerChatMessages((prev) => [...prev, message]);
+      setHaulerChatDraft("");
+    } catch (err: any) {
+      toast.error(err?.message ?? "Failed to send message.");
+    }
+  };
   useEffect(() => {
     let isMounted = true;
 
@@ -227,12 +549,14 @@ export function Loadboard() {
     destination: filters.destination || undefined,
     dateFrom: filters.dateFrom || undefined,
     dateTo: filters.dateTo || undefined,
-    priceMin: filters.priceMin,
-    priceMax: filters.priceMax,
-    distance: filters.distance,
+    priceMin: filters.priceMin ?? 0,
+    priceMax: filters.priceMax ?? undefined,
+    distance: numericDistance,
     status: filters.status || undefined,
     searchQuery: searchQuery || undefined,
   });
+
+  const loadsToDisplay = filteredLoads;
 
   const handleClearFilters = () => {
     const previousFilters = { ...filters };
@@ -243,7 +567,7 @@ export function Loadboard() {
       dateFrom: '',
       dateTo: '',
       priceMin: 0,
-      priceMax: 10000,
+      priceMax: null,
       distance: 0,
       status: 'open',
     };
@@ -354,14 +678,14 @@ export function Loadboard() {
       <div className="grid grid-cols-4 gap-4">
         <Card>
           <CardContent className="p-4 text-center">
-            <div className="text-2xl text-[#172039] mb-1">{filteredLoads.length}</div>
+            <div className="text-2xl text-[#172039] mb-1">{loadsToDisplay.length}</div>
             <div className="text-sm text-gray-600">Available Loads</div>
           </CardContent>
         </Card>
         <Card>
           <CardContent className="p-4 text-center">
             <div className="text-2xl text-[#29CA8D] mb-1">
-              ${filteredLoads.reduce((sum, l) => sum + parseInt(l.price.replace('$', '')), 0).toLocaleString()}
+              ${loadsToDisplay.reduce((sum, l) => sum + parseInt(l.price.replace('$', '')), 0).toLocaleString()}
             </div>
             <div className="text-sm text-gray-600">Total Value</div>
           </CardContent>
@@ -369,7 +693,7 @@ export function Loadboard() {
         <Card>
           <CardContent className="p-4 text-center">
             <div className="text-2xl text-[#F97316] mb-1">
-              {filteredLoads.reduce((sum, l) => sum + (l.bids || 0), 0)}
+              {loadsToDisplay.reduce((sum, l) => sum + (l.bids || 0), 0)}
             </div>
             <div className="text-sm text-gray-600">Active Bids</div>
           </CardContent>
@@ -377,7 +701,14 @@ export function Loadboard() {
         <Card>
           <CardContent className="p-4 text-center">
             <div className="text-2xl text-blue-600 mb-1">
-              {Math.round(filteredLoads.reduce((sum, l) => sum + parseInt(l.distance.replace(' miles', '')), 0) / filteredLoads.length)}
+              {loadsToDisplay.length
+                ? Math.round(
+                    loadsToDisplay.reduce(
+                      (sum, l) => sum + parseInt(l.distance.replace(" miles", "")),
+                      0
+                    ) / loadsToDisplay.length
+                  )
+                : 0}
             </div>
             <div className="text-sm text-gray-600">Avg Distance (mi)</div>
           </CardContent>
@@ -393,7 +724,7 @@ export function Loadboard() {
           {error && (
             <div className="p-4 text-red-500 text-sm">{error}</div>
           )}
-          {!isLoading && !error && filteredLoads.length === 0 && (
+          {!isLoading && !error && loadsToDisplay.length === 0 && (
             <Card>
               <CardContent className="p-12 text-center">
                 <Filter className="w-12 h-12 mx-auto mb-3 text-gray-400" />
@@ -411,9 +742,9 @@ export function Loadboard() {
               </CardContent>
             </Card>
           )}
-          {!isLoading && !error && filteredLoads.length > 0 && (
+          {!isLoading && !error && loadsToDisplay.length > 0 && (
             <>
-              {filteredLoads.map((load) => (
+              {loadsToDisplay.map((load) => (
                 <Card key={load.id} className="hover:shadow-md transition-shadow">
                   <CardContent className="p-4 space-y-3">
                     <div className="flex items-center justify-between">
@@ -435,14 +766,23 @@ export function Loadboard() {
                             {load.price}
                           </div>
                         )}
-                        <Button
-                          className="bg-[#29CA8D] hover:bg-[#24b67d]"
-                          size="sm"
-                          disabled={isAssigning === load.rawId}
-                          onClick={() => handleAcceptLoad(load.rawId)}
-                        >
-                          {isAssigning === load.rawId ? "Accepting..." : "Accept Load"}
-                        </Button>
+                        <div className="flex flex-col gap-2">
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            onClick={() => void openOfferDialog(load)}
+                          >
+                            Place Offer
+                          </Button>
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            onClick={() => openHaulerChat(load)}
+                          >
+                            <MessageSquare className="mr-1 h-4 w-4" />
+                            Chat
+                          </Button>
+                        </div>
                       </div>
                     </div>
                   </CardContent>
@@ -464,24 +804,30 @@ export function Loadboard() {
         </Card>
       )}
 
-      {/* Filters Dialog */}
       <Dialog open={isFilterOpen} onOpenChange={setIsFilterOpen}>
         <DialogContent className="max-w-2xl">
           <DialogHeader>
             <DialogTitle>Filter Loads</DialogTitle>
-            <DialogDescription>Refine your search criteria</DialogDescription>
+            <DialogDescription>
+              Refine your search criteria
+            </DialogDescription>
           </DialogHeader>
 
           <div className="space-y-4">
-            <div className="grid grid-cols-2 gap-4">
+            <div className="grid gap-4 md:grid-cols-2">
               <div className="space-y-2">
                 <Label>Species</Label>
-                <Select value={filters.species} onValueChange={(v) => setFilters({...filters, species: v})}>
+                <Select
+                  value={filters.species || "all"}
+                  onValueChange={(v) =>
+                    setFilters({ ...filters, species: v === "all" ? "" : v })
+                  }
+                >
                   <SelectTrigger>
                     <SelectValue placeholder="All species" />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="">All Species</SelectItem>
+                    <SelectItem value="all">All Species</SelectItem>
                     <SelectItem value="Cattle">Cattle</SelectItem>
                     <SelectItem value="Sheep">Sheep</SelectItem>
                     <SelectItem value="Pigs">Pigs</SelectItem>
@@ -492,46 +838,68 @@ export function Loadboard() {
 
               <div className="space-y-2">
                 <Label>Status</Label>
-                <Select value={filters.status} onValueChange={(v) => setFilters({...filters, status: v})}>
+                <Select
+                  value={filters.status || "all"}
+                  onValueChange={(v) =>
+                    setFilters({ ...filters, status: v === "all" ? "" : v })
+                  }
+                >
                   <SelectTrigger>
-                    <SelectValue />
+                    <SelectValue placeholder="All statuses" />
                   </SelectTrigger>
                   <SelectContent>
+                    <SelectItem value="all">All statuses</SelectItem>
                     <SelectItem value="open">Open</SelectItem>
                     <SelectItem value="assigned">Assigned</SelectItem>
                     <SelectItem value="in-transit">In Transit</SelectItem>
+                    <SelectItem value="delivered">Delivered</SelectItem>
                   </SelectContent>
                 </Select>
               </div>
             </div>
 
-            <div className="grid grid-cols-2 gap-4">
+            <div className="grid gap-4 md:grid-cols-2">
               <div className="space-y-2">
                 <Label>Origin</Label>
-                <Input placeholder="City, State" value={filters.origin} onChange={(e) => setFilters({...filters, origin: e.target.value})} />
+                <Input
+                  placeholder="City, State"
+                  value={filters.origin}
+                  onChange={(e) =>
+                    setFilters({ ...filters, origin: e.target.value })
+                  }
+                />
               </div>
-
               <div className="space-y-2">
                 <Label>Destination</Label>
-                <Input placeholder="City, State" value={filters.destination} onChange={(e) => setFilters({...filters, destination: e.target.value})} />
+                <Input
+                  placeholder="City, State"
+                  value={filters.destination}
+                  onChange={(e) =>
+                    setFilters({ ...filters, destination: e.target.value })
+                  }
+                />
               </div>
             </div>
 
-            <div className="grid grid-cols-2 gap-4">
+            <div className="grid gap-4 md:grid-cols-2">
               <div className="space-y-2">
-                <Label>Min Price: ${filters.priceMin}</Label>
+                <Label>Min Price: ${numericPriceMin}</Label>
                 <Slider
-                  value={[filters.priceMin]}
-                  onValueChange={(v) => setFilters({ ...filters, priceMin: v[0] })}
+                  value={[numericPriceMin]}
+                  onValueChange={(v) =>
+                    setFilters({ ...filters, priceMin: v[0] })
+                  }
                   max={10000}
                   step={100}
                 />
               </div>
               <div className="space-y-2">
-                <Label>Max Price: ${filters.priceMax}</Label>
+                <Label>Max Price: ${numericPriceMax}</Label>
                 <Slider
-                  value={[filters.priceMax]}
-                  onValueChange={(v) => setFilters({ ...filters, priceMax: v[0] })}
+                  value={[numericPriceMax]}
+                  onValueChange={(v) =>
+                    setFilters({ ...filters, priceMax: v[0] })
+                  }
                   max={10000}
                   step={100}
                 />
@@ -539,14 +907,23 @@ export function Loadboard() {
             </div>
 
             <div className="space-y-2">
-              <Label>Max Distance: {filters.distance} miles {filters.distance === 0 ? '(Any)' : ''}</Label>
-              <Slider value={[filters.distance]} onValueChange={(v) => setFilters({...filters, distance: v[0]})} max={500} step={10} />
+              <Label>
+                Max Distance: {numericDistance} miles{" "}
+                {numericDistance === 0 ? "(Any)" : ""}
+              </Label>
+              <Slider
+                value={[numericDistance]}
+                onValueChange={(v) =>
+                  setFilters({ ...filters, distance: v[0] })
+                }
+                max={500}
+                step={10}
+              />
             </div>
 
-            {/* Save Filter Preset */}
             <div className="border-t pt-4 space-y-3">
               <Label>Save Filter Preset</Label>
-              <div className="flex gap-2">
+              <div className="flex flex-col gap-2 md:flex-row">
                 <Input
                   placeholder="Preset name..."
                   value={saveFilterName}
@@ -559,7 +936,9 @@ export function Loadboard() {
               </div>
               {Object.keys(getFilterPresets()).length > 0 && (
                 <div className="space-y-2">
-                  <Label className="text-xs text-gray-600">Load Preset</Label>
+                  <Label className="text-xs text-gray-600">
+                    Load preset
+                  </Label>
                   <div className="flex flex-wrap gap-2">
                     {Object.keys(getFilterPresets()).map((name) => (
                       <Badge
@@ -570,7 +949,7 @@ export function Loadboard() {
                       >
                         {name}
                         <X
-                          className="w-3 h-3 ml-1"
+                          className="ml-1 h-3 w-3"
                           onClick={(e) => {
                             e.stopPropagation();
                             deleteFilterPreset(name);
@@ -584,15 +963,158 @@ export function Loadboard() {
               )}
             </div>
 
-            <div className="flex gap-3">
-              <Button variant="outline" onClick={handleClearFilters} className="flex-1">
+            <div className="flex flex-col gap-3 md:flex-row">
+              <Button
+                variant="outline"
+                onClick={() => {
+                  handleClearFilters();
+                  setIsFilterOpen(false);
+                }}
+                className="flex-1"
+              >
                 Clear All
               </Button>
-              <Button onClick={() => setIsFilterOpen(false)} className="flex-1 bg-[#29CA8D] hover:bg-[#24b67d]">
+              <Button
+                onClick={() => setIsFilterOpen(false)}
+                className="flex-1 bg-[#29CA8D] hover:bg-[#24b67d]"
+              >
                 Apply Filters
               </Button>
             </div>
           </div>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog
+        open={!!offerDialogLoad}
+        onOpenChange={(open) => {
+          if (!open) {
+            setOfferDialogLoad(null);
+            setOfferDialogExistingOffer(null);
+            setOfferAmount("");
+            setOfferMessage("");
+            setOfferDialogCheckingExisting(false);
+          }
+        }}
+      >
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>{isEditingOffer ? "Update Offer" : "Submit Offer"}</DialogTitle>
+            <DialogDescription>
+              {isEditingOffer
+                ? `Edit your bid for load #${offerDialogLoad?.id}`
+                : `Negotiate directly with the shipper for load #${offerDialogLoad?.id}`}
+            </DialogDescription>
+          </DialogHeader>
+          {offerDialogCheckingExisting && (
+            <p className="text-xs text-gray-500">Checking your existing offer…</p>
+          )}
+          <div className="space-y-4">
+            <div>
+              <Label className="text-sm text-gray-500">Offer amount (USD)</Label>
+              <Input
+                type="number"
+                min="1"
+                value={offerAmount}
+                onChange={(e) => setOfferAmount(e.target.value)}
+                placeholder="15000"
+              />
+            </div>
+            <div>
+              <Label className="text-sm text-gray-500">Message to shipper</Label>
+              <textarea
+                className="w-full rounded-md border p-2 text-sm"
+                rows={4}
+                placeholder="Share availability, special equipment, etc."
+                value={offerMessage}
+                onChange={(e) => setOfferMessage(e.target.value)}
+              />
+            </div>
+            <div className="flex gap-2">
+              <Button
+                variant="outline"
+                className="flex-1"
+                onClick={() => setOfferDialogLoad(null)}
+              >
+                Cancel
+              </Button>
+              <Button
+                className="flex-1 bg-[#29CA8D] hover:bg-[#24b67d]"
+                onClick={submitOffer}
+                disabled={offerSubmitting || offerDialogCheckingExisting}
+              >
+                {offerSubmitting
+                  ? isEditingOffer
+                    ? "Saving..."
+                    : "Submitting..."
+                  : isEditingOffer
+                    ? "Save Changes"
+                    : "Send Offer"}
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog
+        open={!!activeHaulerOffer}
+        onOpenChange={(open) => {
+          if (!open) {
+            setActiveHaulerOffer(null);
+            setHaulerChatDraft("");
+            setHaulerChatMessages([]);
+          }
+        }}
+      >
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Offer Chat</DialogTitle>
+            <DialogDescription>
+              {activeHaulerOffer
+                ? `Conversation for offer #${activeHaulerOffer.id}`
+                : "Select an offer to chat"}
+            </DialogDescription>
+          </DialogHeader>
+          {haulerChatLoading ? (
+            <p className="text-sm text-gray-500">Loading conversation…</p>
+          ) : (
+            <div className="space-y-3">
+              <ScrollArea className="h-60 rounded border">
+                {haulerChatMessages.length === 0 ? (
+                  <p className="p-4 text-sm text-gray-500">
+                    No messages yet. Say hello!
+                  </p>
+                ) : (
+                  <div className="space-y-3 p-4">
+                    {haulerChatMessages.map((msg) => (
+                      <div key={msg.id} className="rounded border p-2 text-sm">
+                        <div className="flex items-center justify-between text-xs text-gray-500">
+                          <span>{msg.sender_role}</span>
+                          <span>{new Date(msg.created_at).toLocaleString()}</span>
+                        </div>
+                        {msg.text && <p className="mt-2">{msg.text}</p>}
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </ScrollArea>
+              <div className="flex gap-2">
+                <Textarea
+                  className="flex-1"
+                  placeholder="Type a message…"
+                  value={haulerChatDraft}
+                  onChange={(e) => setHaulerChatDraft(e.target.value)}
+                  disabled={!haulerChatAllowed}
+                />
+                <Button
+                  onClick={sendHaulerChatMessage}
+                  disabled={!activeHaulerOffer || !haulerChatAllowed}
+                >
+                  Send
+                </Button>
+              </div>
+            </div>
+          )}
         </DialogContent>
       </Dialog>
 

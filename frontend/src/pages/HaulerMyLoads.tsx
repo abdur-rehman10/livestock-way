@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import type { Load } from "../lib/api";
 import {
@@ -45,6 +45,10 @@ import {
   Upload,
 } from "lucide-react";
 import { toast } from "sonner";
+import {
+  SOCKET_EVENTS,
+  subscribeToSocketEvent,
+} from "../lib/socket";
 
 const FILTERS = ["all", "assigned", "in_transit", "delivered", "pending"] as const;
 type FilterOption = (typeof FILTERS)[number];
@@ -103,11 +107,12 @@ export default function HaulerMyLoads() {
     open: false,
     load: null,
   });
+  const loadsRef = useRef<Load[]>([]);
   const dialogLoad = detailsDialog.load;
   const navigate = useNavigate();
   const haulerId = storage.get<string | null>(STORAGE_KEYS.USER_ID, null);
 
-  async function refresh() {
+  const refresh = useCallback(async () => {
     if (!haulerId) {
       setError("Please log in as a hauler to view loads.");
       setLoading(false);
@@ -123,11 +128,37 @@ export default function HaulerMyLoads() {
     } finally {
       setLoading(false);
     }
-  }
+  }, [haulerId]);
 
   useEffect(() => {
     refresh();
-  }, [haulerId]);
+  }, [refresh]);
+
+  useEffect(() => {
+    loadsRef.current = loads;
+  }, [loads]);
+
+  useEffect(() => {
+    if (!haulerId) return;
+    const unsubscribe = subscribeToSocketEvent(
+      SOCKET_EVENTS.LOAD_UPDATED,
+      ({ load }) => {
+        const assigned = load.assigned_to_user_id
+          ? String(load.assigned_to_user_id)
+          : undefined;
+        const loadId = Number(load.id);
+        const alreadyTracked = loadsRef.current.some(
+          (existing) => Number(existing.id) === loadId
+        );
+        if (assigned === String(haulerId) || alreadyTracked) {
+          refresh();
+        }
+      }
+    );
+    return () => {
+      unsubscribe();
+    };
+  }, [haulerId, refresh]);
 
   const filteredLoads = useMemo(() => {
     if (filter === "all") return loads;

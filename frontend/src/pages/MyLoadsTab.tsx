@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import {
   fetchLoadsForShipper,
@@ -11,6 +11,10 @@ import { storage, STORAGE_KEYS } from "../lib/storage";
 import { formatLoadStatusLabel } from "../lib/status";
 import { Button } from "../components/ui/button";
 import { Badge } from "../components/ui/badge";
+import {
+  SOCKET_EVENTS,
+  subscribeToSocketEvent,
+} from "../lib/socket";
 
 const paymentStatusMeta: Record<
   string,
@@ -46,50 +50,66 @@ export default function MyLoadsTab() {
   const [payments, setPayments] = useState<Record<number, Payment>>({});
   const navigate = useNavigate();
   const shipperId = storage.get<string | null>(STORAGE_KEYS.USER_ID, null);
+  const loadsRef = useRef<LoadSummary[]>([]);
+
+  const refresh = useCallback(async () => {
+    if (!shipperId) {
+      setError("Please log in as a shipper to view your loads.");
+      setLoading(false);
+      return;
+    }
+    try {
+      setLoading(true);
+      setError(null);
+      const [loadsResult, paymentsResult] = await Promise.all([
+        fetchLoadsForShipper(shipperId),
+        fetchPaymentsForUser(shipperId, "shipper"),
+      ]);
+      setLoads(loadsResult);
+      const map: Record<number, Payment> = {};
+      paymentsResult.forEach((payment) => {
+        if (payment.load_id != null) {
+          map[Number(payment.load_id)] = payment;
+        }
+      });
+      setPayments(map);
+    } catch (err: any) {
+      console.error("Error loading shipper loads", err);
+      setError(err?.message || "Failed to load your trips.");
+    } finally {
+      setLoading(false);
+    }
+  }, [shipperId]);
 
   useEffect(() => {
-    let cancelled = false;
+    refresh();
+  }, [refresh]);
 
-    async function loadData() {
-      if (!shipperId) {
-        setError("Please log in as a shipper to view your loads.");
-        setLoading(false);
-        return;
-      }
-      try {
-        setLoading(true);
-        setError(null);
-        const [loadsResult, paymentsResult] = await Promise.all([
-          fetchLoadsForShipper(shipperId),
-          fetchPaymentsForUser(shipperId, "shipper"),
-        ]);
-        if (!cancelled) {
-          setLoads(loadsResult);
-          const map: Record<number, Payment> = {};
-          paymentsResult.forEach((payment) => {
-            if (payment.load_id != null) {
-              map[Number(payment.load_id)] = payment;
-            }
-          });
-          setPayments(map);
-        }
-      } catch (err: any) {
-        console.error("Error loading shipper loads", err);
-        if (!cancelled) {
-          setError(err?.message || "Failed to load your trips.");
-        }
-      } finally {
-        if (!cancelled) {
-          setLoading(false);
-        }
-      }
-    }
+  useEffect(() => {
+    loadsRef.current = loads;
+  }, [loads]);
 
-    loadData();
+  useEffect(() => {
+    if (!shipperId) return;
+    const unsubscribe = subscribeToSocketEvent(
+      SOCKET_EVENTS.LOAD_UPDATED,
+      ({ load }) => {
+        if (String(load.shipper_user_id ?? "") !== shipperId) {
+          if (
+            !loadsRef.current.some(
+              (existing) => Number(existing.id) === Number(load.id)
+            )
+          ) {
+            return;
+          }
+        }
+        refresh();
+      }
+    );
     return () => {
-      cancelled = true;
+      unsubscribe();
     };
-  }, [shipperId]);
+  }, [shipperId, refresh]);
 
   if (loading) {
     return (

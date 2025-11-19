@@ -5,7 +5,9 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 Object.defineProperty(exports, "__esModule", { value: true });
 const express_1 = require("express");
 const auth_1 = __importDefault(require("../middlewares/auth"));
+const profileHelpers_1 = require("../utils/profileHelpers");
 const marketplaceService_1 = require("../services/marketplaceService");
+const socket_1 = require("../socket");
 function getAuthUser(req) {
     return req.user ?? {};
 }
@@ -17,13 +19,40 @@ router.post("/loads/:loadId/offers", auth_1.default, async (req, res) => {
         if (!loadId) {
             return res.status(400).json({ error: "Missing loadId" });
         }
-        const derivedHaulerId = req.body?.hauler_id !== undefined && req.body?.hauler_id !== null
-            ? String(req.body.hauler_id)
-            : authUser.company_id !== undefined && authUser.company_id !== null
-                ? String(authUser.company_id)
-                : "";
+        let derivedHaulerId = "";
+        if (req.body?.hauler_id !== undefined && req.body?.hauler_id !== null) {
+            derivedHaulerId = String(req.body.hauler_id);
+        }
+        else if (authUser.company_id !== undefined && authUser.company_id !== null) {
+            derivedHaulerId = String(authUser.company_id);
+        }
+        else if (authUser.id !== undefined && authUser.id !== null) {
+            const ensured = await (0, profileHelpers_1.ensureHaulerProfile)(Number(authUser.id));
+            derivedHaulerId = String(ensured);
+        }
         if (!derivedHaulerId) {
             return res.status(400).json({ error: "hauler_id is required" });
+        }
+        const load = await (0, marketplaceService_1.getLoadById)(loadId);
+        if (!load) {
+            return res.status(404).json({ error: "Load not found" });
+        }
+        if (isShipperForLoad(authUser, load)) {
+            return res.status(400).json({ error: "You cannot bid on your own load." });
+        }
+        if (load.status !== marketplaceService_1.LoadStatus.PUBLISHED) {
+            return res.status(400).json({ error: "Offers can only be placed on published loads." });
+        }
+        const existingOffer = await (0, marketplaceService_1.getLatestOfferForHauler)(loadId, derivedHaulerId);
+        if (existingOffer &&
+            ![
+                marketplaceService_1.LoadOfferStatus.WITHDRAWN,
+                marketplaceService_1.LoadOfferStatus.REJECTED,
+                marketplaceService_1.LoadOfferStatus.EXPIRED,
+            ].includes(existingOffer.status)) {
+            return res.status(400).json({
+                error: "You already have an active offer on this load. Update or withdraw it before creating a new one.",
+            });
         }
         const offer = await (0, marketplaceService_1.createLoadOffer)({
             loadId,
@@ -34,11 +63,29 @@ router.post("/loads/:loadId/offers", auth_1.default, async (req, res) => {
             message: req.body.message,
             expiresAt: req.body.expires_at,
         });
+        emitOfferCreatedEvent(offer);
         res.status(201).json({ offer });
     }
     catch (err) {
         console.error("createLoadOffer error", err);
         res.status(500).json({ error: "Failed to create offer" });
+    }
+});
+router.get("/haulers/:haulerId/summary", auth_1.default, async (req, res) => {
+    try {
+        const haulerId = req.params.haulerId;
+        if (!haulerId) {
+            return res.status(400).json({ error: "Missing haulerId" });
+        }
+        const summary = await (0, marketplaceService_1.getHaulerSummary)(haulerId);
+        if (!summary) {
+            return res.status(404).json({ error: "Hauler not found" });
+        }
+        res.json({ summary });
+    }
+    catch (err) {
+        console.error("getHaulerSummary error", err);
+        res.status(500).json({ error: "Failed to load hauler profile" });
     }
 });
 router.get("/loads/:loadId/offers", auth_1.default, async (req, res) => {
@@ -79,11 +126,64 @@ router.post("/load-offers/:offerId/withdraw", auth_1.default, async (req, res) =
             return res.status(400).json({ error: "Offer is not pending" });
         }
         const updated = await (0, marketplaceService_1.updateOfferStatus)(offer.id, marketplaceService_1.LoadOfferStatus.WITHDRAWN);
+        emitOfferUpdatedEvent(updated);
         return res.json({ offer: updated });
     }
     catch (err) {
         console.error("withdrawOffer error", err);
         res.status(500).json({ error: "Failed to withdraw offer" });
+    }
+});
+router.patch("/load-offers/:offerId", auth_1.default, async (req, res) => {
+    try {
+        const authUser = getAuthUser(req);
+        const offerId = req.params.offerId;
+        if (!offerId) {
+            return res.status(400).json({ error: "Missing offerId" });
+        }
+        const offer = await (0, marketplaceService_1.getLoadOfferById)(offerId);
+        if (!offer) {
+            return res.status(404).json({ error: "Offer not found" });
+        }
+        const companyId = getCompanyId(authUser);
+        const isHauler = companyId !== null && offer.hauler_id === companyId;
+        const isCreator = String(authUser.id ?? "") === offer.created_by_user_id;
+        if (!isHauler && !isCreator && !isSuperAdminUser(authUser)) {
+            return res.status(403).json({ error: "Forbidden" });
+        }
+        if (offer.status !== marketplaceService_1.LoadOfferStatus.PENDING) {
+            return res.status(400).json({ error: "Only pending offers can be updated" });
+        }
+        const patch = {};
+        if (req.body?.offered_amount !== undefined) {
+            const amount = Number(req.body.offered_amount);
+            if (!Number.isFinite(amount) || amount <= 0) {
+                return res.status(400).json({ error: "offered_amount must be positive" });
+            }
+            patch.offeredAmount = amount;
+        }
+        if (req.body?.currency !== undefined) {
+            patch.currency = req.body.currency;
+        }
+        if (req.body?.message !== undefined) {
+            patch.message = req.body.message;
+        }
+        if (req.body?.expires_at !== undefined) {
+            patch.expiresAt = req.body.expires_at ?? null;
+        }
+        if (patch.offeredAmount === undefined &&
+            patch.currency === undefined &&
+            patch.message === undefined &&
+            patch.expiresAt === undefined) {
+            return res.status(400).json({ error: "No fields provided to update" });
+        }
+        const updated = await (0, marketplaceService_1.updateOfferDetails)(offer.id, patch);
+        emitOfferUpdatedEvent(updated);
+        return res.json({ offer: updated });
+    }
+    catch (err) {
+        console.error("updateOffer error", err);
+        res.status(500).json({ error: "Failed to update offer" });
     }
 });
 router.post("/load-offers/:offerId/reject", auth_1.default, async (req, res) => {
@@ -101,7 +201,7 @@ router.post("/load-offers/:offerId/reject", auth_1.default, async (req, res) => 
         if (!load) {
             return res.status(404).json({ error: "Load not found" });
         }
-        if (load.shipper_id !== String(authUser.company_id ?? "")) {
+        if (!isShipperForLoad(authUser, load)) {
             return res.status(403).json({ error: "Forbidden" });
         }
         if (offer.status !== marketplaceService_1.LoadOfferStatus.PENDING) {
@@ -110,6 +210,7 @@ router.post("/load-offers/:offerId/reject", auth_1.default, async (req, res) => 
         const updated = await (0, marketplaceService_1.updateOfferStatus)(offer.id, marketplaceService_1.LoadOfferStatus.REJECTED, {
             rejected_at: new Date().toISOString(),
         });
+        emitOfferUpdatedEvent(updated);
         return res.json({ offer: updated });
     }
     catch (err) {
@@ -132,7 +233,7 @@ router.post("/load-offers/:offerId/accept", auth_1.default, async (req, res) => 
         if (!load) {
             return res.status(404).json({ error: "Load not found" });
         }
-        if (load.shipper_id !== String(authUser.company_id ?? "")) {
+        if (!isShipperForLoad(authUser, load)) {
             return res.status(403).json({ error: "Forbidden" });
         }
         if (load.status !== marketplaceService_1.LoadStatus.PUBLISHED) {
@@ -152,6 +253,11 @@ router.post("/load-offers/:offerId/accept", auth_1.default, async (req, res) => 
             currency: offer.currency,
         });
         const acceptedOffer = await (0, marketplaceService_1.getLoadOfferById)(offer.id);
+        const latestLoad = await (0, marketplaceService_1.getLoadById)(offer.load_id);
+        emitOfferUpdatedEvent(acceptedOffer);
+        emitTripEvent(result.trip);
+        emitPaymentEvent(result.payment);
+        emitLoadEvent(latestLoad);
         res.status(201).json({
             offer: acceptedOffer,
             trip: result.trip,
@@ -211,6 +317,46 @@ async function getDisputeContext(disputeId) {
     const payment = await (0, marketplaceService_1.getPaymentById)(dispute.payment_id);
     return { dispute, trip, load, payment };
 }
+function emitOfferCreatedEvent(offer) {
+    if (offer) {
+        (0, socket_1.emitEvent)(socket_1.SOCKET_EVENTS.OFFER_CREATED, { offer });
+    }
+}
+function emitOfferUpdatedEvent(offer) {
+    if (offer) {
+        (0, socket_1.emitEvent)(socket_1.SOCKET_EVENTS.OFFER_UPDATED, { offer });
+    }
+}
+function emitOfferMessageEvent(message) {
+    if (message) {
+        (0, socket_1.emitEvent)(socket_1.SOCKET_EVENTS.OFFER_MESSAGE, { message });
+    }
+}
+function emitTripEvent(trip) {
+    if (trip) {
+        (0, socket_1.emitEvent)(socket_1.SOCKET_EVENTS.TRIP_UPDATED, { trip });
+    }
+}
+function emitLoadEvent(load) {
+    if (load) {
+        (0, socket_1.emitEvent)(socket_1.SOCKET_EVENTS.LOAD_UPDATED, { load });
+    }
+}
+function emitPaymentEvent(payment) {
+    if (payment) {
+        (0, socket_1.emitEvent)(socket_1.SOCKET_EVENTS.PAYMENT_UPDATED, { payment });
+    }
+}
+function emitDisputeEvent(event, dispute) {
+    if (dispute) {
+        (0, socket_1.emitEvent)(event, { dispute });
+    }
+}
+function emitDisputeMessageEvent(message) {
+    if (message) {
+        (0, socket_1.emitEvent)(socket_1.SOCKET_EVENTS.DISPUTE_MESSAGE, { message });
+    }
+}
 // List offer messages
 router.get("/load-offers/:offerId/messages", auth_1.default, async (req, res) => {
     try {
@@ -219,6 +365,9 @@ router.get("/load-offers/:offerId/messages", auth_1.default, async (req, res) =>
             return res.status(400).json({ error: "Missing offerId" });
         }
         const authUser = getAuthUser(req);
+        if (authUser.id === undefined || authUser.id === null) {
+            return res.status(401).json({ error: "Unauthorized" });
+        }
         const access = await getOfferAccess(offerId, authUser.id, authUser.user_type);
         if (!access.offer) {
             return res.status(404).json({ error: "Offer not found" });
@@ -242,12 +391,24 @@ router.post("/load-offers/:offerId/messages", auth_1.default, async (req, res) =
             return res.status(400).json({ error: "Missing offerId" });
         }
         const authUser = getAuthUser(req);
+        if (authUser.id === undefined || authUser.id === null) {
+            return res.status(401).json({ error: "Unauthorized" });
+        }
         const access = await getOfferAccess(offerId, authUser.id, authUser.user_type);
         if (!access.offer) {
             return res.status(404).json({ error: "Offer not found" });
         }
         if (!access.allowed) {
             return res.status(403).json({ error: "Forbidden" });
+        }
+        if (access.isHauler &&
+            access.offer.status === marketplaceService_1.LoadOfferStatus.PENDING) {
+            const hasShipperMessage = await (0, marketplaceService_1.offerHasShipperMessage)(access.offer.id);
+            if (!hasShipperMessage) {
+                return res
+                    .status(403)
+                    .json({ error: "Shipper must start the conversation first." });
+            }
         }
         if (access.offer.status === marketplaceService_1.LoadOfferStatus.EXPIRED ||
             access.offer.status === marketplaceService_1.LoadOfferStatus.REJECTED ||
@@ -256,11 +417,12 @@ router.post("/load-offers/:offerId/messages", auth_1.default, async (req, res) =
         }
         const message = await (0, marketplaceService_1.createOfferMessage)({
             offerId: access.offer.id,
-            senderUserId: String(authUser.id ?? ""),
+            senderUserId: String(authUser.id),
             senderRole: String(authUser.user_type ?? "unknown"),
             text: req.body.text,
             attachments: req.body.attachments,
         });
+        emitOfferMessageEvent(message);
         return res.status(201).json({ message });
     }
     catch (err) {
@@ -323,6 +485,7 @@ router.patch("/trips/:tripId/assign-driver", auth_1.default, async (req, res) =>
             return res.status(400).json({ error: "Driver must belong to hauler" });
         }
         const updated = await (0, marketplaceService_1.updateTripAssignment)({ tripId: trip.id, driverId });
+        emitTripEvent(updated);
         return res.json({ trip: updated });
     }
     catch (err) {
@@ -355,6 +518,7 @@ router.patch("/trips/:tripId/assign-vehicle", auth_1.default, async (req, res) =
             return res.status(400).json({ error: "Vehicle must belong to hauler" });
         }
         const updated = await (0, marketplaceService_1.updateTripAssignment)({ tripId: trip.id, vehicleId });
+        emitTripEvent(updated);
         return res.json({ trip: updated });
     }
     catch (err) {
@@ -391,6 +555,8 @@ router.post("/trips/:tripId/start", auth_1.default, async (req, res) => {
             started_at: now,
         });
         const updatedLoad = await (0, marketplaceService_1.updateLoadStatus)(context.load.id, marketplaceService_1.LoadStatus.IN_TRANSIT);
+        emitTripEvent(updatedTrip);
+        emitLoadEvent(updatedLoad);
         return res.json({ trip: updatedTrip, load: updatedLoad });
     }
     catch (err) {
@@ -420,6 +586,8 @@ router.post("/trips/:tripId/mark-delivered", auth_1.default, async (req, res) =>
         const now = new Date().toISOString();
         const updatedTrip = await (0, marketplaceService_1.updateTripStatus)(context.trip.id, marketplaceService_1.TripStatus.DELIVERED_AWAITING_CONFIRMATION, { delivered_at: now });
         const updatedLoad = await (0, marketplaceService_1.updateLoadStatus)(context.load.id, marketplaceService_1.LoadStatus.DELIVERED);
+        emitTripEvent(updatedTrip);
+        emitLoadEvent(updatedLoad);
         return res.json({ trip: updatedTrip, load: updatedLoad });
     }
     catch (err) {
@@ -453,6 +621,9 @@ router.post("/trips/:tripId/confirm-delivery", auth_1.default, async (req, res) 
         const releaseAt = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString();
         const updatedPayment = await (0, marketplaceService_1.scheduleAutoRelease)({ tripId: context.trip.id, releaseAt });
         const updatedLoad = await (0, marketplaceService_1.updateLoadStatus)(context.load.id, marketplaceService_1.LoadStatus.DELIVERED);
+        emitTripEvent(updatedTrip);
+        emitPaymentEvent(updatedPayment);
+        emitLoadEvent(updatedLoad);
         return res.json({ trip: updatedTrip, payment: updatedPayment, load: updatedLoad });
     }
     catch (err) {
@@ -489,6 +660,7 @@ router.post("/trips/:tripId/escrow/payment-intent", auth_1.default, async (req, 
             provider,
             externalIntentId,
         });
+        emitPaymentEvent(payment);
         const clientSecret = payment?.external_intent_id
             ? `secret_${payment.external_intent_id}`
             : null;
@@ -536,12 +708,17 @@ router.post("/webhooks/payment-provider", async (req, res) => {
         if (!payment) {
             return res.status(200).json({ ok: true });
         }
+        let updatedPayment = null;
+        let relatedTrip = null;
         if (event === "payment_succeeded" && payment.trip_id) {
-            await (0, marketplaceService_1.markPaymentFunded)(payment.trip_id);
+            updatedPayment = await (0, marketplaceService_1.markPaymentFunded)(payment.trip_id);
+            relatedTrip = await (0, marketplaceService_1.getTripById)(payment.trip_id);
         }
         else if (event === "payment_failed") {
-            await (0, marketplaceService_1.updatePaymentStatus)(payment.id, marketplaceService_1.PaymentStatus.AWAITING_FUNDING);
+            updatedPayment = await (0, marketplaceService_1.updatePaymentStatus)(payment.id, marketplaceService_1.PaymentStatus.AWAITING_FUNDING);
         }
+        emitPaymentEvent(updatedPayment);
+        emitTripEvent(relatedTrip);
         return res.status(200).json({ ok: true });
     }
     catch (err) {
@@ -600,10 +777,14 @@ router.post("/trips/:tripId/disputes", auth_1.default, async (req, res) => {
             description: req.body?.description,
             requestedAction: req.body?.requested_action,
         });
-        await (0, marketplaceService_1.updateTripStatus)(context.trip.id, marketplaceService_1.TripStatus.DISPUTED);
+        const updatedTrip = await (0, marketplaceService_1.updateTripStatus)(context.trip.id, marketplaceService_1.TripStatus.DISPUTED);
+        let updatedPayment = payment;
         if (payment.id) {
-            await (0, marketplaceService_1.clearAutoReleaseForPayment)(payment.id);
+            updatedPayment = await (0, marketplaceService_1.clearAutoReleaseForPayment)(payment.id);
         }
+        emitDisputeEvent(socket_1.SOCKET_EVENTS.DISPUTE_CREATED, dispute);
+        emitTripEvent(updatedTrip);
+        emitPaymentEvent(updatedPayment);
         return res.status(201).json({ dispute });
     }
     catch (err) {
@@ -681,6 +862,7 @@ router.post("/disputes/:disputeId/messages", auth_1.default, async (req, res) =>
             text: req.body?.text,
             attachments: req.body?.attachments,
         });
+        emitDisputeMessageEvent(message);
         return res.status(201).json({ message });
     }
     catch (err) {
@@ -755,6 +937,9 @@ router.post("/disputes/:disputeId/cancel", auth_1.default, async (req, res) => {
                 }
             }
         }
+        emitDisputeEvent(socket_1.SOCKET_EVENTS.DISPUTE_UPDATED, updatedDispute);
+        emitTripEvent(updatedTrip);
+        emitPaymentEvent(updatedPayment);
         return res.json({ dispute: updatedDispute, trip: updatedTrip, payment: updatedPayment });
     }
     catch (err) {
@@ -781,6 +966,7 @@ router.post("/admin/disputes/:disputeId/start-review", auth_1.default, async (re
         if (!dispute) {
             return res.status(404).json({ error: "Dispute not found" });
         }
+        emitDisputeEvent(socket_1.SOCKET_EVENTS.DISPUTE_UPDATED, dispute);
         return res.json({ dispute });
     }
     catch (err) {
@@ -804,6 +990,10 @@ router.post("/admin/disputes/:disputeId/resolve-release", auth_1.default, async 
             paymentStatus: marketplaceService_1.PaymentStatus.RELEASED_TO_HAULER,
             resolvedBy: String(user.id ?? ""),
         });
+        emitDisputeEvent(socket_1.SOCKET_EVENTS.DISPUTE_UPDATED, result.dispute);
+        emitPaymentEvent(result.payment);
+        emitTripEvent(result.trip);
+        emitLoadEvent(result.load);
         return res.json(result);
     }
     catch (err) {
@@ -827,6 +1017,10 @@ router.post("/admin/disputes/:disputeId/resolve-refund", auth_1.default, async (
             paymentStatus: marketplaceService_1.PaymentStatus.REFUNDED_TO_SHIPPER,
             resolvedBy: String(user.id ?? ""),
         });
+        emitDisputeEvent(socket_1.SOCKET_EVENTS.DISPUTE_UPDATED, result.dispute);
+        emitPaymentEvent(result.payment);
+        emitTripEvent(result.trip);
+        emitLoadEvent(result.load);
         return res.json(result);
     }
     catch (err) {
@@ -864,6 +1058,10 @@ router.post("/admin/disputes/:disputeId/resolve-split", auth_1.default, async (r
                 amountToShipper: amountToShipper.toFixed(2),
             },
         });
+        emitDisputeEvent(socket_1.SOCKET_EVENTS.DISPUTE_UPDATED, result.dispute);
+        emitPaymentEvent(result.payment);
+        emitTripEvent(result.trip);
+        emitLoadEvent(result.load);
         return res.json(result);
     }
     catch (err) {
@@ -887,6 +1085,9 @@ router.post("/admin/payments/:paymentId/force-release", auth_1.default, async (r
             tripStatus: marketplaceService_1.TripStatus.CLOSED,
             loadStatus: marketplaceService_1.LoadStatus.COMPLETED,
         });
+        emitPaymentEvent(result.payment);
+        emitTripEvent(result.trip);
+        emitLoadEvent(result.load);
         return res.json(result);
     }
     catch (err) {
@@ -910,6 +1111,9 @@ router.post("/admin/payments/:paymentId/force-refund", auth_1.default, async (re
             tripStatus: marketplaceService_1.TripStatus.CLOSED,
             loadStatus: marketplaceService_1.LoadStatus.COMPLETED,
         });
+        emitPaymentEvent(result.payment);
+        emitTripEvent(result.trip);
+        emitLoadEvent(result.load);
         return res.json(result);
     }
     catch (err) {
@@ -924,6 +1128,11 @@ router.post("/admin/payments/run-auto-release", auth_1.default, async (req, res)
             return res.status(403).json({ error: "Admin only" });
         }
         const results = await (0, marketplaceService_1.autoReleaseReadyPayments)();
+        for (const result of results) {
+            emitPaymentEvent(result.payment);
+            emitTripEvent(result.trip);
+            emitLoadEvent(result.load);
+        }
         return res.json({
             processed: results.map((r) => ({
                 payment_id: r.payment.id,

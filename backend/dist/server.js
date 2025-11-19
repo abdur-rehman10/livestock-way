@@ -3,6 +3,8 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
+exports.app = void 0;
+const http_1 = __importDefault(require("http"));
 const express_1 = __importDefault(require("express"));
 const cors_1 = __importDefault(require("cors"));
 const dotenv_1 = __importDefault(require("dotenv"));
@@ -18,8 +20,10 @@ const loadboardRoutes_1 = __importDefault(require("./routes/loadboardRoutes"));
 const driverRoutes_1 = __importDefault(require("./routes/driverRoutes"));
 const tripRoutes_1 = __importDefault(require("./routes/tripRoutes"));
 const marketplaceRoutes_1 = __importDefault(require("./routes/marketplaceRoutes"));
+const socket_1 = require("./socket");
 dotenv_1.default.config();
 const app = (0, express_1.default)();
+exports.app = app;
 app.use((0, cors_1.default)());
 app.use(express_1.default.json());
 app.use("/uploads", express_1.default.static(path_1.default.join(__dirname, "..", "uploads")));
@@ -61,7 +65,9 @@ app.use("/api/drivers", driverRoutes_1.default);
 app.use("/api/trips", tripRoutes_1.default);
 app.use("/api/marketplace", marketplaceRoutes_1.default);
 const PORT = Number(process.env.PORT) || 4000;
-app.listen(PORT, () => {
+const server = http_1.default.createServer(app);
+(0, socket_1.initSocket)(server);
+server.listen(PORT, () => {
     console.log(`✅ Server running on http://localhost:${PORT}`);
 });
 //# sourceMappingURL=server.js.map

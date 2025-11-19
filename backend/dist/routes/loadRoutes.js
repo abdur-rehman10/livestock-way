@@ -14,7 +14,7 @@ router.get("/:id", loadController_1.getLoadById);
 // POST /api/loads
 router.post("/", auth_1.default, loadController_1.createLoad);
 // POST /api/loads/:id/assign
-router.post("/:id/assign", loadController_1.assignLoad);
+router.post("/:id/assign", auth_1.default, loadController_1.assignLoad);
 // POST /api/loads/:id/start
 router.post("/:id/start", loadController_1.startLoad);
 // POST /api/loads/:id/complete
