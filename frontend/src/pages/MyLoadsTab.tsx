@@ -11,26 +11,52 @@ import { storage, STORAGE_KEYS } from "../lib/storage";
 import { formatLoadStatusLabel } from "../lib/status";
 import { Button } from "../components/ui/button";
 import { Badge } from "../components/ui/badge";
+import { Label } from "../components/ui/label";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+} from "../components/ui/dialog";
+import { Input } from "../components/ui/input";
+import { Textarea } from "../components/ui/textarea";
 import {
   SOCKET_EVENTS,
   subscribeToSocketEvent,
 } from "../lib/socket";
+import { toast } from "sonner";
+import {
+  createEscrowPaymentIntent,
+  triggerPaymentWebhook,
+  createTripDispute,
+  fetchTripDisputes,
+  cancelDispute,
+  type DisputeRecord,
+} from "../api/marketplace";
 
 const paymentStatusMeta: Record<
   string,
   { label: string; badgeClass: string }
 > = {
-  PENDING_FUNDING: {
-    label: "Pending",
+  AWAITING_FUNDING: {
+    label: "Awaiting Funding",
     badgeClass: "bg-amber-50 text-amber-700 border border-amber-200",
   },
-  FUNDED: {
-    label: "Funded",
+  ESCROW_FUNDED: {
+    label: "Escrow Funded",
     badgeClass: "bg-sky-50 text-sky-700 border border-sky-200",
   },
-  RELEASED: {
+  RELEASED_TO_HAULER: {
     label: "Released",
     badgeClass: "bg-emerald-50 text-emerald-700 border border-emerald-200",
+  },
+  REFUNDED_TO_SHIPPER: {
+    label: "Refunded",
+    badgeClass: "bg-rose-50 text-rose-700 border border-rose-200",
+  },
+  SPLIT_BETWEEN_PARTIES: {
+    label: "Split",
+    badgeClass: "bg-indigo-50 text-indigo-700 border border-indigo-200",
   },
 };
 
@@ -48,9 +74,22 @@ export default function MyLoadsTab() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [payments, setPayments] = useState<Record<number, Payment>>({});
+  const [fundingLoadId, setFundingLoadId] = useState<number | null>(null);
   const navigate = useNavigate();
   const shipperId = storage.get<string | null>(STORAGE_KEYS.USER_ID, null);
   const loadsRef = useRef<LoadSummary[]>([]);
+  const [disputeDialog, setDisputeDialog] = useState<{
+    open: boolean;
+    loadId: number | null;
+    tripId: number | null;
+    disputes: DisputeRecord[];
+    loading: boolean;
+  }>({ open: false, loadId: null, tripId: null, disputes: [], loading: false });
+  const [disputeForm, setDisputeForm] = useState({
+    reason_code: "",
+    description: "",
+    requested_action: "",
+  });
 
   const refresh = useCallback(async () => {
     if (!shipperId) {
@@ -110,6 +149,88 @@ export default function MyLoadsTab() {
       unsubscribe();
     };
   }, [shipperId, refresh]);
+
+  const handleFundEscrow = useCallback(
+    async (loadId: number) => {
+      const payment = payments[loadId];
+      if (!payment || !payment.trip_id) {
+        toast.error("Escrow payment not ready for this load yet.");
+        return;
+      }
+      try {
+        setFundingLoadId(loadId);
+        const intent = await createEscrowPaymentIntent(String(payment.trip_id), {
+          provider: "livestockway",
+        });
+        const intentId = intent.payment?.external_intent_id;
+        if (intentId) {
+          await triggerPaymentWebhook(intentId, "payment_succeeded");
+        }
+        toast.success("Escrow funded successfully.");
+        refresh();
+      } catch (err: any) {
+        toast.error(err?.message ?? "Failed to fund escrow.");
+      } finally {
+        setFundingLoadId(null);
+      }
+    },
+    [payments, refresh]
+  );
+
+  const openDisputeDialog = async (loadId: number) => {
+    const payment = payments[loadId];
+    if (!payment?.trip_id) {
+      toast.error("Trip not ready for disputes yet.");
+      return;
+    }
+    setDisputeDialog({
+      open: true,
+      loadId,
+      tripId: Number(payment.trip_id),
+      disputes: [],
+      loading: true,
+    });
+    setDisputeForm({
+      reason_code: "",
+      description: "",
+      requested_action: "",
+    });
+    try {
+      const resp = await fetchTripDisputes(payment.trip_id);
+      setDisputeDialog((prev) => ({ ...prev, disputes: resp.items, loading: false }));
+    } catch (err: any) {
+      setDisputeDialog((prev) => ({ ...prev, loading: false }));
+      toast.error(err?.message ?? "Failed to load disputes");
+    }
+  };
+
+  const submitDispute = async () => {
+    if (!disputeDialog.tripId || !disputeForm.reason_code.trim()) {
+      toast.error("Reason code is required");
+      return;
+    }
+    try {
+      await createTripDispute(disputeDialog.tripId, disputeForm);
+      toast.success("Dispute submitted.");
+      setDisputeDialog((prev) => ({ ...prev, open: false }));
+      refresh();
+    } catch (err: any) {
+      toast.error(err?.message ?? "Failed to submit dispute");
+    }
+  };
+
+  const cancelExistingDispute = async (disputeId: string) => {
+    try {
+      await cancelDispute(disputeId);
+      toast.success("Dispute cancelled.");
+      if (disputeDialog.tripId) {
+        const resp = await fetchTripDisputes(disputeDialog.tripId);
+        setDisputeDialog((prev) => ({ ...prev, disputes: resp.items }));
+      }
+    } catch (err: any) {
+      toast.error(err?.message ?? "Failed to cancel dispute");
+    }
+  };
 
   if (loading) {
     return (
@@ -216,6 +337,27 @@ export default function MyLoadsTab() {
                       >
                         Track
                       </Button>
+                      {payment?.status === "AWAITING_FUNDING" && (
+                        <Button
+                          size="sm"
+                          variant="secondary"
+                          className="text-xs"
+                          onClick={() => handleFundEscrow(load.id)}
+                          disabled={fundingLoadId === load.id}
+                        >
+                          {fundingLoadId === load.id ? "Funding…" : "Fund Escrow"}
+                        </Button>
+                      )}
+                      {payment?.trip_id && (
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          className="text-xs"
+                          onClick={() => openDisputeDialog(load.id)}
+                        >
+                          Dispute
+                        </Button>
+                      )}
                       {resolveEpodUrl(load.epod_url) && (
                         <Button size="sm" variant="outline" className="text-xs" asChild>
                           <a
@@ -235,6 +377,91 @@ export default function MyLoadsTab() {
           </tbody>
         </table>
       </div>
+
+      <Dialog
+        open={disputeDialog.open}
+        onOpenChange={(open) => setDisputeDialog((prev) => ({ ...prev, open }))}
+      >
+        <DialogContent className="max-w-lg">
+          <DialogHeader>
+            <DialogTitle>Dispute Load #{disputeDialog.loadId}</DialogTitle>
+          </DialogHeader>
+          {disputeDialog.loading ? (
+            <p className="text-sm text-gray-500">Loading disputes…</p>
+          ) : (
+            <div className="space-y-4">
+              {disputeDialog.disputes.length > 0 && (
+                <div className="space-y-2">
+                  <p className="text-xs text-gray-500">Existing disputes</p>
+                  <div className="space-y-2 max-h-48 overflow-y-auto">
+                    {disputeDialog.disputes.map((d) => (
+                      <div
+                        key={d.id}
+                        className="rounded border p-2 text-xs flex items-center justify-between"
+                      >
+                        <div>
+                          <p className="font-semibold">{d.reason_code}</p>
+                          <p className="text-gray-500">Status: {d.status}</p>
+                        </div>
+                        {d.status === "OPEN" && (
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            onClick={() => cancelExistingDispute(d.id)}
+                          >
+                            Cancel
+                          </Button>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              <div className="space-y-2">
+                <Label className="text-xs">Reason Code</Label>
+                <Input
+                  value={disputeForm.reason_code}
+                  onChange={(e) =>
+                    setDisputeForm((prev) => ({ ...prev, reason_code: e.target.value }))
+                  }
+                  placeholder="e.g. DAMAGE"
+                />
+              </div>
+              <div className="space-y-2">
+                <Label className="text-xs">Requested Action</Label>
+                <Input
+                  value={disputeForm.requested_action}
+                  onChange={(e) =>
+                    setDisputeForm((prev) => ({ ...prev, requested_action: e.target.value }))
+                  }
+                  placeholder="Refund, split, investigation…"
+                />
+              </div>
+              <div className="space-y-2">
+                <Label className="text-xs">Description</Label>
+                <Textarea
+                  value={disputeForm.description}
+                  onChange={(e) =>
+                    setDisputeForm((prev) => ({ ...prev, description: e.target.value }))
+                  }
+                  rows={4}
+                  placeholder="Describe the issue"
+                />
+              </div>
+              <div className="flex justify-end gap-2">
+                <Button
+                  variant="outline"
+                  onClick={() => setDisputeDialog((prev) => ({ ...prev, open: false }))}
+                >
+                  Close
+                </Button>
+                <Button onClick={submitDispute}>Submit Dispute</Button>
+              </div>
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

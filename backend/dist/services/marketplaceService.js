@@ -1,12 +1,22 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.DisputeStatus = exports.PaymentStatus = exports.TripStatus = exports.LoadOfferStatus = exports.LoadStatus = void 0;
+exports.BookingStatus = exports.DisputeStatus = exports.PaymentStatus = exports.TripStatus = exports.LoadOfferStatus = exports.LoadStatus = void 0;
 exports.getLoadOfferById = getLoadOfferById;
 exports.getLatestOfferForHauler = getLatestOfferForHauler;
 exports.getLoadById = getLoadById;
 exports.createLoadOffer = createLoadOffer;
 exports.listLoadOffers = listLoadOffers;
 exports.updateOfferStatus = updateOfferStatus;
+exports.getTruckAvailabilityById = getTruckAvailabilityById;
+exports.listTruckAvailability = listTruckAvailability;
+exports.createTruckAvailability = createTruckAvailability;
+exports.updateTruckAvailability = updateTruckAvailability;
+exports.createBookingFromOffer = createBookingFromOffer;
+exports.createBookingForAvailability = createBookingForAvailability;
+exports.getBookingById = getBookingById;
+exports.listBookingsForHauler = listBookingsForHauler;
+exports.listBookingsForShipper = listBookingsForShipper;
+exports.respondToBooking = respondToBooking;
 exports.updateOfferDetails = updateOfferDetails;
 exports.expireOtherOffers = expireOtherOffers;
 exports.acceptOfferAndCreateTrip = acceptOfferAndCreateTrip;
@@ -87,6 +97,13 @@ var DisputeStatus;
     DisputeStatus["RESOLVED_SPLIT"] = "RESOLVED_SPLIT";
     DisputeStatus["CANCELLED"] = "CANCELLED";
 })(DisputeStatus || (exports.DisputeStatus = DisputeStatus = {}));
+var BookingStatus;
+(function (BookingStatus) {
+    BookingStatus["REQUESTED"] = "REQUESTED";
+    BookingStatus["ACCEPTED"] = "ACCEPTED";
+    BookingStatus["REJECTED"] = "REJECTED";
+    BookingStatus["CANCELLED"] = "CANCELLED";
+})(BookingStatus || (exports.BookingStatus = BookingStatus = {}));
 const LOAD_STATUS_DB_TO_APP = {
     draft: LoadStatus.DRAFT,
     DRAFT: LoadStatus.DRAFT,
@@ -228,6 +245,47 @@ function mapTripRow(row) {
         updated_at: row.updated_at,
     };
 }
+function mapTruckAvailabilityRow(row) {
+    return {
+        id: row.id,
+        hauler_id: row.hauler_id,
+        truck_id: row.truck_id ?? null,
+        origin_location_text: row.origin_location_text,
+        destination_location_text: row.destination_location_text ?? null,
+        available_from: row.available_from,
+        available_until: row.available_until ?? null,
+        capacity_headcount: row.capacity_headcount === null || row.capacity_headcount === undefined
+            ? null
+            : Number(row.capacity_headcount),
+        capacity_weight_kg: row.capacity_weight_kg ?? null,
+        allow_shared: row.allow_shared ?? true,
+        notes: row.notes ?? null,
+        created_at: row.created_at,
+        updated_at: row.updated_at,
+    };
+}
+function mapBookingRow(row) {
+    return {
+        id: row.id,
+        load_id: row.load_id,
+        hauler_id: row.hauler_id,
+        shipper_id: row.shipper_id,
+        offer_id: row.offer_id ?? null,
+        truck_availability_id: row.truck_availability_id ?? null,
+        requested_headcount: row.requested_headcount === null || row.requested_headcount === undefined
+            ? null
+            : Number(row.requested_headcount),
+        requested_weight_kg: row.requested_weight_kg ?? null,
+        offered_amount: row.offered_amount ?? null,
+        offered_currency: row.offered_currency ?? null,
+        status: row.status ?? BookingStatus.REQUESTED,
+        notes: row.notes ?? null,
+        created_by_user_id: row.created_by_user_id,
+        updated_by_user_id: row.updated_by_user_id ?? null,
+        created_at: row.created_at,
+        updated_at: row.updated_at,
+    };
+}
 function mapPaymentRow(row) {
     return {
         ...row,
@@ -326,6 +384,505 @@ async function updateOfferStatus(offerId, status, patch = {}) {
   `;
     const result = await database_1.pool.query(query, [offerId, ...values]);
     return result.rows[0] ?? null;
+}
+async function getTruckAvailabilityById(id) {
+    const result = await database_1.pool.query(`
+      SELECT
+        id::text,
+        hauler_id::text,
+        truck_id::text,
+        origin_location_text,
+        destination_location_text,
+        available_from,
+        available_until,
+        capacity_headcount,
+        capacity_weight_kg::text,
+        allow_shared,
+        notes,
+        created_at,
+        updated_at
+      FROM truck_availability
+      WHERE id = $1
+        AND is_active = TRUE
+    `, [id]);
+    return result.rows[0] ? mapTruckAvailabilityRow(result.rows[0]) : null;
+}
+async function listTruckAvailability(options = {}) {
+    const clauses = ["is_active = TRUE"];
+    const params = [];
+    let idx = 1;
+    if (options.haulerId) {
+        clauses.push(`hauler_id = $${idx++}`);
+        params.push(options.haulerId);
+    }
+    if (options.originSearch) {
+        clauses.push(`origin_location_text ILIKE $${idx++}`);
+        params.push(`%${options.originSearch}%`);
+    }
+    const limit = options.limit ?? 50;
+    params.push(limit);
+    const result = await database_1.pool.query(`
+      SELECT
+        id::text,
+        hauler_id::text,
+        truck_id::text,
+        origin_location_text,
+        destination_location_text,
+        available_from,
+        available_until,
+        capacity_headcount,
+        capacity_weight_kg::text,
+        allow_shared,
+        notes,
+        created_at,
+        updated_at
+      FROM truck_availability
+      WHERE ${clauses.join(" AND ")}
+      ORDER BY available_from ASC
+      LIMIT $${idx}
+    `, params);
+    return result.rows.map(mapTruckAvailabilityRow);
+}
+async function createTruckAvailability(input) {
+    if (!input.origin.trim()) {
+        throw new Error("Origin is required");
+    }
+    if (input.truckId) {
+        const conflict = await database_1.pool.query(`
+        SELECT 1
+        FROM trips
+        WHERE truck_id = $1
+          AND status NOT IN ($2,$3,$4)
+        LIMIT 1
+      `, [input.truckId, mapTripStatusToDb(TripStatus.DELIVERED_CONFIRMED), mapTripStatusToDb(TripStatus.CLOSED), "completed"]);
+        if (conflict.rowCount) {
+            throw new Error("Truck is currently assigned to an active trip.");
+        }
+    }
+    const result = await database_1.pool.query(`
+      INSERT INTO truck_availability (
+        hauler_id,
+        truck_id,
+        origin_location_text,
+        destination_location_text,
+        available_from,
+        available_until,
+        capacity_headcount,
+        capacity_weight_kg,
+        allow_shared,
+        notes
+      )
+      VALUES (
+        $1,$2,$3,$4,$5,$6,$7,$8,$9,$10
+      )
+      RETURNING
+        id::text,
+        hauler_id::text,
+        truck_id::text,
+        origin_location_text,
+        destination_location_text,
+        available_from,
+        available_until,
+        capacity_headcount,
+        capacity_weight_kg::text,
+        allow_shared,
+        notes,
+        created_at,
+        updated_at
+    `, [
+        input.haulerId,
+        input.truckId ?? null,
+        input.origin,
+        input.destination ?? null,
+        input.availableFrom,
+        input.availableUntil ?? null,
+        input.capacityHeadcount ?? null,
+        input.capacityWeightKg ?? null,
+        input.allowShared ?? true,
+        input.notes ?? null,
+    ]);
+    const row = result.rows[0];
+    if (!row) {
+        throw new Error("Failed to create truck availability");
+    }
+    return mapTruckAvailabilityRow(row);
+}
+async function updateTruckAvailability(id, patch) {
+    const sets = [];
+    const values = [];
+    if (patch.origin !== undefined) {
+        sets.push(`origin_location_text = $${sets.length + 2}`);
+        values.push(patch.origin);
+    }
+    if (patch.destination !== undefined) {
+        sets.push(`destination_location_text = $${sets.length + 2}`);
+        values.push(patch.destination);
+    }
+    if (patch.availableFrom !== undefined) {
+        sets.push(`available_from = $${sets.length + 2}`);
+        values.push(patch.availableFrom);
+    }
+    if (patch.availableUntil !== undefined) {
+        sets.push(`available_until = $${sets.length + 2}`);
+        values.push(patch.availableUntil);
+    }
+    if (patch.capacityHeadcount !== undefined) {
+        sets.push(`capacity_headcount = $${sets.length + 2}`);
+        values.push(patch.capacityHeadcount);
+    }
+    if (patch.capacityWeightKg !== undefined) {
+        sets.push(`capacity_weight_kg = $${sets.length + 2}`);
+        values.push(patch.capacityWeightKg);
+    }
+    if (patch.allowShared !== undefined) {
+        sets.push(`allow_shared = $${sets.length + 2}`);
+        values.push(patch.allowShared);
+    }
+    if (patch.truckId !== undefined) {
+        sets.push(`truck_id = $${sets.length + 2}`);
+        values.push(patch.truckId);
+    }
+    if (patch.notes !== undefined) {
+        sets.push(`notes = $${sets.length + 2}`);
+        values.push(patch.notes);
+    }
+    if (patch.isActive !== undefined) {
+        sets.push(`is_active = $${sets.length + 2}`);
+        values.push(patch.isActive);
+    }
+    if (sets.length === 0) {
+        return getTruckAvailabilityById(id);
+    }
+    sets.push(`updated_at = NOW()`);
+    const result = await database_1.pool.query(`
+      UPDATE truck_availability
+      SET ${sets.join(", ")}
+      WHERE id = $1
+      RETURNING
+        id::text,
+        hauler_id::text,
+        truck_id::text,
+        origin_location_text,
+        destination_location_text,
+        available_from,
+        available_until,
+        capacity_headcount,
+        capacity_weight_kg::text,
+        allow_shared,
+        notes,
+        created_at,
+        updated_at
+    `, [id, ...values]);
+    const row = result.rows[0];
+    return row ? mapTruckAvailabilityRow(row) : null;
+}
+async function getLoadDetails(loadId) {
+    const result = await database_1.pool.query(`
+      SELECT
+        l.id,
+        l.shipper_id,
+        l.shipper_id::text AS shipper_id_text,
+        l.animal_count,
+        l.estimated_weight_kg,
+        l.price_offer_amount,
+        l.price_currency,
+        l.assigned_to_user_id
+      FROM loads l
+      WHERE l.id = $1
+    `, [loadId]);
+    return result.rows[0] ?? null;
+}
+async function loadHasActiveBooking(loadId) {
+    const result = await database_1.pool.query(`
+      SELECT 1
+      FROM load_bookings
+      WHERE load_id = $1
+        AND status IN ($2,$3)
+      LIMIT 1
+    `, [loadId, BookingStatus.REQUESTED, BookingStatus.ACCEPTED]);
+    return (result.rowCount ?? 0) > 0;
+}
+function ensureNumeric(value) {
+    if (value === null || value === undefined)
+        return null;
+    const num = Number(value);
+    if (Number.isNaN(num))
+        return null;
+    return num;
+}
+async function createBookingFromOffer(params) {
+    const offer = await getLoadOfferById(params.offerId);
+    if (!offer) {
+        throw new Error("Offer not found.");
+    }
+    const loadDetails = await getLoadDetails(offer.load_id);
+    if (!loadDetails) {
+        throw new Error("Load not found.");
+    }
+    const load = await getLoadById(offer.load_id);
+    if (!load) {
+        throw new Error("Load not found");
+    }
+    if (load.shipper_user_id !== params.shipperUserId) {
+        throw new Error("You can only request bookings for your own load.");
+    }
+    if (load.status !== LoadStatus.PUBLISHED && load.status !== LoadStatus.AWAITING_ESCROW) {
+        throw new Error("Load is not open for new bookings.");
+    }
+    if (await loadHasActiveBooking(offer.load_id)) {
+        throw new Error("Load already has an active booking.");
+    }
+    const requestedHeadcount = ensureNumeric(loadDetails.animal_count);
+    const insert = await database_1.pool.query(`
+      INSERT INTO load_bookings (
+        load_id,
+        hauler_id,
+        shipper_id,
+        offer_id,
+        requested_headcount,
+        requested_weight_kg,
+        offered_amount,
+        offered_currency,
+        status,
+        notes,
+        created_by_user_id
+      )
+      VALUES (
+        $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11
+      )
+      RETURNING *
+    `, [
+        offer.load_id,
+        offer.hauler_id,
+        load.shipper_id,
+        offer.id,
+        requestedHeadcount,
+        loadDetails.estimated_weight_kg ?? null,
+        offer.offered_amount,
+        offer.currency,
+        BookingStatus.REQUESTED,
+        params.notes ?? null,
+        params.shipperUserId,
+    ]);
+    return mapBookingRow(insert.rows[0]);
+}
+async function ensureTruckCapacity(availabilityId, requestedHeadcount) {
+    if (!requestedHeadcount)
+        return;
+    const availability = await getTruckAvailabilityById(availabilityId);
+    if (!availability || availability.capacity_headcount == null) {
+        return;
+    }
+    const current = await database_1.pool.query(`
+      SELECT COALESCE(SUM(COALESCE(requested_headcount,0)),0)::int AS total
+      FROM load_bookings
+      WHERE truck_availability_id = $1
+        AND status IN ($2,$3)
+    `, [availabilityId, BookingStatus.REQUESTED, BookingStatus.ACCEPTED]);
+    const used = Number(current.rows[0]?.total ?? 0);
+    if (used + requestedHeadcount > availability.capacity_headcount) {
+        throw new Error("Truck does not have enough remaining capacity.");
+    }
+}
+async function createBookingForAvailability(params) {
+    const availability = await getTruckAvailabilityById(params.truckAvailabilityId);
+    if (!availability) {
+        throw new Error("Truck availability not found.");
+    }
+    const requestedHeadcount = params.requestedHeadcount ??
+        ensureNumeric((await getLoadDetails(params.loadId))?.animal_count) ??
+        null;
+    await ensureTruckCapacity(params.truckAvailabilityId, requestedHeadcount);
+    const insert = await database_1.pool.query(`
+      INSERT INTO load_bookings (
+        load_id,
+        hauler_id,
+        shipper_id,
+        truck_availability_id,
+        requested_headcount,
+        requested_weight_kg,
+        offered_amount,
+        offered_currency,
+        status,
+        notes,
+        created_by_user_id
+      )
+      VALUES (
+        $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11
+      )
+      RETURNING *
+    `, [
+        params.loadId,
+        availability.hauler_id,
+        params.shipperId,
+        params.truckAvailabilityId,
+        requestedHeadcount,
+        params.requestedWeightKg ?? null,
+        params.offeredAmount ?? null,
+        params.offeredCurrency ?? "USD",
+        BookingStatus.REQUESTED,
+        params.notes ?? null,
+        params.shipperUserId,
+    ]);
+    return mapBookingRow(insert.rows[0]);
+}
+async function getBookingById(id) {
+    const result = await database_1.pool.query(`SELECT * FROM load_bookings WHERE id = $1`, [id]);
+    return result.rows[0] ? mapBookingRow(result.rows[0]) : null;
+}
+async function listBookingsForHauler(haulerId) {
+    const result = await database_1.pool.query(`SELECT * FROM load_bookings WHERE hauler_id = $1 ORDER BY created_at DESC LIMIT 50`, [haulerId]);
+    return result.rows.map(mapBookingRow);
+}
+async function listBookingsForShipper(shipperId) {
+    const result = await database_1.pool.query(`SELECT * FROM load_bookings WHERE shipper_id = $1 ORDER BY created_at DESC LIMIT 50`, [shipperId]);
+    return result.rows.map(mapBookingRow);
+}
+async function updateBookingStatus(bookingId, status, userId) {
+    const result = await database_1.pool.query(`
+      UPDATE load_bookings
+      SET status = $2,
+          updated_by_user_id = $3,
+          updated_at = NOW()
+      WHERE id = $1
+      RETURNING *
+    `, [bookingId, status, userId ?? null]);
+    return result.rows[0] ? mapBookingRow(result.rows[0]) : null;
+}
+async function createTripFromTruckBooking(booking) {
+    const availability = await getTruckAvailabilityById(booking.truck_availability_id);
+    if (!availability) {
+        throw new Error("Truck availability not found");
+    }
+    const loadRow = await getLoadById(booking.load_id);
+    if (!loadRow) {
+        throw new Error("Load not found");
+    }
+    const shipperUserId = loadRow.shipper_user_id;
+    const haulerUserQuery = await database_1.pool.query(`SELECT user_id::text FROM haulers WHERE id = $1`, [
+        availability.hauler_id,
+    ]);
+    const haulerUserId = haulerUserQuery.rows[0]?.user_id;
+    if (!haulerUserId) {
+        throw new Error("Hauler user profile not found");
+    }
+    const amount = booking.offered_amount
+        ? Number(booking.offered_amount)
+        : Number((await getLoadDetails(booking.load_id))?.price_offer_amount ?? 0);
+    if (!amount || amount <= 0) {
+        throw new Error("Booking amount required");
+    }
+    const tripResult = await database_1.pool.query(`
+      INSERT INTO trips (
+        load_id,
+        hauler_id,
+        truck_id,
+        status
+      )
+      VALUES (
+        $1,$2,$3,$4
+      )
+      RETURNING *
+    `, [
+        booking.load_id,
+        booking.hauler_id,
+        availability.truck_id,
+        mapTripStatusToDb(TripStatus.PENDING_ESCROW),
+    ]);
+    const tripRow = tripResult.rows[0];
+    if (!tripRow) {
+        throw new Error("Failed to create trip");
+    }
+    const trip = mapTripRow(tripRow);
+    const paymentResult = await database_1.pool.query(`
+      INSERT INTO payments (
+        trip_id,
+        load_id,
+        payer_user_id,
+        payee_user_id,
+        amount,
+        currency,
+        status,
+        is_escrow
+      )
+      VALUES (
+        $1,$2,$3,$4,$5,$6,$7,true
+      )
+      RETURNING *
+    `, [
+        trip.id,
+        booking.load_id,
+        shipperUserId,
+        haulerUserId,
+        amount,
+        booking.offered_currency ?? "USD",
+        mapPaymentStatusToDb(PaymentStatus.AWAITING_FUNDING),
+    ]);
+    const paymentRow = paymentResult.rows[0];
+    if (!paymentRow) {
+        throw new Error("Failed to create payment");
+    }
+    const payment = mapPaymentRow(paymentRow);
+    await database_1.pool.query(`
+      UPDATE loads
+      SET awarded_offer_id = NULL,
+          status = $2,
+          assigned_to_user_id = $3,
+          assigned_at = NOW(),
+          updated_at = NOW()
+      WHERE id = $1
+    `, [booking.load_id, mapLoadStatusToDb(LoadStatus.AWAITING_ESCROW), haulerUserId]);
+    return { trip, payment };
+}
+async function respondToBooking(params) {
+    const booking = await getBookingById(params.bookingId);
+    if (!booking) {
+        throw new Error("Booking not found");
+    }
+    if (params.action === "REJECT") {
+        const updated = await updateBookingStatus(booking.id, BookingStatus.REJECTED, params.actingUserId);
+        if (!updated)
+            throw new Error("Failed to update booking");
+        return { booking: updated };
+    }
+    if (booking.status !== BookingStatus.REQUESTED) {
+        throw new Error("Booking is not pending");
+    }
+    let trip;
+    let payment;
+    if (booking.offer_id) {
+        const offer = await getLoadOfferById(booking.offer_id);
+        if (!offer)
+            throw new Error("Offer not found for booking");
+        const loadRow = await getLoadById(booking.load_id);
+        if (!loadRow)
+            throw new Error("Load not found");
+        const result = await acceptOfferAndCreateTrip({
+            offerId: offer.id,
+            loadId: offer.load_id,
+            haulerId: offer.hauler_id,
+            shipperId: loadRow.shipper_id,
+            shipperUserId: loadRow.shipper_user_id,
+            haulerUserId: offer.created_by_user_id,
+            amount: Number(offer.offered_amount),
+            currency: offer.currency,
+        });
+        trip = result.trip;
+        payment = result.payment;
+    }
+    else if (booking.truck_availability_id) {
+        const result = await createTripFromTruckBooking(booking);
+        trip = result.trip;
+        payment = result.payment;
+    }
+    else {
+        throw new Error("Booking is missing source information");
+    }
+    const updated = await updateBookingStatus(booking.id, BookingStatus.ACCEPTED, params.actingUserId);
+    if (!updated) {
+        throw new Error("Failed to update booking");
+    }
+    return { booking: updated, trip, payment };
 }
 async function updateOfferDetails(offerId, patch) {
     const sets = [];

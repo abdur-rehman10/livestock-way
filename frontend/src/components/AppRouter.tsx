@@ -34,6 +34,7 @@ import { storage, STORAGE_KEYS, getPreferences, updatePreferences } from '../lib
 import { toast } from 'sonner';
 import { NotFound } from '../pages/ErrorPages';
 import MarketplaceDevLab from '../pages/MarketplaceDevLab';
+import TruckBoard from '../pages/TruckBoard';
 
 type UserRole = 'shipper' | 'driver' | 'hauler' | 'stakeholder' | 'super-admin' | null;
 type LandingRole = 'hauler' | 'shipper' | 'stakeholder';
@@ -247,6 +248,7 @@ export function AppRouter({ showKeyboardShortcuts, onKeyboardShortcutsToggle }: 
                   <Route path="dashboard" element={<HaulerDashboard onLogout={handleLogout} />} />
                   <Route path="my-loads" element={<HaulerMyLoads />} />
                   <Route path="loadboard" element={<Loadboard />} />
+                  <Route path="truck-board" element={<TruckBoard />} />
                   <Route path="fleet" element={<FleetManagement />} />
                   <Route path="trips" element={<TripsTab onViewTrip={() => toast.info('Trip view coming soon')} />} />
                   <Route path="trips/:id" element={<TripDetail />} />
@@ -276,6 +278,7 @@ export function AppRouter({ showKeyboardShortcuts, onKeyboardShortcutsToggle }: 
                   <Route path="dashboard" element={<ShipperDashboard onLogout={handleLogout} onRoleSwitch={handleRoleSwitch} />} />
                   <Route path="my-loads" element={<MyLoadsTab />} />
                   <Route path="loadboard" element={<Loadboard />} />
+                  <Route path="truck-board" element={<TruckBoard />} />
                   <Route path="trips" element={<TripsTab onViewTrip={() => toast.info('Trip view coming soon')} />} />
                   <Route path="trips/:id" element={<TripDetail />} />
                   <Route path="trips/:id/tracking" element={<TripTracking />} />

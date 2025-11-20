@@ -40,6 +40,12 @@ export declare enum DisputeStatus {
     RESOLVED_SPLIT = "RESOLVED_SPLIT",
     CANCELLED = "CANCELLED"
 }
+export declare enum BookingStatus {
+    REQUESTED = "REQUESTED",
+    ACCEPTED = "ACCEPTED",
+    REJECTED = "REJECTED",
+    CANCELLED = "CANCELLED"
+}
 export interface LoadRecord {
     id: string;
     shipper_id: string;
@@ -62,6 +68,39 @@ export interface LoadOfferRecord {
     expires_at: string | null;
     accepted_at: string | null;
     rejected_at: string | null;
+    created_at: string;
+    updated_at: string;
+}
+export interface TruckAvailabilityRecord {
+    id: string;
+    hauler_id: string;
+    truck_id: string | null;
+    origin_location_text: string;
+    destination_location_text: string | null;
+    available_from: string;
+    available_until: string | null;
+    capacity_headcount: number | null;
+    capacity_weight_kg: string | null;
+    allow_shared: boolean;
+    notes: string | null;
+    created_at: string;
+    updated_at: string;
+}
+export interface LoadBookingRecord {
+    id: string;
+    load_id: string;
+    hauler_id: string;
+    shipper_id: string;
+    offer_id: string | null;
+    truck_availability_id: string | null;
+    requested_headcount: number | null;
+    requested_weight_kg: string | null;
+    offered_amount: string | null;
+    offered_currency: string | null;
+    status: BookingStatus;
+    notes: string | null;
+    created_by_user_id: string;
+    updated_by_user_id: string | null;
     created_at: string;
     updated_at: string;
 }
@@ -143,6 +182,57 @@ export declare function listLoadOffers(loadId: string, options?: {
     total: number;
 }>;
 export declare function updateOfferStatus(offerId: string, status: LoadOfferStatus, patch?: Partial<LoadOfferRecord>): Promise<LoadOfferRecord | null>;
+export declare function getTruckAvailabilityById(id: string): Promise<TruckAvailabilityRecord | null>;
+export declare function listTruckAvailability(options?: {
+    haulerId?: string;
+    originSearch?: string;
+    limit?: number;
+}): Promise<TruckAvailabilityRecord[]>;
+export interface CreateTruckAvailabilityInput {
+    haulerId: string;
+    truckId?: string | null;
+    origin: string;
+    destination?: string | null;
+    availableFrom: string;
+    availableUntil?: string | null;
+    capacityHeadcount?: number | null;
+    capacityWeightKg?: number | null;
+    allowShared?: boolean;
+    notes?: string | null;
+}
+export declare function createTruckAvailability(input: CreateTruckAvailabilityInput): Promise<TruckAvailabilityRecord>;
+export declare function updateTruckAvailability(id: string, patch: Partial<CreateTruckAvailabilityInput> & {
+    isActive?: boolean;
+}): Promise<TruckAvailabilityRecord | null>;
+export declare function createBookingFromOffer(params: {
+    offerId: string;
+    shipperUserId: string;
+    notes?: string;
+}): Promise<LoadBookingRecord>;
+export declare function createBookingForAvailability(params: {
+    truckAvailabilityId: string;
+    loadId: string;
+    shipperId: string;
+    shipperUserId: string;
+    requestedHeadcount?: number | null;
+    requestedWeightKg?: number | null;
+    offeredAmount?: number | null;
+    offeredCurrency?: string | null;
+    notes?: string | null;
+}): Promise<LoadBookingRecord>;
+export declare function getBookingById(id: string): Promise<LoadBookingRecord | null>;
+export declare function listBookingsForHauler(haulerId: string): Promise<LoadBookingRecord[]>;
+export declare function listBookingsForShipper(shipperId: string): Promise<LoadBookingRecord[]>;
+export declare function respondToBooking(params: {
+    bookingId: string;
+    actor: "SHIPPER" | "HAULER";
+    action: "ACCEPT" | "REJECT";
+    actingUserId: string;
+}): Promise<{
+    booking: LoadBookingRecord;
+    trip?: TripRecord;
+    payment?: PaymentRecord;
+}>;
 export interface UpdateOfferDetailsInput {
     offeredAmount?: number;
     currency?: string;

@@ -7,6 +7,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '../components/ui/tabs'
 import { Loadboard } from './Loadboard';
 import { FleetManagement } from './FleetManagement';
 import { PostTruckDialog } from './PostTruckDialog';
+import HaulerBookingsTab from './HaulerBookingsTab';
 import { 
   Building2,
   Menu,
@@ -201,6 +202,12 @@ export function HaulerDashboard({ onLogout }: HaulerDashboardProps) {
                 className="data-[state=active]:border-b-2 data-[state=active]:border-[#29CA8D] rounded-none"
               >
                 Compliance
+              </TabsTrigger>
+              <TabsTrigger
+                value="bookings"
+                className="data-[state=active]:border-b-2 data-[state=active]:border-[#29CA8D] rounded-none"
+              >
+                Bookings
               </TabsTrigger>
               <TabsTrigger
                 value="my-loads"
@@ -513,6 +520,9 @@ export function HaulerDashboard({ onLogout }: HaulerDashboardProps) {
                 <p className="text-sm text-gray-600">Documents, certifications, and regulatory compliance</p>
               </CardContent>
             </Card>
+          </TabsContent>
+          <TabsContent value="bookings" className="mt-0">
+            <HaulerBookingsTab />
           </TabsContent>
         </Tabs>
       </main>

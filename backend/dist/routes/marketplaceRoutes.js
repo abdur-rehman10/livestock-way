@@ -12,6 +12,97 @@ function getAuthUser(req) {
     return req.user ?? {};
 }
 const router = (0, express_1.Router)();
+router.get("/truck-board", auth_1.default, async (req, res) => {
+    try {
+        const origin = req.query?.origin ? String(req.query.origin) : undefined;
+        const onlyMine = String(req.query?.scope || "").toLowerCase() === "mine";
+        const authUser = getAuthUser(req);
+        let haulerId;
+        if (onlyMine && isHaulerUser(authUser)) {
+            const resolved = await resolveHaulerId(authUser);
+            if (resolved)
+                haulerId = resolved;
+        }
+        const options = {};
+        if (haulerId)
+            options.haulerId = haulerId;
+        if (origin)
+            options.originSearch = origin;
+        options.limit = Number(req.query?.limit ?? 50);
+        const items = await (0, marketplaceService_1.listTruckAvailability)(options);
+        res.json({ items });
+    }
+    catch (err) {
+        console.error("listTruckAvailability error", err);
+        res.status(500).json({ error: "Failed to load truck board" });
+    }
+});
+router.post("/truck-board", auth_1.default, async (req, res) => {
+    try {
+        const authUser = getAuthUser(req);
+        if (!isHaulerUser(authUser)) {
+            return res.status(403).json({ error: "Only haulers can post trucks" });
+        }
+        const haulerIdResolved = await resolveHaulerId(authUser);
+        if (!haulerIdResolved) {
+            return res.status(400).json({ error: "Unable to resolve hauler profile" });
+        }
+        const availability = await (0, marketplaceService_1.createTruckAvailability)({
+            haulerId: haulerIdResolved,
+            truckId: req.body?.truck_id ?? null,
+            origin: req.body?.origin_location_text ?? "",
+            destination: req.body?.destination_location_text ?? null,
+            availableFrom: req.body?.available_from ?? new Date().toISOString(),
+            availableUntil: req.body?.available_until ?? null,
+            capacityHeadcount: req.body?.capacity_headcount ?? null,
+            capacityWeightKg: req.body?.capacity_weight_kg ?? null,
+            allowShared: req.body?.allow_shared ?? true,
+            notes: req.body?.notes ?? null,
+        });
+        res.status(201).json({ availability });
+    }
+    catch (err) {
+        console.error("createTruckAvailability error", err);
+        res.status(400).json({ error: err?.message ?? "Failed to post truck" });
+    }
+});
+router.patch("/truck-board/:id", auth_1.default, async (req, res) => {
+    try {
+        const authUser = getAuthUser(req);
+        if (!isHaulerUser(authUser) && !isSuperAdminUser(authUser)) {
+            return res.status(403).json({ error: "Forbidden" });
+        }
+        const availabilityId = req.params.id;
+        if (!availabilityId) {
+            return res.status(400).json({ error: "Missing availability id" });
+        }
+        const availability = await (0, marketplaceService_1.getTruckAvailabilityById)(availabilityId);
+        if (!availability) {
+            return res.status(404).json({ error: "Listing not found" });
+        }
+        const haulerId = await resolveHaulerId(authUser);
+        if (!isSuperAdminUser(authUser) &&
+            (!haulerId || availability.hauler_id !== haulerId)) {
+            return res.status(403).json({ error: "Forbidden" });
+        }
+        const updated = await (0, marketplaceService_1.updateTruckAvailability)(availabilityId, {
+            origin: req.body?.origin_location_text,
+            destination: req.body?.destination_location_text,
+            availableFrom: req.body?.available_from,
+            availableUntil: req.body?.available_until,
+            capacityHeadcount: req.body?.capacity_headcount,
+            capacityWeightKg: req.body?.capacity_weight_kg,
+            allowShared: req.body?.allow_shared,
+            notes: req.body?.notes,
+            isActive: req.body?.is_active,
+        });
+        res.json({ availability: updated });
+    }
+    catch (err) {
+        console.error("updateTruckAvailability error", err);
+        res.status(500).json({ error: "Failed to update listing" });
+    }
+});
 router.post("/loads/:loadId/offers", auth_1.default, async (req, res) => {
     try {
         const authUser = getAuthUser(req);
@@ -134,6 +225,31 @@ router.post("/load-offers/:offerId/withdraw", auth_1.default, async (req, res) =
         res.status(500).json({ error: "Failed to withdraw offer" });
     }
 });
+router.post("/load-offers/:offerId/bookings", auth_1.default, async (req, res) => {
+    try {
+        const authUser = getAuthUser(req);
+        if (!authUser.id) {
+            return res.status(401).json({ error: "Unauthorized" });
+        }
+        if (!isShipperUser(authUser) && !isSuperAdminUser(authUser)) {
+            return res.status(403).json({ error: "Only shippers can request bookings" });
+        }
+        const offerId = req.params.offerId;
+        if (!offerId) {
+            return res.status(400).json({ error: "Missing offerId" });
+        }
+        const booking = await (0, marketplaceService_1.createBookingFromOffer)({
+            offerId,
+            shipperUserId: String(authUser.id),
+            notes: req.body?.notes,
+        });
+        res.status(201).json({ booking });
+    }
+    catch (err) {
+        console.error("createBookingFromOffer error", err);
+        res.status(400).json({ error: err?.message ?? "Failed to request booking" });
+    }
+});
 router.patch("/load-offers/:offerId", auth_1.default, async (req, res) => {
     try {
         const authUser = getAuthUser(req);
@@ -219,55 +335,7 @@ router.post("/load-offers/:offerId/reject", auth_1.default, async (req, res) => 
     }
 });
 router.post("/load-offers/:offerId/accept", auth_1.default, async (req, res) => {
-    try {
-        const authUser = getAuthUser(req);
-        const offerId = req.params.offerId;
-        if (!offerId) {
-            return res.status(400).json({ error: "Missing offerId" });
-        }
-        const offer = await (0, marketplaceService_1.getLoadOfferById)(offerId);
-        if (!offer) {
-            return res.status(404).json({ error: "Offer not found" });
-        }
-        const load = await (0, marketplaceService_1.getLoadById)(offer.load_id);
-        if (!load) {
-            return res.status(404).json({ error: "Load not found" });
-        }
-        if (!isShipperForLoad(authUser, load)) {
-            return res.status(403).json({ error: "Forbidden" });
-        }
-        if (load.status !== marketplaceService_1.LoadStatus.PUBLISHED) {
-            return res.status(400).json({ error: "Load is not open for offers" });
-        }
-        if (offer.status !== marketplaceService_1.LoadOfferStatus.PENDING) {
-            return res.status(400).json({ error: "Offer is not pending" });
-        }
-        const result = await (0, marketplaceService_1.acceptOfferAndCreateTrip)({
-            offerId: offer.id,
-            loadId: offer.load_id,
-            haulerId: offer.hauler_id,
-            shipperId: load.shipper_id,
-            shipperUserId: load.shipper_user_id,
-            haulerUserId: offer.created_by_user_id,
-            amount: Number(offer.offered_amount),
-            currency: offer.currency,
-        });
-        const acceptedOffer = await (0, marketplaceService_1.getLoadOfferById)(offer.id);
-        const latestLoad = await (0, marketplaceService_1.getLoadById)(offer.load_id);
-        emitOfferUpdatedEvent(acceptedOffer);
-        emitTripEvent(result.trip);
-        emitPaymentEvent(result.payment);
-        emitLoadEvent(latestLoad);
-        res.status(201).json({
-            offer: acceptedOffer,
-            trip: result.trip,
-            payment: result.payment,
-        });
-    }
-    catch (err) {
-        console.error("acceptOffer error", err);
-        res.status(500).json({ error: "Failed to accept offer" });
-    }
+    res.status(400).json({ error: "Use booking approval endpoint to accept offers." });
 });
 // helper to check offer access
 async function getOfferAccess(offerId, userId, userRole) {
@@ -293,6 +361,32 @@ function getCompanyId(user) {
 }
 function isSuperAdminUser(user) {
     return normalizeRole(user?.user_type) === "SUPER_ADMIN";
+}
+function isHaulerUser(user) {
+    const role = normalizeRole(user?.user_type);
+    return role.startsWith("HAULER");
+}
+function isShipperUser(user) {
+    const role = normalizeRole(user?.user_type);
+    return role.startsWith("SHIPPER");
+}
+async function resolveHaulerId(user) {
+    const companyId = getCompanyId(user);
+    if (companyId)
+        return companyId;
+    if (user.id === undefined || user.id === null)
+        return null;
+    const ensured = await (0, profileHelpers_1.ensureHaulerProfile)(Number(user.id));
+    return String(ensured);
+}
+async function resolveShipperId(user) {
+    const companyId = getCompanyId(user);
+    if (companyId)
+        return companyId;
+    if (user.id === undefined || user.id === null)
+        return null;
+    const ensured = await (0, profileHelpers_1.ensureShipperProfile)(Number(user.id));
+    return String(ensured);
 }
 function isShipperForLoad(user, load) {
     const companyId = getCompanyId(user);
@@ -1144,6 +1238,138 @@ router.post("/admin/payments/run-auto-release", auth_1.default, async (req, res)
     catch (err) {
         console.error("autoReleaseJob error", err);
         res.status(500).json({ error: "Auto-release job failed" });
+    }
+});
+router.post("/truck-board/:id/bookings", auth_1.default, async (req, res) => {
+    try {
+        const authUser = getAuthUser(req);
+        if (!isShipperUser(authUser)) {
+            return res.status(403).json({ error: "Only shippers can request bookings" });
+        }
+        const shipperIdResolved = await resolveShipperId(authUser);
+        if (!shipperIdResolved) {
+            return res.status(400).json({ error: "Unable to resolve shipper profile" });
+        }
+        const loadId = String(req.body?.load_id ?? "");
+        if (!loadId) {
+            return res.status(400).json({ error: "load_id is required" });
+        }
+        const availabilityId = req.params.id;
+        if (!availabilityId) {
+            return res.status(400).json({ error: "Missing availability id" });
+        }
+        const booking = await (0, marketplaceService_1.createBookingForAvailability)({
+            truckAvailabilityId: availabilityId,
+            loadId,
+            shipperId: shipperIdResolved,
+            shipperUserId: String(authUser.id ?? ""),
+            requestedHeadcount: req.body?.requested_headcount,
+            requestedWeightKg: req.body?.requested_weight_kg,
+            offeredAmount: req.body?.offered_amount,
+            offeredCurrency: req.body?.offered_currency,
+            notes: req.body?.notes,
+        });
+        res.status(201).json({ booking });
+    }
+    catch (err) {
+        console.error("createBookingForAvailability error", err);
+        res.status(400).json({ error: err?.message ?? "Failed to request booking" });
+    }
+});
+router.get("/bookings", auth_1.default, async (req, res) => {
+    try {
+        const authUser = getAuthUser(req);
+        if (isHaulerUser(authUser)) {
+            const haulerIdResolved = await resolveHaulerId(authUser);
+            if (!haulerIdResolved) {
+                return res.status(400).json({ error: "Unable to resolve hauler profile" });
+            }
+            const items = await (0, marketplaceService_1.listBookingsForHauler)(haulerIdResolved);
+            return res.json({ items });
+        }
+        if (isShipperUser(authUser)) {
+            const shipperIdResolved = await resolveShipperId(authUser);
+            if (!shipperIdResolved) {
+                return res.status(400).json({ error: "Unable to resolve shipper profile" });
+            }
+            const items = await (0, marketplaceService_1.listBookingsForShipper)(shipperIdResolved);
+            return res.json({ items });
+        }
+        if (isSuperAdminUser(authUser)) {
+            return res.json({ items: [] });
+        }
+        res.status(403).json({ error: "Forbidden" });
+    }
+    catch (err) {
+        console.error("listBookings error", err);
+        res.status(500).json({ error: "Failed to load bookings" });
+    }
+});
+async function emitBookingSideEffects(result) {
+    if (result.trip) {
+        emitTripEvent(result.trip);
+    }
+    if (result.payment) {
+        emitPaymentEvent(result.payment);
+    }
+    const load = await (0, marketplaceService_1.getLoadById)(result.booking.load_id);
+    emitLoadEvent(load);
+}
+router.post("/bookings/:bookingId/accept", auth_1.default, async (req, res) => {
+    try {
+        const authUser = getAuthUser(req);
+        const actor = isHaulerUser(authUser)
+            ? "HAULER"
+            : isShipperUser(authUser)
+                ? "SHIPPER"
+                : null;
+        if (!actor && !isSuperAdminUser(authUser)) {
+            return res.status(403).json({ error: "Forbidden" });
+        }
+        const bookingId = req.params.bookingId;
+        if (!bookingId) {
+            return res.status(400).json({ error: "Missing booking id" });
+        }
+        const result = await (0, marketplaceService_1.respondToBooking)({
+            bookingId,
+            actor: actor ?? "SHIPPER",
+            action: "ACCEPT",
+            actingUserId: String(authUser.id ?? ""),
+        });
+        await emitBookingSideEffects(result);
+        res.json(result);
+    }
+    catch (err) {
+        console.error("acceptBooking error", err);
+        res.status(400).json({ error: err?.message ?? "Failed to accept booking" });
+    }
+});
+router.post("/bookings/:bookingId/reject", auth_1.default, async (req, res) => {
+    try {
+        const authUser = getAuthUser(req);
+        const actor = isHaulerUser(authUser)
+            ? "HAULER"
+            : isShipperUser(authUser)
+                ? "SHIPPER"
+                : null;
+        if (!actor && !isSuperAdminUser(authUser)) {
+            return res.status(403).json({ error: "Forbidden" });
+        }
+        const bookingId = req.params.bookingId;
+        if (!bookingId) {
+            return res.status(400).json({ error: "Missing booking id" });
+        }
+        const result = await (0, marketplaceService_1.respondToBooking)({
+            bookingId,
+            actor: actor ?? "SHIPPER",
+            action: "REJECT",
+            actingUserId: String(authUser.id ?? ""),
+        });
+        res.json(result);
+    }
+    catch (err) {
+        console.error("rejectBooking error", err);
+        res.status(400).json({ error: err?.message ?? "Failed to reject booking" });
     }
 });
 exports.default = router;
