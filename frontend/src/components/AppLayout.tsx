@@ -50,6 +50,7 @@ export function AppLayout({ children, userRole, onLogout }: AppLayoutProps) {
       routes: [
         { path: '/hauler/dashboard', icon: LayoutDashboard, label: 'Dashboard' },
         { path: '/hauler/loadboard', icon: Package, label: 'Loadboard' },
+        { path: '/hauler/truck-board', icon: Truck, label: 'Truck Board' },
         { path: '/hauler/my-loads', icon: ClipboardList, label: 'My Loads' },
         { path: '/hauler/fleet', icon: Truck, label: 'Fleet' },
         { path: '/hauler/trips', icon: MapPin, label: 'Trips' },
@@ -66,6 +67,7 @@ export function AppLayout({ children, userRole, onLogout }: AppLayoutProps) {
         { path: '/shipper/dashboard', icon: LayoutDashboard, label: 'Dashboard' },
         { path: '/shipper/my-loads', icon: Package, label: 'My Loads' },
         { path: '/shipper/loadboard', icon: Search, label: 'Find Carriers' },
+        { path: '/shipper/truck-board', icon: Truck, label: 'Truck Board' },
         { path: '/shipper/trips', icon: MapPin, label: 'Track Shipments' },
         { path: '/shipper/payments', icon: DollarSign, label: 'Payments' },
         { path: '/shipper/documents', icon: FileText, label: 'Documents' },

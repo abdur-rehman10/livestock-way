@@ -5,12 +5,12 @@ import {
   fetchLoadOffers,
   fetchOfferMessages,
   postOfferMessage,
-  acceptOffer,
   rejectOffer,
   fetchHaulerSummary,
   type LoadOffer,
   type OfferMessage,
   type HaulerSummary,
+  requestBookingForOffer,
 } from "../api/marketplace";
 import {
   Card,
@@ -136,12 +136,6 @@ export default function ShipperOffersTab() {
         toast.error(err?.message ?? "Failed to load hauler profile.")
       )
       .finally(() => setSummaryLoading(false));
-    const chatInterval = setInterval(() => {
-      fetchOfferMessages(activeOfferId)
-        .then((resp) => setMessages(resp.items))
-        .catch(() => {});
-    }, 5000);
-    return () => clearInterval(chatInterval);
   }, [activeOfferId, offers]);
 
   useEffect(() => {
@@ -208,13 +202,13 @@ export default function ShipperOffersTab() {
 
   const handleAccept = async (offerId: string) => {
     try {
-      await acceptOffer(offerId);
-      toast.success("Offer accepted.");
+      await requestBookingForOffer(offerId);
+      toast.success("Booking requested.");
       if (selectedLoadId) {
         await refreshOffers(selectedLoadId);
       }
     } catch (err: any) {
-      toast.error(err?.message ?? "Failed to accept offer.");
+      toast.error(err?.message ?? "Failed to request booking.");
     }
   };
 
@@ -369,7 +363,7 @@ export default function ShipperOffersTab() {
                               handleAccept(offer.id);
                             }}
                           >
-                            Accept
+                            Request Booking
                           </Button>
                           <Button
                             size="sm"
@@ -427,7 +421,9 @@ export default function ShipperOffersTab() {
               {chatLoading ? (
                 <p className="p-4 text-sm text-gray-500">Loading chat…</p>
               ) : messages.length === 0 ? (
-                <p className="p-4 text-sm text-gray-500">No messages yet.</p>
+                <p className="p-4 text-sm text-gray-500">
+                  No messages yet. Send the first note to unlock chat for the hauler.
+                </p>
               ) : (
                 <div className="space-y-3 p-4">
                   {messages.map((msg) => (
