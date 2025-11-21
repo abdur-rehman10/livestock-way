@@ -8,6 +8,7 @@ const database_1 = require("../config/database");
 const auth_1 = __importDefault(require("../middlewares/auth"));
 const profileHelpers_1 = require("../utils/profileHelpers");
 const router = (0, express_1.Router)();
+router.use(auth_1.default);
 const TRUCK_TYPE_VALUES = new Set([
     "cattle_trailer",
     "horse_trailer",
@@ -58,7 +59,7 @@ function mapTruckRow(row) {
     };
 }
 // CREATE TRUCK
-router.post("/", auth_1.default, async (req, res) => {
+router.post("/", async (req, res) => {
     try {
         const { truck_name, plate_number, capacity_lbs, capacity, equipment_type, truck_type, species_supported, notes, description, } = req.body;
         if (!truck_name || !plate_number) {
@@ -71,7 +72,7 @@ router.post("/", auth_1.default, async (req, res) => {
         if (!userId) {
             return res.status(401).json({ message: "Unauthorized" });
         }
-        if (userType !== "HAULER") {
+        if (!userType.includes("HAULER") && !userType.includes("SUPER_ADMIN")) {
             return res
                 .status(403)
                 .json({ message: "Only haulers can post trucks" });
@@ -117,8 +118,23 @@ router.post("/", auth_1.default, async (req, res) => {
     }
 });
 // GET ALL TRUCKS
-router.get("/", async (_req, res) => {
+router.get("/", async (req, res) => {
     try {
+        const userType = (req.user?.user_type || "").toUpperCase();
+        const isHauler = userType.includes("HAULER");
+        const isAdmin = userType.includes("SUPER_ADMIN");
+        let haulerId = null;
+        if (isHauler) {
+            haulerId = await (0, profileHelpers_1.ensureHaulerProfile)(Number(req.user?.id));
+        }
+        else if (isAdmin && req.query?.hauler_id) {
+            haulerId = Number(Array.isArray(req.query.hauler_id)
+                ? req.query.hauler_id[0]
+                : req.query.hauler_id);
+        }
+        if (!haulerId) {
+            return res.status(403).json({ message: "Only haulers can view trucks" });
+        }
         const result = await database_1.pool.query(`SELECT
         id,
         hauler_id,
@@ -129,11 +145,10 @@ router.get("/", async (_req, res) => {
         notes,
         created_at
       FROM trucks
-      WHERE status = 'active'
-      ORDER BY created_at DESC
-      LIMIT 100`);
+      WHERE hauler_id = $1 AND status <> 'inactive'
+      ORDER BY created_at DESC`, [haulerId]);
         const trucks = result.rows.map(mapTruckRow);
-        res.json(trucks);
+        res.json({ items: trucks });
     }
     catch (err) {
         console.error("GET /trucks error:", err);
@@ -161,11 +176,41 @@ router.get("/:id", async (req, res) => {
         if (result.rowCount === 0) {
             return res.status(404).json({ message: "Truck not found" });
         }
-        return res.json(mapTruckRow(result.rows[0]));
+        const truck = result.rows[0];
+        const userType = (req.user?.user_type || "").toUpperCase();
+        if (!userType.includes("SUPER_ADMIN") &&
+            Number(truck.hauler_id) !== (await (0, profileHelpers_1.ensureHaulerProfile)(Number(req.user?.id)))) {
+            return res.status(403).json({ message: "Forbidden" });
+        }
+        return res.json(mapTruckRow(truck));
     }
     catch (err) {
         console.error("GET /trucks/:id error:", err);
         res.status(500).json({ message: "Failed to fetch truck" });
+    }
+});
+router.delete("/:id", async (req, res) => {
+    try {
+        const id = Number(req.params.id);
+        if (Number.isNaN(id)) {
+            return res.status(400).json({ message: "Invalid truck id" });
+        }
+        const userType = (req.user?.user_type || "").toUpperCase();
+        const haulerId = await (0, profileHelpers_1.ensureHaulerProfile)(Number(req.user?.id));
+        const result = await database_1.pool.query(`
+        UPDATE trucks
+        SET status = 'inactive', updated_at = NOW()
+        WHERE id = $1 AND hauler_id = $2
+        RETURNING *
+      `, [id, haulerId]);
+        if (result.rowCount === 0) {
+            return res.status(404).json({ message: "Truck not found" });
+        }
+        res.json(mapTruckRow(result.rows[0]));
+    }
+    catch (err) {
+        console.error("DELETE /trucks/:id error:", err);
+        res.status(500).json({ message: "Failed to deactivate truck" });
     }
 });
 exports.default = router;

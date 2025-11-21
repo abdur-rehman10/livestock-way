@@ -10,7 +10,12 @@ type AuthenticatedRequest = Request & {
   };
 };
 
+type AuthedRequest = Request & {
+  user?: { id?: string | number; user_type?: string | null };
+};
+
 const router = Router();
+router.use(authRequired);
 
 const TRUCK_TYPE_VALUES = new Set([
   "cattle_trailer",
@@ -70,7 +75,7 @@ function mapTruckRow(row: any) {
 }
 
 // CREATE TRUCK
-router.post("/", authRequired, async (req: AuthenticatedRequest, res: Response) => {
+router.post("/", async (req: AuthedRequest, res: Response) => {
   try {
     const {
       truck_name,
@@ -96,7 +101,7 @@ router.post("/", authRequired, async (req: AuthenticatedRequest, res: Response) 
       return res.status(401).json({ message: "Unauthorized" });
     }
 
-    if (userType !== "HAULER") {
+    if (!userType.includes("HAULER") && !userType.includes("SUPER_ADMIN")) {
       return res
         .status(403)
         .json({ message: "Only haulers can post trucks" });
@@ -153,8 +158,25 @@ router.post("/", authRequired, async (req: AuthenticatedRequest, res: Response) 
 });
 
 // GET ALL TRUCKS
-router.get("/", async (_req: Request, res: Response) => {
+router.get("/", async (req: AuthedRequest, res: Response) => {
   try {
+    const userType = (req.user?.user_type || "").toUpperCase();
+    const isHauler = userType.includes("HAULER");
+    const isAdmin = userType.includes("SUPER_ADMIN");
+    let haulerId: number | null = null;
+    if (isHauler) {
+      haulerId = await ensureHaulerProfile(Number(req.user?.id));
+    } else if (isAdmin && req.query?.hauler_id) {
+      haulerId = Number(
+        Array.isArray(req.query.hauler_id)
+          ? req.query.hauler_id[0]
+          : req.query.hauler_id
+      );
+    }
+    if (!haulerId) {
+      return res.status(403).json({ message: "Only haulers can view trucks" });
+    }
+
     const result = await pool.query(
       `SELECT
         id,
@@ -166,12 +188,12 @@ router.get("/", async (_req: Request, res: Response) => {
         notes,
         created_at
       FROM trucks
-      WHERE status = 'active'
-      ORDER BY created_at DESC
-      LIMIT 100`
+      WHERE hauler_id = $1 AND status <> 'inactive'
+      ORDER BY created_at DESC`,
+      [haulerId]
     );
     const trucks = result.rows.map(mapTruckRow);
-    res.json(trucks);
+    res.json({ items: trucks });
   } catch (err) {
     console.error("GET /trucks error:", err);
     res.status(500).json({ message: "Failed to fetch trucks" });
@@ -179,7 +201,7 @@ router.get("/", async (_req: Request, res: Response) => {
 });
 
 // GET truck detail
-router.get("/:id", async (req: Request, res: Response) => {
+router.get("/:id", async (req: AuthedRequest, res: Response) => {
   const id = Number(req.params.id);
   if (Number.isNaN(id)) {
     return res.status(400).json({ message: "Invalid truck id" });
@@ -205,10 +227,46 @@ router.get("/:id", async (req: Request, res: Response) => {
       return res.status(404).json({ message: "Truck not found" });
     }
 
-    return res.json(mapTruckRow(result.rows[0]));
+    const truck = result.rows[0];
+    const userType = (req.user?.user_type || "").toUpperCase();
+    if (
+      !userType.includes("SUPER_ADMIN") &&
+      Number(truck.hauler_id) !== (await ensureHaulerProfile(Number(req.user?.id)))
+    ) {
+      return res.status(403).json({ message: "Forbidden" });
+    }
+
+    return res.json(mapTruckRow(truck));
   } catch (err) {
     console.error("GET /trucks/:id error:", err);
     res.status(500).json({ message: "Failed to fetch truck" });
+  }
+});
+
+router.delete("/:id", async (req: AuthedRequest, res: Response) => {
+  try {
+    const id = Number(req.params.id);
+    if (Number.isNaN(id)) {
+      return res.status(400).json({ message: "Invalid truck id" });
+    }
+    const userType = (req.user?.user_type || "").toUpperCase();
+    const haulerId = await ensureHaulerProfile(Number(req.user?.id));
+    const result = await pool.query(
+      `
+        UPDATE trucks
+        SET status = 'inactive', updated_at = NOW()
+        WHERE id = $1 AND hauler_id = $2
+        RETURNING *
+      `,
+      [id, haulerId]
+    );
+    if (result.rowCount === 0) {
+      return res.status(404).json({ message: "Truck not found" });
+    }
+    res.json(mapTruckRow(result.rows[0]));
+  } catch (err) {
+    console.error("DELETE /trucks/:id error:", err);
+    res.status(500).json({ message: "Failed to deactivate truck" });
   }
 });
 

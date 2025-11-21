@@ -80,9 +80,13 @@ export interface TruckAvailabilityRecord {
     available_from: string;
     available_until: string | null;
     capacity_headcount: number | null;
-    capacity_weight_kg: string | null;
+    capacity_weight_kg: number | null;
     allow_shared: boolean;
     notes: string | null;
+    origin_lat: number | null;
+    origin_lng: number | null;
+    destination_lat: number | null;
+    destination_lng: number | null;
     created_at: string;
     updated_at: string;
 }
@@ -122,6 +126,15 @@ export interface TruckChatMessageRecord {
     message: string | null;
     attachments: any[];
     created_at: string;
+}
+export interface TruckChatSummary {
+    chat: TruckChatRecord;
+    availability: {
+        origin_location_text: string;
+        destination_location_text: string | null;
+        capacity_headcount: number | null;
+    };
+    last_message: TruckChatMessageRecord | null;
 }
 export declare function getLoadOfferById(offerId: string): Promise<LoadOfferRecord | null>;
 export declare function getLatestOfferForHauler(loadId: string, haulerId: string): Promise<LoadOfferRecord | null>;
@@ -182,6 +195,20 @@ export interface HaulerSummary {
     completed_trips: number;
     rating: number | null;
 }
+export interface HaulerDriverRecord {
+    id: string;
+    full_name: string | null;
+    status: string | null;
+    phone_number?: string | null;
+    license_number?: string | null;
+    license_expiry?: string | null;
+}
+export interface HaulerVehicleRecord {
+    id: string;
+    plate_number: string | null;
+    truck_type: string | null;
+    status: string | null;
+}
 export interface CreateLoadOfferInput {
     loadId: string;
     haulerId: string;
@@ -205,6 +232,11 @@ export declare function getTruckAvailabilityById(id: string): Promise<TruckAvail
 export declare function listTruckAvailability(options?: {
     haulerId?: string;
     originSearch?: string;
+    near?: {
+        lat: number;
+        lng: number;
+        radiusKm: number;
+    };
     limit?: number;
 }): Promise<TruckAvailabilityRecord[]>;
 export interface CreateTruckAvailabilityInput {
@@ -218,6 +250,10 @@ export interface CreateTruckAvailabilityInput {
     capacityWeightKg?: number | null;
     allowShared?: boolean;
     notes?: string | null;
+    originLat?: number | null;
+    originLng?: number | null;
+    destinationLat?: number | null;
+    destinationLng?: number | null;
 }
 export declare function createTruckAvailability(input: CreateTruckAvailabilityInput): Promise<TruckAvailabilityRecord>;
 export declare function updateTruckAvailability(id: string, patch: Partial<CreateTruckAvailabilityInput> & {
@@ -239,6 +275,8 @@ export declare function createTruckChatMessage(params: {
     attachments?: unknown[];
 }): Promise<TruckChatMessageRecord>;
 export declare function listTruckChatMessages(chatId: string): Promise<TruckChatMessageRecord[]>;
+export declare function listTruckChatsForHauler(haulerId: string): Promise<TruckChatSummary[]>;
+export declare function listTruckChatsForShipper(shipperId: string): Promise<TruckChatSummary[]>;
 export declare function createBookingFromOffer(params: {
     offerId: string;
     shipperUserId: string;
@@ -300,10 +338,18 @@ export declare function createOfferMessage(input: CreateOfferMessageInput): Prom
 export declare function listOfferMessages(offerId: string): Promise<any[]>;
 export declare function offerHasShipperMessage(offerId: string): Promise<boolean>;
 export declare function getTripById(tripId: string): Promise<TripRecord | null>;
+export declare function getLatestTripForLoad(loadId: string): Promise<TripRecord | null>;
 export declare function getTripAndLoad(tripId: string): Promise<{
     trip: TripRecord;
     load: LoadRecord;
 } | null>;
+export declare function getTripContextByLoadId(loadId: string): Promise<{
+    trip: TripRecord | null;
+    load: LoadRecord;
+    payment: PaymentRecord | null;
+}>;
+export declare function listDriversForHauler(haulerId: string): Promise<HaulerDriverRecord[]>;
+export declare function listVehiclesForHauler(haulerId: string): Promise<HaulerVehicleRecord[]>;
 export interface UpdateTripAssignmentInput {
     tripId: string;
     driverId?: string | null;

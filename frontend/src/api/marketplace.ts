@@ -117,6 +117,23 @@ export interface TripEnvelope {
   payment: PaymentRecord | null;
 }
 
+export interface HaulerDriverOption {
+  id: string;
+  full_name: string | null;
+  status: string | null;
+  phone_number?: string | null;
+  license_number?: string | null;
+  license_expiry?: string | null;
+}
+
+export interface HaulerVehicleOption {
+  id: string;
+  plate_number: string | null;
+  truck_type: string | null;
+  status: string | null;
+  truck_name?: string | null;
+}
+
 export interface TruckAvailability {
   id: string;
   hauler_id: string;
@@ -126,9 +143,13 @@ export interface TruckAvailability {
   available_from: string;
   available_until: string | null;
   capacity_headcount: number | null;
-  capacity_weight_kg: string | null;
+  capacity_weight_kg: number | null;
   allow_shared: boolean;
   notes: string | null;
+  origin_lat: number | null;
+  origin_lng: number | null;
+  destination_lat: number | null;
+  destination_lng: number | null;
 }
 
 export interface LoadBooking {
@@ -176,6 +197,16 @@ export interface TruckChatMessage {
   message: string | null;
   attachments: any[];
   created_at: string;
+}
+
+export interface TruckChatSummary {
+  chat: TruckChat;
+  availability: {
+    origin_location_text: string;
+    destination_location_text: string | null;
+    capacity_headcount: number | null;
+  };
+  last_message: TruckChatMessage | null;
 }
 
 export async function fetchLoadOffers(loadId: string, page = 1, pageSize = 20) {
@@ -246,6 +277,18 @@ export async function fetchTrip(tripId: string) {
   return marketplaceRequest<TripEnvelope>(`/trips/${tripId}`);
 }
 
+export async function fetchTripByLoadId(loadId: string | number) {
+  return marketplaceRequest<TripEnvelope>(`/loads/${loadId}/trip`);
+}
+
+export async function fetchHaulerDrivers() {
+  return marketplaceRequest<{ items: HaulerDriverOption[] }>(`/hauler/drivers`);
+}
+
+export async function fetchHaulerVehicles() {
+  return marketplaceRequest<{ items: HaulerVehicleOption[] }>(`/hauler/vehicles`);
+}
+
 export async function createEscrowPaymentIntent(
   tripId: string,
   payload: { provider?: string; payment_method_id?: string; save_payment_method?: boolean } = {}
@@ -266,11 +309,56 @@ export async function triggerPaymentWebhook(intentId: string, event: "payment_su
   });
 }
 
-export async function fetchTruckAvailability(params: { origin?: string; scope?: "mine" } = {}) {
+export async function assignTripDriver(tripId: string | number, driverId: string | number) {
+  return marketplaceRequest<{ trip: TripRecord }>(`/trips/${tripId}/assign-driver`, {
+    method: "PATCH",
+    body: JSON.stringify({ driver_id: driverId }),
+  });
+}
+
+export async function assignTripVehicle(tripId: string | number, vehicleId: string | number) {
+  return marketplaceRequest<{ trip: TripRecord }>(`/trips/${tripId}/assign-vehicle`, {
+    method: "PATCH",
+    body: JSON.stringify({ vehicle_id: vehicleId }),
+  });
+}
+
+export async function startMarketplaceTrip(tripId: string | number) {
+  return marketplaceRequest<{ trip: TripRecord; load: { id: string } }>(`/trips/${tripId}/start`, {
+    method: "POST",
+  });
+}
+
+export async function markMarketplaceTripDelivered(tripId: string | number) {
+  return marketplaceRequest<{ trip: TripRecord; load: { id: string } }>(
+    `/trips/${tripId}/mark-delivered`,
+    { method: "POST" }
+  );
+}
+
+export async function confirmMarketplaceTripDelivery(tripId: string | number) {
+  return marketplaceRequest<{ trip: TripRecord; load: { id: string } }>(
+    `/trips/${tripId}/confirm-delivery`,
+    { method: "POST" }
+  );
+}
+
+export async function fetchTruckAvailability(
+  params: { origin?: string; scope?: "mine"; nearLat?: number; nearLng?: number; radiusKm?: number } = {}
+) {
   const query = new URLSearchParams();
   if (params.origin) query.set("origin", params.origin);
   if (params.scope) query.set("scope", params.scope);
-  return marketplaceRequest<{ items: TruckAvailability[] }>(`/truck-board?${query.toString()}`);
+  if (params.nearLat !== undefined && params.nearLng !== undefined) {
+    query.set("near_lat", String(params.nearLat));
+    query.set("near_lng", String(params.nearLng));
+    if (params.radiusKm) {
+      query.set("radius_km", String(params.radiusKm));
+    }
+  }
+  const queryString = query.toString();
+  const suffix = queryString ? `?${queryString}` : "";
+  return marketplaceRequest<{ items: TruckAvailability[] }>(`/truck-board${suffix}`);
 }
 
 export async function createTruckAvailabilityEntry(payload: {
@@ -283,6 +371,10 @@ export async function createTruckAvailabilityEntry(payload: {
   capacity_weight_kg?: number | null;
   allow_shared?: boolean;
   notes?: string | null;
+  origin_lat?: number | null;
+  origin_lng?: number | null;
+  destination_lat?: number | null;
+  destination_lng?: number | null;
 }) {
   return marketplaceRequest<{ availability: TruckAvailability }>(`/truck-board`, {
     method: "POST",
@@ -302,6 +394,10 @@ export async function updateTruckAvailabilityEntry(
     allow_shared: boolean;
     notes: string | null;
     is_active: boolean;
+    origin_lat: number | null;
+    origin_lng: number | null;
+    destination_lat: number | null;
+    destination_lng: number | null;
   }>
 ) {
   return marketplaceRequest<{ availability: TruckAvailability | null }>(`/truck-board/${id}`, {
@@ -392,6 +488,10 @@ export async function sendTruckChatMessage(
 
 export async function fetchTruckChatMessages(chatId: string) {
   return marketplaceRequest<{ items: TruckChatMessage[] }>(`/truck-chats/${chatId}/messages`);
+}
+
+export async function fetchTruckChats() {
+  return marketplaceRequest<{ items: TruckChatSummary[] }>(`/truck-chats`);
 }
 
 export interface HaulerSummary {

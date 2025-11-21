@@ -16,6 +16,8 @@ exports.getTruckChatForShipper = getTruckChatForShipper;
 exports.createTruckChat = createTruckChat;
 exports.createTruckChatMessage = createTruckChatMessage;
 exports.listTruckChatMessages = listTruckChatMessages;
+exports.listTruckChatsForHauler = listTruckChatsForHauler;
+exports.listTruckChatsForShipper = listTruckChatsForShipper;
 exports.createBookingFromOffer = createBookingFromOffer;
 exports.createBookingForAvailability = createBookingForAvailability;
 exports.getBookingById = getBookingById;
@@ -29,7 +31,11 @@ exports.createOfferMessage = createOfferMessage;
 exports.listOfferMessages = listOfferMessages;
 exports.offerHasShipperMessage = offerHasShipperMessage;
 exports.getTripById = getTripById;
+exports.getLatestTripForLoad = getLatestTripForLoad;
 exports.getTripAndLoad = getTripAndLoad;
+exports.getTripContextByLoadId = getTripContextByLoadId;
+exports.listDriversForHauler = listDriversForHauler;
+exports.listVehiclesForHauler = listVehiclesForHauler;
 exports.updateTripAssignment = updateTripAssignment;
 exports.driverBelongsToHauler = driverBelongsToHauler;
 exports.vehicleBelongsToHauler = vehicleBelongsToHauler;
@@ -262,9 +268,23 @@ function mapTruckAvailabilityRow(row) {
         capacity_headcount: row.capacity_headcount === null || row.capacity_headcount === undefined
             ? null
             : Number(row.capacity_headcount),
-        capacity_weight_kg: row.capacity_weight_kg ?? null,
+        capacity_weight_kg: row.capacity_weight_kg === null || row.capacity_weight_kg === undefined
+            ? null
+            : Number(row.capacity_weight_kg),
         allow_shared: row.allow_shared ?? true,
         notes: row.notes ?? null,
+        origin_lat: row.origin_lat === null || row.origin_lat === undefined
+            ? null
+            : Number(row.origin_lat),
+        origin_lng: row.origin_lng === null || row.origin_lng === undefined
+            ? null
+            : Number(row.origin_lng),
+        destination_lat: row.destination_lat === null || row.destination_lat === undefined
+            ? null
+            : Number(row.destination_lat),
+        destination_lng: row.destination_lng === null || row.destination_lng === undefined
+            ? null
+            : Number(row.destination_lng),
         created_at: row.created_at,
         updated_at: row.updated_at,
     };
@@ -424,9 +444,13 @@ async function getTruckAvailabilityById(id) {
         available_from,
         available_until,
         capacity_headcount,
-        capacity_weight_kg::text,
+        capacity_weight_kg,
         allow_shared,
         notes,
+        origin_lat,
+        origin_lng,
+        destination_lat,
+        destination_lng,
         created_at,
         updated_at
       FROM truck_availability
@@ -447,6 +471,19 @@ async function listTruckAvailability(options = {}) {
         clauses.push(`origin_location_text ILIKE $${idx++}`);
         params.push(`%${options.originSearch}%`);
     }
+    if (options.near) {
+        const { lat, lng, radiusKm } = options.near;
+        const clampedLat = Math.max(-90, Math.min(90, lat));
+        const clampedLng = Math.max(-180, Math.min(180, lng));
+        const latDelta = Math.min(radiusKm / 111, 180);
+        const lngDenominator = Math.max(Math.cos((clampedLat * Math.PI) / 180), 0.0001);
+        const lngDelta = Math.min(radiusKm / (111 * lngDenominator), 360);
+        clauses.push(`origin_lat IS NOT NULL AND origin_lng IS NOT NULL`);
+        clauses.push(`origin_lat BETWEEN $${idx++} AND $${idx++}`);
+        params.push(clampedLat - latDelta, clampedLat + latDelta);
+        clauses.push(`origin_lng BETWEEN $${idx++} AND $${idx++}`);
+        params.push(clampedLng - lngDelta, clampedLng + lngDelta);
+    }
     const limit = options.limit ?? 50;
     params.push(limit);
     const result = await database_1.pool.query(`
@@ -459,9 +496,13 @@ async function listTruckAvailability(options = {}) {
         available_from,
         available_until,
         capacity_headcount,
-        capacity_weight_kg::text,
+        capacity_weight_kg,
         allow_shared,
         notes,
+        origin_lat,
+        origin_lng,
+        destination_lat,
+        destination_lng,
         created_at,
         updated_at
       FROM truck_availability
@@ -475,6 +516,34 @@ async function createTruckAvailability(input) {
     if (!input.origin.trim()) {
         throw new Error("Origin is required");
     }
+    const normalizedHeadcount = input.capacityHeadcount === undefined || input.capacityHeadcount === null
+        ? null
+        : Number(input.capacityHeadcount);
+    if (normalizedHeadcount !== null && normalizedHeadcount <= 0) {
+        throw new Error("Capacity headcount must be greater than zero.");
+    }
+    const normalizedWeight = input.capacityWeightKg === undefined || input.capacityWeightKg === null
+        ? null
+        : Number(input.capacityWeightKg);
+    if (normalizedWeight !== null && normalizedWeight <= 0) {
+        throw new Error("Capacity weight must be greater than zero.");
+    }
+    const originLatRaw = parseCoordinate("Origin latitude", input.originLat, -90, 90);
+    const originLngRaw = parseCoordinate("Origin longitude", input.originLng, -180, 180);
+    if ((originLatRaw !== undefined && originLngRaw === undefined) ||
+        (originLngRaw !== undefined && originLatRaw === undefined)) {
+        throw new Error("Origin latitude and longitude must both be provided.");
+    }
+    const destinationLatRaw = parseCoordinate("Destination latitude", input.destinationLat, -90, 90);
+    const destinationLngRaw = parseCoordinate("Destination longitude", input.destinationLng, -180, 180);
+    if ((destinationLatRaw !== undefined && destinationLngRaw === undefined) ||
+        (destinationLngRaw !== undefined && destinationLatRaw === undefined)) {
+        throw new Error("Destination latitude and longitude must both be provided.");
+    }
+    const originLat = originLatRaw === undefined ? null : originLatRaw;
+    const originLng = originLngRaw === undefined ? null : originLngRaw;
+    const destinationLat = destinationLatRaw === undefined ? null : destinationLatRaw;
+    const destinationLng = destinationLngRaw === undefined ? null : destinationLngRaw;
     if (input.truckId) {
         const conflict = await database_1.pool.query(`
         SELECT 1
@@ -485,6 +554,29 @@ async function createTruckAvailability(input) {
       `, [input.truckId, mapTripStatusToDb(TripStatus.DELIVERED_CONFIRMED), mapTripStatusToDb(TripStatus.CLOSED), "completed"]);
         if (conflict.rowCount) {
             throw new Error("Truck is currently assigned to an active trip.");
+        }
+        const bookingUsage = await database_1.pool.query(`
+        SELECT
+          COALESCE(SUM(COALESCE(lb.requested_headcount,0)),0)::int AS total_headcount,
+          COALESCE(SUM(COALESCE(lb.requested_weight_kg,0)),0)::numeric AS total_weight,
+          COUNT(*)::int AS active_count
+        FROM load_bookings lb
+        JOIN truck_availability ta ON ta.id = lb.truck_availability_id
+        WHERE ta.truck_id = $1
+          AND ta.is_active = TRUE
+          AND lb.status IN ($2,$3)
+      `, [input.truckId, BookingStatus.REQUESTED, BookingStatus.ACCEPTED]);
+        const usedHeadcount = Number(bookingUsage.rows[0]?.total_headcount ?? 0);
+        const usedWeight = Number(bookingUsage.rows[0]?.total_weight ?? 0);
+        const bookingCount = Number(bookingUsage.rows[0]?.active_count ?? 0);
+        if (normalizedHeadcount !== null && usedHeadcount > normalizedHeadcount) {
+            throw new Error("Existing bookings already exceed the headcount capacity for this truck.");
+        }
+        if (normalizedWeight !== null && usedWeight > normalizedWeight) {
+            throw new Error("Existing bookings already exceed the weight capacity for this truck.");
+        }
+        if ((input.allowShared ?? true) === false && bookingCount > 0) {
+            throw new Error("This truck already has active bookings and cannot be marked exclusive.");
         }
     }
     const result = await database_1.pool.query(`
@@ -498,10 +590,14 @@ async function createTruckAvailability(input) {
         capacity_headcount,
         capacity_weight_kg,
         allow_shared,
-        notes
+        notes,
+        origin_lat,
+        origin_lng,
+        destination_lat,
+        destination_lng
       )
       VALUES (
-        $1,$2,$3,$4,$5,$6,$7,$8,$9,$10
+        $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14
       )
       RETURNING
         id::text,
@@ -512,9 +608,13 @@ async function createTruckAvailability(input) {
         available_from,
         available_until,
         capacity_headcount,
-        capacity_weight_kg::text,
+        capacity_weight_kg,
         allow_shared,
         notes,
+        origin_lat,
+        origin_lng,
+        destination_lat,
+        destination_lng,
         created_at,
         updated_at
     `, [
@@ -524,10 +624,14 @@ async function createTruckAvailability(input) {
         input.destination ?? null,
         input.availableFrom,
         input.availableUntil ?? null,
-        input.capacityHeadcount ?? null,
-        input.capacityWeightKg ?? null,
+        normalizedHeadcount,
+        normalizedWeight,
         input.allowShared ?? true,
         input.notes ?? null,
+        originLat,
+        originLng,
+        destinationLat,
+        destinationLng,
     ]);
     const row = result.rows[0];
     if (!row) {
@@ -538,6 +642,34 @@ async function createTruckAvailability(input) {
 async function updateTruckAvailability(id, patch) {
     const sets = [];
     const values = [];
+    const normalizedHeadcount = patch.capacityHeadcount === undefined
+        ? undefined
+        : patch.capacityHeadcount === null
+            ? null
+            : Number(patch.capacityHeadcount);
+    if (normalizedHeadcount !== undefined && normalizedHeadcount !== null && normalizedHeadcount <= 0) {
+        throw new Error("Capacity headcount must be greater than zero.");
+    }
+    const normalizedWeight = patch.capacityWeightKg === undefined
+        ? undefined
+        : patch.capacityWeightKg === null
+            ? null
+            : Number(patch.capacityWeightKg);
+    if (normalizedWeight !== undefined && normalizedWeight !== null && normalizedWeight <= 0) {
+        throw new Error("Capacity weight must be greater than zero.");
+    }
+    const originLatRaw = parseCoordinate("Origin latitude", patch.originLat, -90, 90);
+    const originLngRaw = parseCoordinate("Origin longitude", patch.originLng, -180, 180);
+    if ((patch.originLat !== undefined && patch.originLng === undefined) ||
+        (patch.originLng !== undefined && patch.originLat === undefined)) {
+        throw new Error("Origin latitude and longitude must both be provided.");
+    }
+    const destinationLatRaw = parseCoordinate("Destination latitude", patch.destinationLat, -90, 90);
+    const destinationLngRaw = parseCoordinate("Destination longitude", patch.destinationLng, -180, 180);
+    if ((patch.destinationLat !== undefined && patch.destinationLng === undefined) ||
+        (patch.destinationLng !== undefined && patch.destinationLat === undefined)) {
+        throw new Error("Destination latitude and longitude must both be provided.");
+    }
     if (patch.origin !== undefined) {
         sets.push(`origin_location_text = $${sets.length + 2}`);
         values.push(patch.origin);
@@ -556,11 +688,11 @@ async function updateTruckAvailability(id, patch) {
     }
     if (patch.capacityHeadcount !== undefined) {
         sets.push(`capacity_headcount = $${sets.length + 2}`);
-        values.push(patch.capacityHeadcount);
+        values.push(normalizedHeadcount);
     }
     if (patch.capacityWeightKg !== undefined) {
         sets.push(`capacity_weight_kg = $${sets.length + 2}`);
-        values.push(patch.capacityWeightKg);
+        values.push(normalizedWeight);
     }
     if (patch.allowShared !== undefined) {
         sets.push(`allow_shared = $${sets.length + 2}`);
@@ -573,6 +705,26 @@ async function updateTruckAvailability(id, patch) {
     if (patch.notes !== undefined) {
         sets.push(`notes = $${sets.length + 2}`);
         values.push(patch.notes);
+    }
+    if (patch.originLat !== undefined) {
+        const normalized = originLatRaw ?? null;
+        sets.push(`origin_lat = $${sets.length + 2}`);
+        values.push(normalized);
+    }
+    if (patch.originLng !== undefined) {
+        const normalized = originLngRaw ?? null;
+        sets.push(`origin_lng = $${sets.length + 2}`);
+        values.push(normalized);
+    }
+    if (patch.destinationLat !== undefined) {
+        const normalized = destinationLatRaw ?? null;
+        sets.push(`destination_lat = $${sets.length + 2}`);
+        values.push(normalized);
+    }
+    if (patch.destinationLng !== undefined) {
+        const normalized = destinationLngRaw ?? null;
+        sets.push(`destination_lng = $${sets.length + 2}`);
+        values.push(normalized);
     }
     if (patch.isActive !== undefined) {
         sets.push(`is_active = $${sets.length + 2}`);
@@ -595,9 +747,13 @@ async function updateTruckAvailability(id, patch) {
         available_from,
         available_until,
         capacity_headcount,
-        capacity_weight_kg::text,
+        capacity_weight_kg,
         allow_shared,
         notes,
+        origin_lat,
+        origin_lng,
+        destination_lat,
+        destination_lng,
         created_at,
         updated_at
     `, [id, ...values]);
@@ -727,6 +883,114 @@ async function listTruckChatMessages(chatId) {
     `, [chatId]);
     return result.rows.map(mapTruckChatMessageRow);
 }
+function mapSummaryRow(row) {
+    const chat = mapTruckChatRow(row);
+    let lastMessage = null;
+    if (row.last_message_id) {
+        lastMessage = mapTruckChatMessageRow({
+            id: row.last_message_id,
+            chat_id: chat.id,
+            sender_user_id: row.last_message_sender_user_id,
+            sender_role: row.last_message_sender_role,
+            message: row.last_message_text,
+            attachments: row.last_message_attachments,
+            created_at: row.last_message_created_at,
+        });
+    }
+    return {
+        chat,
+        availability: {
+            origin_location_text: row.origin_location_text,
+            destination_location_text: row.destination_location_text ?? null,
+            capacity_headcount: row.capacity_headcount === null || row.capacity_headcount === undefined
+                ? null
+                : Number(row.capacity_headcount),
+        },
+        last_message: lastMessage,
+    };
+}
+async function listTruckChatsForHauler(haulerId) {
+    const result = await database_1.pool.query(`
+      SELECT
+        c.id::text,
+        c.truck_availability_id::text,
+        c.shipper_id::text,
+        c.load_id::text,
+        c.status::text,
+        c.created_by_user_id::text,
+        c.created_at,
+        c.updated_at,
+        ta.origin_location_text,
+        ta.destination_location_text,
+        ta.capacity_headcount,
+        lm.id::text AS last_message_id,
+        lm.sender_user_id::text AS last_message_sender_user_id,
+        lm.sender_role AS last_message_sender_role,
+        lm.message AS last_message_text,
+        lm.attachments AS last_message_attachments,
+        lm.created_at AS last_message_created_at
+      FROM truck_availability_chats c
+      JOIN truck_availability ta ON ta.id = c.truck_availability_id
+      LEFT JOIN LATERAL (
+        SELECT
+          m.id::text,
+          m.sender_user_id::text,
+          m.sender_role,
+          m.message,
+          m.attachments,
+          m.created_at
+        FROM truck_availability_messages m
+        WHERE m.chat_id = c.id
+        ORDER BY m.created_at DESC
+        LIMIT 1
+      ) lm ON TRUE
+      WHERE ta.hauler_id = $1
+      ORDER BY c.updated_at DESC
+      LIMIT 100
+    `, [haulerId]);
+    return result.rows.map(mapSummaryRow);
+}
+async function listTruckChatsForShipper(shipperId) {
+    const result = await database_1.pool.query(`
+      SELECT
+        c.id::text,
+        c.truck_availability_id::text,
+        c.shipper_id::text,
+        c.load_id::text,
+        c.status::text,
+        c.created_by_user_id::text,
+        c.created_at,
+        c.updated_at,
+        ta.origin_location_text,
+        ta.destination_location_text,
+        ta.capacity_headcount,
+        lm.id::text AS last_message_id,
+        lm.sender_user_id::text AS last_message_sender_user_id,
+        lm.sender_role AS last_message_sender_role,
+        lm.message AS last_message_text,
+        lm.attachments AS last_message_attachments,
+        lm.created_at AS last_message_created_at
+      FROM truck_availability_chats c
+      JOIN truck_availability ta ON ta.id = c.truck_availability_id
+      LEFT JOIN LATERAL (
+        SELECT
+          m.id::text,
+          m.sender_user_id::text,
+          m.sender_role,
+          m.message,
+          m.attachments,
+          m.created_at
+        FROM truck_availability_messages m
+        WHERE m.chat_id = c.id
+        ORDER BY m.created_at DESC
+        LIMIT 1
+      ) lm ON TRUE
+      WHERE c.shipper_id = $1
+      ORDER BY c.updated_at DESC
+      LIMIT 100
+    `, [shipperId]);
+    return result.rows.map(mapSummaryRow);
+}
 async function getLoadDetails(loadId) {
     const result = await database_1.pool.query(`
       SELECT
@@ -761,6 +1025,20 @@ function ensureNumeric(value) {
         return null;
     return num;
 }
+function parseCoordinate(label, value, min, max) {
+    if (value === undefined)
+        return undefined;
+    if (value === null || value === "")
+        return null;
+    const num = Number(value);
+    if (Number.isNaN(num)) {
+        throw new Error(`${label} must be a valid number.`);
+    }
+    if (num < min || num > max) {
+        throw new Error(`${label} must be between ${min} and ${max}.`);
+    }
+    return num;
+}
 async function createBookingFromOffer(params) {
     const offer = await getLoadOfferById(params.offerId);
     if (!offer) {
@@ -784,6 +1062,7 @@ async function createBookingFromOffer(params) {
         throw new Error("Load already has an active booking.");
     }
     const requestedHeadcount = ensureNumeric(loadDetails.animal_count);
+    const requestedWeight = ensureNumeric(loadDetails.estimated_weight_kg);
     const insert = await database_1.pool.query(`
       INSERT INTO load_bookings (
         load_id,
@@ -808,7 +1087,7 @@ async function createBookingFromOffer(params) {
         load.shipper_id,
         offer.id,
         requestedHeadcount,
-        loadDetails.estimated_weight_kg ?? null,
+        requestedWeight,
         offer.offered_amount,
         offer.currency,
         BookingStatus.REQUESTED,
@@ -817,22 +1096,43 @@ async function createBookingFromOffer(params) {
     ]);
     return mapBookingRow(insert.rows[0]);
 }
-async function ensureTruckCapacity(availabilityId, requestedHeadcount) {
-    if (!requestedHeadcount)
-        return;
-    const availability = await getTruckAvailabilityById(availabilityId);
-    if (!availability || availability.capacity_headcount == null) {
-        return;
-    }
-    const current = await database_1.pool.query(`
-      SELECT COALESCE(SUM(COALESCE(requested_headcount,0)),0)::int AS total
-      FROM load_bookings
-      WHERE truck_availability_id = $1
-        AND status IN ($2,$3)
-    `, [availabilityId, BookingStatus.REQUESTED, BookingStatus.ACCEPTED]);
-    const used = Number(current.rows[0]?.total ?? 0);
-    if (used + requestedHeadcount > availability.capacity_headcount) {
-        throw new Error("Truck does not have enough remaining capacity.");
+async function ensureTruckCapacity(availability, requestedHeadcount, requestedWeightKg) {
+    const needsHeadcountCheck = requestedHeadcount !== null &&
+        requestedHeadcount !== undefined &&
+        availability.capacity_headcount !== null &&
+        availability.capacity_headcount !== undefined;
+    const needsWeightCheck = requestedWeightKg !== null &&
+        requestedWeightKg !== undefined &&
+        availability.capacity_weight_kg !== null &&
+        availability.capacity_weight_kg !== undefined;
+    if (!availability.allow_shared || needsHeadcountCheck || needsWeightCheck) {
+        const current = await database_1.pool.query(`
+        SELECT
+          COALESCE(SUM(COALESCE(requested_headcount,0)),0)::int AS total_headcount,
+          COALESCE(SUM(COALESCE(requested_weight_kg,0)),0)::numeric AS total_weight,
+          COUNT(*)::int AS active_count
+        FROM load_bookings
+        WHERE truck_availability_id = $1
+          AND status IN ($2,$3)
+      `, [availability.id, BookingStatus.REQUESTED, BookingStatus.ACCEPTED]);
+        const usedHeadcount = Number(current.rows[0]?.total_headcount ?? 0);
+        const usedWeight = Number(current.rows[0]?.total_weight ?? 0);
+        const activeCount = Number(current.rows[0]?.active_count ?? 0);
+        if (!availability.allow_shared && activeCount > 0) {
+            throw new Error("This truck is exclusive and already has a pending booking.");
+        }
+        if (needsHeadcountCheck) {
+            const headcountToAdd = Number(requestedHeadcount ?? 0);
+            if (usedHeadcount + headcountToAdd > Number(availability.capacity_headcount)) {
+                throw new Error("Truck does not have enough remaining headcount capacity.");
+            }
+        }
+        if (needsWeightCheck) {
+            const weightToAdd = Number(requestedWeightKg ?? 0);
+            if (usedWeight + weightToAdd > Number(availability.capacity_weight_kg)) {
+                throw new Error("Truck does not have enough remaining weight capacity.");
+            }
+        }
     }
 }
 async function createBookingForAvailability(params) {
@@ -840,10 +1140,27 @@ async function createBookingForAvailability(params) {
     if (!availability) {
         throw new Error("Truck availability not found.");
     }
-    const requestedHeadcount = params.requestedHeadcount ??
-        ensureNumeric((await getLoadDetails(params.loadId))?.animal_count) ??
-        null;
-    await ensureTruckCapacity(params.truckAvailabilityId, requestedHeadcount);
+    let loadDetails = null;
+    async function ensureLoadDetailsFetched() {
+        if (!loadDetails) {
+            loadDetails = await getLoadDetails(params.loadId);
+            if (!loadDetails) {
+                throw new Error("Load not found.");
+            }
+        }
+        return loadDetails;
+    }
+    let requestedHeadcount = params.requestedHeadcount ?? null;
+    if (requestedHeadcount === null || requestedHeadcount === undefined) {
+        const details = await ensureLoadDetailsFetched();
+        requestedHeadcount = ensureNumeric(details?.animal_count);
+    }
+    let requestedWeight = params.requestedWeightKg ?? null;
+    if (requestedWeight === null || requestedWeight === undefined) {
+        const details = await ensureLoadDetailsFetched();
+        requestedWeight = ensureNumeric(details?.estimated_weight_kg);
+    }
+    await ensureTruckCapacity(availability, requestedHeadcount ?? null, requestedWeight ?? null);
     const insert = await database_1.pool.query(`
       INSERT INTO load_bookings (
         load_id,
@@ -868,7 +1185,7 @@ async function createBookingForAvailability(params) {
         params.shipperId,
         params.truckAvailabilityId,
         requestedHeadcount,
-        params.requestedWeightKg ?? null,
+        requestedWeight,
         params.offeredAmount ?? null,
         params.offeredCurrency ?? "USD",
         BookingStatus.REQUESTED,
@@ -1291,6 +1608,28 @@ async function getTripById(tripId) {
     const row = result.rows[0];
     return row ? mapTripRow(row) : null;
 }
+async function getLatestTripForLoad(loadId) {
+    const result = await database_1.pool.query(`
+      SELECT
+        id::text,
+        load_id::text,
+        hauler_id::text,
+        driver_id::text,
+        truck_id::text,
+        status::text,
+        actual_start_time,
+        actual_end_time,
+        delivered_confirmed_at,
+        created_at,
+        updated_at
+      FROM trips
+      WHERE load_id = $1
+      ORDER BY created_at DESC
+      LIMIT 1
+    `, [loadId]);
+    const row = result.rows[0];
+    return row ? mapTripRow(row) : null;
+}
 async function getTripAndLoad(tripId) {
     const trip = await getTripById(tripId);
     if (!trip)
@@ -1299,6 +1638,51 @@ async function getTripAndLoad(tripId) {
     if (!load)
         return null;
     return { trip, load };
+}
+async function getTripContextByLoadId(loadId) {
+    const load = await getLoadById(loadId);
+    if (!load) {
+        throw new Error("Load not found");
+    }
+    const trip = await getLatestTripForLoad(loadId);
+    const payment = trip ? await getPaymentForTrip(trip.id) : null;
+    return { trip, load, payment };
+}
+async function listDriversForHauler(haulerId) {
+    const result = await database_1.pool.query(`
+      SELECT
+        id::text,
+        full_name,
+        phone_number,
+        license_number,
+        license_expiry::text,
+        status
+      FROM drivers
+      WHERE hauler_id = $1
+      ORDER BY full_name ASC
+    `, [haulerId]);
+    return result.rows.map((row) => ({
+        id: row.id,
+        full_name: row.full_name ?? null,
+        status: row.status ?? null,
+        phone_number: row.phone_number ?? null,
+        license_number: row.license_number ?? null,
+        license_expiry: row.license_expiry ?? null,
+    }));
+}
+async function listVehiclesForHauler(haulerId) {
+    const result = await database_1.pool.query(`
+      SELECT id::text, plate_number, truck_type, status
+      FROM trucks
+      WHERE hauler_id = $1
+      ORDER BY created_at DESC
+    `, [haulerId]);
+    return result.rows.map((row) => ({
+        id: row.id,
+        plate_number: row.plate_number ?? null,
+        truck_type: row.truck_type ?? null,
+        status: row.status ?? null,
+    }));
 }
 async function updateTripAssignment(input) {
     const sets = [];
@@ -1342,20 +1726,28 @@ async function driverMatchesUser(driverId, userId) {
     const result = await database_1.pool.query(`SELECT 1 FROM drivers WHERE id = $1 AND user_id = $2`, [driverId, userId]);
     return (result.rowCount ?? 0) > 0;
 }
+function fallbackTimestamp(value) {
+    const date = value === null || value === undefined
+        ? new Date()
+        : value instanceof Date
+            ? value
+            : new Date(value);
+    if (Number.isNaN(date.getTime())) {
+        return new Date().toISOString();
+    }
+    return date.toISOString();
+}
 async function updateTripStatus(tripId, status, patch = {}) {
     const sets = [`status = $1`, `updated_at = NOW()`];
     const values = [mapTripStatusToDb(status)];
     if (patch.started_at !== undefined) {
-        sets.push(`actual_start_time = $${sets.length + 1}`);
-        values.push(patch.started_at);
+        sets.push(`actual_start_time = NOW()`);
     }
     if (patch.delivered_at !== undefined) {
-        sets.push(`actual_end_time = $${sets.length + 1}`);
-        values.push(patch.delivered_at);
+        sets.push(`actual_end_time = NOW()`);
     }
     if (patch.delivered_confirmed_at !== undefined) {
-        sets.push(`delivered_confirmed_at = $${sets.length + 1}`);
-        values.push(patch.delivered_confirmed_at);
+        sets.push(`delivered_confirmed_at = NOW()`);
     }
     const result = await database_1.pool.query(`UPDATE trips SET ${sets.join(", ")} WHERE id = $${values.length + 1} RETURNING *`, [...values, tripId]);
     const row = result.rows[0];

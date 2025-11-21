@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { useParams, useNavigate, useLocation } from "react-router-dom";
 import {
   fetchLoadById,
@@ -13,9 +13,26 @@ import {
 import type { TripExpense, TripRecord, Payment } from "../lib/types";
 import { storage, STORAGE_KEYS } from "../lib/storage";
 import { Button } from "../components/ui/button";
+import { Label } from "../components/ui/label";
 import { normalizeLoadStatus, formatLoadStatusLabel } from "../lib/status";
-import { getPaymentByTrip, fundTripPayment } from "../api/payments";
+import { getPaymentByTrip } from "../api/payments";
+import {
+  assignTripDriver,
+  assignTripVehicle,
+  startMarketplaceTrip,
+  markMarketplaceTripDelivered,
+  confirmMarketplaceTripDelivery,
+  createEscrowPaymentIntent,
+  triggerPaymentWebhook,
+  fetchTripByLoadId as fetchMarketplaceTripByLoad,
+  fetchHaulerDrivers,
+  fetchHaulerVehicles,
+  type TripEnvelope,
+  type HaulerDriverOption,
+  type HaulerVehicleOption,
+} from "../api/marketplace";
 import { PaymentCard } from "../components/PaymentCard";
+import { toast } from "sonner";
 
 
 const formatDateTime = (value?: string | null) => {
@@ -105,7 +122,20 @@ export function TripDetail() {
   const [paymentError, setPaymentError] = useState<string | null>(null);
   const [funding, setFunding] = useState(false);
   const [fundError, setFundError] = useState<string | null>(null);
-  const tripId = trip?.id ?? null;
+  const [marketplaceContext, setMarketplaceContext] = useState<TripEnvelope | null>(null);
+  const [marketplaceContextLoading, setMarketplaceContextLoading] = useState(true);
+  const [marketplaceContextError, setMarketplaceContextError] = useState<string | null>(null);
+  const [driverInput, setDriverInput] = useState("");
+  const [vehicleInput, setVehicleInput] = useState("");
+  const [assignDriverLoading, setAssignDriverLoading] = useState(false);
+  const [assignVehicleLoading, setAssignVehicleLoading] = useState(false);
+  const [tripActionLoading, setTripActionLoading] = useState(false);
+  const [driverOptions, setDriverOptions] = useState<HaulerDriverOption[]>([]);
+  const [vehicleOptions, setVehicleOptions] = useState<HaulerVehicleOption[]>([]);
+  const [resourceLoading, setResourceLoading] = useState(false);
+  const [resourceError, setResourceError] = useState<string | null>(null);
+  const marketplaceTripId = marketplaceContext?.trip ? Number(marketplaceContext.trip.id) : null;
+  const tripId = trip?.id ?? marketplaceTripId;
 
   useEffect(() => {
     if (!id) {
@@ -139,6 +169,58 @@ export function TripDetail() {
 
     loadTrip();
   }, [id]);
+
+  const loadMarketplaceContext = useCallback(async () => {
+    if (!id) {
+      setMarketplaceContext(null);
+      setMarketplaceContextLoading(false);
+      return;
+    }
+    try {
+      setMarketplaceContextLoading(true);
+      setMarketplaceContextError(null);
+      const ctx = await fetchMarketplaceTripByLoad(Number(id));
+      setMarketplaceContext(ctx);
+    } catch (err: any) {
+      console.error("Error loading marketplace trip", err);
+      setMarketplaceContext(null);
+      setMarketplaceContextError(err?.message || "Trip not created yet.");
+    } finally {
+      setMarketplaceContextLoading(false);
+    }
+  }, [id]);
+
+  useEffect(() => {
+    loadMarketplaceContext();
+  }, [loadMarketplaceContext]);
+
+  const loadResourceOptions = useCallback(async () => {
+    try {
+      setResourceLoading(true);
+      setResourceError(null);
+      const [driversResp, vehiclesResp] = await Promise.all([
+        fetchHaulerDrivers(),
+        fetchHaulerVehicles(),
+      ]);
+      setDriverOptions(driversResp.items ?? []);
+      setVehicleOptions(vehiclesResp.items ?? []);
+    } catch (err: any) {
+      setResourceError(err?.message ?? "Failed to load drivers or vehicles.");
+      setDriverOptions([]);
+      setVehicleOptions([]);
+    } finally {
+      setResourceLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (currentUserRole !== "hauler") {
+      setDriverOptions([]);
+      setVehicleOptions([]);
+      return;
+    }
+    loadResourceOptions();
+  }, [currentUserRole, loadResourceOptions]);
 
   useEffect(() => {
     if (!load || !load.id) return;
@@ -383,12 +465,28 @@ export function TripDetail() {
   };
 
   const handleFundEscrow = async () => {
-    if (!payment) return;
+    if (!marketplaceTripId) {
+      setFundError("Trip has not been created yet.");
+      return;
+    }
     setFundError(null);
     try {
       setFunding(true);
-      const updated = await fundTripPayment(payment.id);
-      setPayment(updated);
+      const intent = await createEscrowPaymentIntent(String(marketplaceTripId), {
+        provider: "livestockway",
+      });
+      const intentId = intent.payment?.external_intent_id;
+      if (intentId) {
+        await triggerPaymentWebhook(intentId, "payment_succeeded");
+      }
+      toast.success("Escrow funded successfully.");
+      await loadMarketplaceContext();
+      try {
+        const refreshed = await getPaymentByTrip(marketplaceTripId);
+        setPayment(refreshed);
+      } catch (err) {
+        console.error("Failed to refresh payment after funding", err);
+      }
     } catch (err: any) {
       console.error("Failed to fund escrow", err);
       setFundError(err?.message || "Unable to fund escrow right now.");
@@ -396,6 +494,107 @@ export function TripDetail() {
       setFunding(false);
     }
   };
+
+  const handleAssignDriver = async () => {
+    if (!marketplaceContext?.trip) {
+      toast.error("Trip not ready yet.");
+      return;
+    }
+    if (!driverInput.trim()) {
+      toast.error("Enter a driver ID.");
+      return;
+    }
+    try {
+      setAssignDriverLoading(true);
+      await assignTripDriver(marketplaceContext.trip.id, driverInput.trim());
+      toast.success("Driver assigned.");
+      setDriverInput("");
+      await loadMarketplaceContext();
+    } catch (err: any) {
+      toast.error(err?.message ?? "Failed to assign driver.");
+    } finally {
+      setAssignDriverLoading(false);
+    }
+  };
+
+  const handleAssignVehicle = async () => {
+    if (!marketplaceContext?.trip) {
+      toast.error("Trip not ready yet.");
+      return;
+    }
+    if (!vehicleInput.trim()) {
+      toast.error("Enter a vehicle ID.");
+      return;
+    }
+    try {
+      setAssignVehicleLoading(true);
+      await assignTripVehicle(marketplaceContext.trip.id, vehicleInput.trim());
+      toast.success("Vehicle assigned.");
+      setVehicleInput("");
+      await loadMarketplaceContext();
+    } catch (err: any) {
+      toast.error(err?.message ?? "Failed to assign vehicle.");
+    } finally {
+      setAssignVehicleLoading(false);
+    }
+  };
+
+  const handleStartTrip = async () => {
+    if (!marketplaceContext?.trip) return;
+    try {
+      setTripActionLoading(true);
+      await startMarketplaceTrip(marketplaceContext.trip.id);
+      toast.success("Trip started.");
+      await loadMarketplaceContext();
+    } catch (err: any) {
+      toast.error(err?.message ?? "Failed to start trip.");
+    } finally {
+      setTripActionLoading(false);
+    }
+  };
+
+  const handleMarkDelivered = async () => {
+    if (!marketplaceContext?.trip) return;
+    try {
+      setTripActionLoading(true);
+      await markMarketplaceTripDelivered(marketplaceContext.trip.id);
+      toast.success("Trip marked delivered.");
+      await loadMarketplaceContext();
+    } catch (err: any) {
+      toast.error(err?.message ?? "Failed to mark delivered.");
+    } finally {
+      setTripActionLoading(false);
+    }
+  };
+
+  const handleConfirmDelivery = async () => {
+    if (!marketplaceContext?.trip) return;
+    try {
+      setTripActionLoading(true);
+      await confirmMarketplaceTripDelivery(marketplaceContext.trip.id);
+      toast.success("Delivery confirmed.");
+      await loadMarketplaceContext();
+    } catch (err: any) {
+      toast.error(err?.message ?? "Failed to confirm delivery.");
+    } finally {
+      setTripActionLoading(false);
+    }
+  };
+
+  const marketplaceTrip = marketplaceContext?.trip ?? null;
+  const marketplacePayment = marketplaceContext?.payment ?? null;
+  const assignedDriver = useMemo(() => {
+    if (!marketplaceTrip?.assigned_driver_id) return null;
+    return driverOptions.find(
+      (driver) => String(driver.id) === String(marketplaceTrip.assigned_driver_id)
+    );
+  }, [driverOptions, marketplaceTrip?.assigned_driver_id]);
+  const assignedVehicle = useMemo(() => {
+    if (!marketplaceTrip?.assigned_vehicle_id) return null;
+    return vehicleOptions.find(
+      (vehicle) => String(vehicle.id) === String(marketplaceTrip.assigned_vehicle_id)
+    );
+  }, [vehicleOptions, marketplaceTrip?.assigned_vehicle_id]);
 
   if (loading) {
 
@@ -428,7 +627,6 @@ export function TripDetail() {
       </div>
     );
   }
-
   const statusKey = normalizeLoadStatus(load.status);
   const badgeLabel = statusLabel[statusKey] ?? formatLoadStatusLabel(load.status);
   const badgeClass = statusColor[statusKey] ?? "bg-gray-100 text-gray-700";
@@ -511,6 +709,188 @@ export function TripDetail() {
             </div>
           </div>
         </div>
+      </div>
+
+      <div className="rounded-lg border border-gray-200 bg-white p-4 space-y-4">
+        <div className="flex items-center justify-between">
+          <h2 className="text-sm font-semibold text-gray-900">Marketplace Trip Status</h2>
+          {marketplaceTrip && (
+            <span className="text-xs font-medium text-gray-600">
+              {marketplaceTrip.status.replace(/_/g, " ")}
+            </span>
+          )}
+        </div>
+        {marketplaceContextLoading ? (
+          <p className="text-xs text-gray-500">Loading trip context…</p>
+        ) : marketplaceContextError ? (
+          <p className="text-xs text-rose-600">{marketplaceContextError}</p>
+        ) : !marketplaceTrip ? (
+          <p className="text-xs text-gray-500">Trip has not been created yet.</p>
+        ) : (
+          <>
+            <div className="grid gap-3 text-xs text-gray-600 md:grid-cols-3">
+              <div>
+                <p className="font-semibold text-gray-900">Driver</p>
+                <p className="text-gray-900">
+                  {assignedDriver
+                    ? `${assignedDriver.full_name}${assignedDriver.phone_number ? ` · ${assignedDriver.phone_number}` : ""
+                      }`
+                    : marketplaceTrip.assigned_driver_id
+                      ? `Driver #${marketplaceTrip.assigned_driver_id}`
+                      : "Not assigned"}
+                </p>
+              </div>
+              <div>
+                <p className="font-semibold text-gray-900">Vehicle</p>
+                <p className="text-gray-900">
+                  {assignedVehicle
+                    ? `${assignedVehicle.truck_name || assignedVehicle.plate_number || `Truck #${assignedVehicle.id}`
+                    }${assignedVehicle.plate_number ? ` · ${assignedVehicle.plate_number}` : ""}`
+                    : marketplaceTrip.assigned_vehicle_id
+                      ? `Truck #${marketplaceTrip.assigned_vehicle_id}`
+                      : "Not assigned"}
+                </p>
+              </div>
+              <div>
+                <p className="font-semibold text-gray-900">Payment</p>
+                <p>{marketplacePayment?.status ?? "Pending"}</p>
+              </div>
+            </div>
+            {currentUserRole === "hauler" &&
+              ["PENDING_ESCROW", "READY_TO_START"].includes(
+                marketplaceTrip.status ?? ""
+              ) && (
+                <>
+                  <div className="grid gap-4 md:grid-cols-2">
+                    <div className="space-y-2">
+                      <Label className="text-xs">Assign Driver</Label>
+                    <select
+                      className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm"
+                      value={driverInput}
+                      onChange={(e) => setDriverInput(e.target.value)}
+                      onFocus={() => {
+                        if (!resourceLoading) {
+                          loadResourceOptions();
+                        }
+                      }}
+                    >
+                        <option value="">Select driver</option>
+                        {driverOptions.map((driver) => (
+                          <option key={driver.id} value={driver.id}>
+                            {driver.full_name || `Driver #${driver.id}`}
+                            {driver.status ? ` (${driver.status})` : ""}
+                          </option>
+                        ))}
+                      </select>
+                      <Button
+                        size="sm"
+                        onClick={handleAssignDriver}
+                        disabled={
+                          assignDriverLoading ||
+                          !driverInput.trim() ||
+                          resourceLoading ||
+                          driverOptions.length === 0
+                        }
+                      >
+                        {assignDriverLoading ? "Assigning…" : "Assign Driver"}
+                      </Button>
+                    </div>
+                    <div className="space-y-2">
+                      <Label className="text-xs">Assign Vehicle</Label>
+                    <select
+                      className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm"
+                      value={vehicleInput}
+                      onChange={(e) => setVehicleInput(e.target.value)}
+                      onFocus={() => {
+                        if (!resourceLoading) {
+                          loadResourceOptions();
+                        }
+                      }}
+                    >
+                        <option value="">Select vehicle</option>
+                        {vehicleOptions.map((vehicle) => (
+                          <option key={vehicle.id} value={vehicle.id}>
+                            {vehicle.plate_number || `Truck #${vehicle.id}`}
+                            {vehicle.truck_type ? ` – ${vehicle.truck_type}` : ""}
+                          </option>
+                        ))}
+                      </select>
+                      <Button
+                        size="sm"
+                        onClick={handleAssignVehicle}
+                        disabled={
+                          assignVehicleLoading ||
+                          !vehicleInput.trim() ||
+                          resourceLoading ||
+                          vehicleOptions.length === 0
+                        }
+                      >
+                        {assignVehicleLoading ? "Assigning…" : "Assign Vehicle"}
+                      </Button>
+                    </div>
+                  </div>
+                  {resourceLoading && (
+                    <p className="text-[11px] text-gray-500">
+                      Loading drivers and vehicles…
+                    </p>
+                  )}
+                  {resourceError && (
+                    <p className="text-[11px] text-rose-600">{resourceError}</p>
+                  )}
+                </>
+              )}
+            <div className="flex flex-wrap gap-2">
+              {currentUserRole === "hauler" &&
+                marketplaceTrip.status === "READY_TO_START" &&
+                marketplacePayment?.status === "ESCROW_FUNDED" && (
+                  <Button
+                    size="sm"
+                    onClick={handleStartTrip}
+                    disabled={tripActionLoading}
+                  >
+                    {tripActionLoading ? "Processing…" : "Start Trip"}
+                  </Button>
+                )}
+              {currentUserRole === "hauler" &&
+                marketplaceTrip.status === "IN_PROGRESS" && (
+                  <Button
+                    size="sm"
+                    variant="secondary"
+                    onClick={handleMarkDelivered}
+                    disabled={tripActionLoading}
+                  >
+                    {tripActionLoading ? "Processing…" : "Mark Delivered"}
+                  </Button>
+                )}
+              {currentUserRole === "shipper" &&
+                marketplacePayment?.status === "AWAITING_FUNDING" && (
+                  <Button
+                    size="sm"
+                    variant="secondary"
+                    onClick={handleFundEscrow}
+                    disabled={funding}
+                  >
+                    {funding ? "Funding…" : "Fund Escrow"}
+                  </Button>
+                )}
+              {currentUserRole === "shipper" &&
+                marketplaceTrip.status === "DELIVERED_AWAITING_CONFIRMATION" &&
+                marketplacePayment?.status === "ESCROW_FUNDED" && (
+                  <Button
+                    size="sm"
+                    className="bg-emerald-600 text-white"
+                    onClick={handleConfirmDelivery}
+                    disabled={tripActionLoading}
+                  >
+                    {tripActionLoading ? "Processing…" : "Confirm Delivery"}
+                  </Button>
+                )}
+            </div>
+            {fundError && (
+              <p className="text-xs text-rose-600">{fundError}</p>
+            )}
+          </>
+        )}
       </div>
 
       {load && (() => {

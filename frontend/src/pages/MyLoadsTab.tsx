@@ -31,7 +31,9 @@ import {
   createTripDispute,
   fetchTripDisputes,
   cancelDispute,
+  fetchTripByLoadId as fetchMarketplaceTripByLoad,
   type DisputeRecord,
+  type TripEnvelope,
 } from "../api/marketplace";
 
 const paymentStatusMeta: Record<
@@ -90,6 +92,11 @@ export default function MyLoadsTab() {
     description: "",
     requested_action: "",
   });
+  const tripContextCache = useRef<Record<number, TripEnvelope | null>>({});
+
+  const resetTripCache = useCallback(() => {
+    tripContextCache.current = {};
+  }, []);
 
   const refresh = useCallback(async () => {
     if (!shipperId) {
@@ -117,8 +124,9 @@ export default function MyLoadsTab() {
       setError(err?.message || "Failed to load your trips.");
     } finally {
       setLoading(false);
+      resetTripCache();
     }
-  }, [shipperId]);
+  }, [shipperId, resetTripCache]);
 
   useEffect(() => {
     refresh();
@@ -150,16 +158,33 @@ export default function MyLoadsTab() {
     };
   }, [shipperId, refresh]);
 
+  const getTripContext = useCallback(
+    async (loadId: number) => {
+      if (!tripContextCache.current[loadId]) {
+        try {
+          const ctx = await fetchMarketplaceTripByLoad(loadId);
+          tripContextCache.current[loadId] = ctx;
+        } catch (err) {
+          console.error("failed to load trip context", err);
+          tripContextCache.current[loadId] = null;
+        }
+      }
+      return tripContextCache.current[loadId];
+    },
+    []
+  );
+
   const handleFundEscrow = useCallback(
     async (loadId: number) => {
-      const payment = payments[loadId];
-      if (!payment || !payment.trip_id) {
-        toast.error("Escrow payment not ready for this load yet.");
+      const context = await getTripContext(loadId);
+      const tripId = context?.trip?.id;
+      if (!tripId) {
+        toast.error("Trip has not been created yet.");
         return;
       }
       try {
         setFundingLoadId(loadId);
-        const intent = await createEscrowPaymentIntent(String(payment.trip_id), {
+        const intent = await createEscrowPaymentIntent(String(tripId), {
           provider: "livestockway",
         });
         const intentId = intent.payment?.external_intent_id;
@@ -167,6 +192,7 @@ export default function MyLoadsTab() {
           await triggerPaymentWebhook(intentId, "payment_succeeded");
         }
         toast.success("Escrow funded successfully.");
+        tripContextCache.current[loadId] = await fetchMarketplaceTripByLoad(loadId);
         refresh();
       } catch (err: any) {
         toast.error(err?.message ?? "Failed to fund escrow.");
@@ -174,19 +200,21 @@ export default function MyLoadsTab() {
         setFundingLoadId(null);
       }
     },
-    [payments, refresh]
+    [getTripContext, refresh]
   );
 
   const openDisputeDialog = async (loadId: number) => {
-    const payment = payments[loadId];
-    if (!payment?.trip_id) {
+    const context = await getTripContext(loadId);
+    const tripId = context?.trip?.id;
+    if (!tripId) {
       toast.error("Trip not ready for disputes yet.");
       return;
     }
+    const payment = context?.payment ?? payments[loadId];
     setDisputeDialog({
       open: true,
       loadId,
-      tripId: Number(payment.trip_id),
+      tripId: Number(tripId),
       disputes: [],
       loading: true,
     });
@@ -196,7 +224,7 @@ export default function MyLoadsTab() {
       requested_action: "",
     });
     try {
-      const resp = await fetchTripDisputes(payment.trip_id);
+      const resp = await fetchTripDisputes(tripId);
       setDisputeDialog((prev) => ({ ...prev, disputes: resp.items, loading: false }));
     } catch (err: any) {
       setDisputeDialog((prev) => ({ ...prev, loading: false }));
