@@ -3,11 +3,13 @@ import {
   fetchTruckAvailability,
   createTruckAvailabilityEntry,
   requestBookingForTruckListing,
+  startTruckChat,
   type TruckAvailability,
 } from "../api/marketplace";
 import { Card, CardContent, CardHeader, CardTitle } from "../components/ui/card";
 import { Button } from "../components/ui/button";
 import { Input } from "../components/ui/input";
+import { Textarea } from "../components/ui/textarea";
 import { Label } from "../components/ui/label";
 import { toast } from "sonner";
 import { storage, STORAGE_KEYS } from "../lib/storage";
@@ -23,7 +25,9 @@ export default function TruckBoard() {
     capacity_headcount: "",
     notes: "",
   });
-  const [bookingLoadId, setBookingLoadId] = useState("");
+  const [interestForm, setInterestForm] = useState<
+    Record<string, { loadId: string; message: string }>
+  >({});
   const [posting, setPosting] = useState(false);
   const userRole = storage.get<string | null>(STORAGE_KEYS.USER_ROLE, null);
 
@@ -75,14 +79,46 @@ export default function TruckBoard() {
     }
   };
 
+  const updateInterest = (id: string, field: "loadId" | "message", value: string) => {
+    setInterestForm((prev) => {
+      const existing = prev[id] ?? { loadId: "", message: "" };
+      return {
+        ...prev,
+        [id]: {
+          ...existing,
+          [field]: value,
+        },
+      };
+    });
+  };
+
+  const handleStartChat = async (availabilityId: string) => {
+    const interest = interestForm[availabilityId] ?? { loadId: "", message: "" };
+    if (!interest.loadId.trim() && !interest.message.trim()) {
+      toast.error("Enter a load ID or message to start the conversation.");
+      return;
+    }
+    try {
+      await startTruckChat(availabilityId, {
+        load_id: interest.loadId || undefined,
+        message: interest.message || undefined,
+      });
+      toast.success("Chat started with hauler.");
+      updateInterest(availabilityId, "message", "");
+    } catch (err: any) {
+      toast.error(err?.message ?? "Failed to start chat");
+    }
+  };
+
   const handleRequestBooking = async (availabilityId: string) => {
-    if (!bookingLoadId.trim()) {
+    const interest = interestForm[availabilityId] ?? { loadId: "", message: "" };
+    if (!interest.loadId.trim()) {
       toast.error("Enter the load ID you want to assign.");
       return;
     }
     try {
       await requestBookingForTruckListing(availabilityId, {
-        load_id: bookingLoadId,
+        load_id: interest.loadId,
         requested_headcount: undefined,
       });
       toast.success("Booking requested.");
@@ -132,16 +168,41 @@ export default function TruckBoard() {
                     )}
                   </div>
                   {userRole === "shipper" && (
-                    <div className="flex flex-col gap-2 items-end">
-                      <Badge className="text-[10px]">
+                    <div className="flex flex-col gap-2 w-full md:w-64">
+                      <Badge className="self-end text-[10px]">
                         {listing.allow_shared ? "Shared" : "Exclusive"}
                       </Badge>
-                      <Button
-                        size="sm"
-                        onClick={() => handleRequestBooking(listing.id)}
-                      >
-                        Request Booking
-                      </Button>
+                      <Input
+                        placeholder="Your load ID"
+                        value={interestForm[listing.id]?.loadId ?? ""}
+                        onChange={(e) =>
+                          updateInterest(listing.id, "loadId", e.target.value)
+                        }
+                      />
+                      <Textarea
+                        placeholder="Message to hauler"
+                        value={interestForm[listing.id]?.message ?? ""}
+                        onChange={(e) =>
+                          updateInterest(listing.id, "message", e.target.value)
+                        }
+                      />
+                      <div className="flex gap-2">
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          className="flex-1"
+                          onClick={() => handleStartChat(listing.id)}
+                        >
+                          Start Chat
+                        </Button>
+                        <Button
+                          size="sm"
+                          className="flex-1"
+                          onClick={() => handleRequestBooking(listing.id)}
+                        >
+                          Request Booking
+                        </Button>
+                      </div>
                     </div>
                   )}
                 </div>
@@ -150,25 +211,6 @@ export default function TruckBoard() {
           )}
         </CardContent>
       </Card>
-
-      {userRole === "shipper" && (
-        <Card>
-          <CardHeader>
-            <CardTitle>Request Truck Booking</CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-2">
-            <Label className="text-xs">Load ID</Label>
-            <Input
-              placeholder="Enter load ID to match with a truck"
-              value={bookingLoadId}
-              onChange={(e) => setBookingLoadId(e.target.value)}
-            />
-            <p className="text-[11px] text-gray-500">
-              Select a truck above and click “Request Booking”
-            </p>
-          </CardContent>
-        </Card>
-      )}
 
       {userRole === "hauler" && (
         <Card>
@@ -216,10 +258,11 @@ export default function TruckBoard() {
             </div>
             <div>
               <Label className="text-xs">Notes</Label>
-              <Input
+              <Textarea
                 value={form.notes}
                 onChange={(e) => setForm({ ...form, notes: e.target.value })}
                 placeholder="Equipment, special info, etc."
+                rows={3}
               />
             </div>
             <Button onClick={handlePostTruck} disabled={posting}>

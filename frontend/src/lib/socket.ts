@@ -24,6 +24,7 @@ export const SOCKET_EVENTS = {
   DISPUTE_CREATED: "marketplace:dispute:created",
   DISPUTE_UPDATED: "marketplace:dispute:updated",
   DISPUTE_MESSAGE: "marketplace:dispute:message",
+  TRUCK_CHAT_MESSAGE: "marketplace:truck-chat:message",
 } as const;
 
 export type SocketEventKey = typeof SOCKET_EVENTS[keyof typeof SOCKET_EVENTS];
@@ -47,6 +48,7 @@ type SocketEventPayloadMap = {
   [SOCKET_EVENTS.DISPUTE_CREATED]: { dispute: Record<string, unknown> };
   [SOCKET_EVENTS.DISPUTE_UPDATED]: { dispute: Record<string, unknown> };
   [SOCKET_EVENTS.DISPUTE_MESSAGE]: { message: Record<string, unknown> };
+  [SOCKET_EVENTS.TRUCK_CHAT_MESSAGE]: { message: unknown };
 };
 
 let socket: Socket | null = null;

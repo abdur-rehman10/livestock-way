@@ -160,6 +160,24 @@ export interface DisputeRecord {
   resolved_at: string | null;
 }
 
+export interface TruckChat {
+  id: string;
+  truck_availability_id: string;
+  shipper_id: string;
+  load_id: string | null;
+  status: string;
+}
+
+export interface TruckChatMessage {
+  id: string;
+  chat_id: string;
+  sender_user_id: string;
+  sender_role: string;
+  message: string | null;
+  attachments: any[];
+  created_at: string;
+}
+
 export async function fetchLoadOffers(loadId: string, page = 1, pageSize = 20) {
   const query = new URLSearchParams({
     page: String(page),
@@ -344,6 +362,36 @@ export async function cancelDispute(disputeId: string | number) {
   return marketplaceRequest<{ dispute: DisputeRecord }>(`/disputes/${disputeId}/cancel`, {
     method: "POST",
   });
+}
+
+export async function startTruckChat(
+  availabilityId: string,
+  payload: { load_id?: string | number; message?: string; attachments?: unknown[] }
+) {
+  return marketplaceRequest<{ chat: TruckChat; message: TruckChatMessage | null }>(
+    `/truck-board/${availabilityId}/chat`,
+    {
+      method: "POST",
+      body: JSON.stringify(payload),
+    }
+  );
+}
+
+export async function sendTruckChatMessage(
+  chatId: string,
+  payload: { message?: string; attachments?: unknown[] }
+) {
+  return marketplaceRequest<{ message: TruckChatMessage }>(
+    `/truck-chats/${chatId}/messages`,
+    {
+      method: "POST",
+      body: JSON.stringify(payload),
+    }
+  );
+}
+
+export async function fetchTruckChatMessages(chatId: string) {
+  return marketplaceRequest<{ items: TruckChatMessage[] }>(`/truck-chats/${chatId}/messages`);
 }
 
 export interface HaulerSummary {
