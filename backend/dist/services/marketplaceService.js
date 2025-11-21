@@ -11,6 +11,11 @@ exports.getTruckAvailabilityById = getTruckAvailabilityById;
 exports.listTruckAvailability = listTruckAvailability;
 exports.createTruckAvailability = createTruckAvailability;
 exports.updateTruckAvailability = updateTruckAvailability;
+exports.getTruckChatById = getTruckChatById;
+exports.getTruckChatForShipper = getTruckChatForShipper;
+exports.createTruckChat = createTruckChat;
+exports.createTruckChatMessage = createTruckChatMessage;
+exports.listTruckChatMessages = listTruckChatMessages;
 exports.createBookingFromOffer = createBookingFromOffer;
 exports.createBookingForAvailability = createBookingForAvailability;
 exports.getBookingById = getBookingById;
@@ -284,6 +289,29 @@ function mapBookingRow(row) {
         updated_by_user_id: row.updated_by_user_id ?? null,
         created_at: row.created_at,
         updated_at: row.updated_at,
+    };
+}
+function mapTruckChatRow(row) {
+    return {
+        id: row.id,
+        truck_availability_id: row.truck_availability_id,
+        shipper_id: row.shipper_id,
+        load_id: row.load_id ?? null,
+        status: row.status,
+        created_by_user_id: row.created_by_user_id,
+        created_at: row.created_at,
+        updated_at: row.updated_at,
+    };
+}
+function mapTruckChatMessageRow(row) {
+    return {
+        id: row.id,
+        chat_id: row.chat_id,
+        sender_user_id: row.sender_user_id,
+        sender_role: row.sender_role,
+        message: row.message ?? null,
+        attachments: Array.isArray(row.attachments) ? row.attachments : [],
+        created_at: row.created_at,
     };
 }
 function mapPaymentRow(row) {
@@ -575,6 +603,129 @@ async function updateTruckAvailability(id, patch) {
     `, [id, ...values]);
     const row = result.rows[0];
     return row ? mapTruckAvailabilityRow(row) : null;
+}
+async function getTruckChatById(id) {
+    const result = await database_1.pool.query(`
+      SELECT
+        id::text,
+        truck_availability_id::text,
+        shipper_id::text,
+        load_id::text,
+        status::text,
+        created_by_user_id::text,
+        created_at,
+        updated_at
+      FROM truck_availability_chats
+      WHERE id = $1
+    `, [id]);
+    return result.rows[0] ? mapTruckChatRow(result.rows[0]) : null;
+}
+async function getTruckChatForShipper(availabilityId, shipperId, loadId) {
+    const clauses = ["truck_availability_id = $1", "shipper_id = $2"];
+    const params = [availabilityId, shipperId];
+    if (loadId) {
+        clauses.push("load_id = $3");
+        params.push(loadId);
+    }
+    const result = await database_1.pool.query(`
+      SELECT
+        id::text,
+        truck_availability_id::text,
+        shipper_id::text,
+        load_id::text,
+        status::text,
+        created_by_user_id::text,
+        created_at,
+        updated_at
+      FROM truck_availability_chats
+      WHERE ${clauses.join(" AND ")}
+      ORDER BY created_at DESC
+      LIMIT 1
+    `, params);
+    return result.rows[0] ? mapTruckChatRow(result.rows[0]) : null;
+}
+async function createTruckChat(params) {
+    const existing = await getTruckChatForShipper(params.availabilityId, params.shipperId, params.loadId);
+    if (existing) {
+        return existing;
+    }
+    const result = await database_1.pool.query(`
+      INSERT INTO truck_availability_chats (
+        truck_availability_id,
+        shipper_id,
+        load_id,
+        created_by_user_id
+      )
+      VALUES (
+        $1,$2,$3,$4
+      )
+      RETURNING
+        id::text,
+        truck_availability_id::text,
+        shipper_id::text,
+        load_id::text,
+        status::text,
+        created_by_user_id::text,
+        created_at,
+        updated_at
+    `, [
+        params.availabilityId,
+        params.shipperId,
+        params.loadId ?? null,
+        params.createdByUserId,
+    ]);
+    if (!result.rows[0]) {
+        throw new Error("Failed to create truck chat");
+    }
+    return mapTruckChatRow(result.rows[0]);
+}
+async function createTruckChatMessage(params) {
+    const result = await database_1.pool.query(`
+      INSERT INTO truck_availability_messages (
+        chat_id,
+        sender_user_id,
+        sender_role,
+        message,
+        attachments
+      )
+      VALUES (
+        $1,$2,$3,$4,$5
+      )
+      RETURNING
+        id::text,
+        chat_id::text,
+        sender_user_id::text,
+        sender_role,
+        message,
+        attachments,
+        created_at
+    `, [
+        params.chatId,
+        params.senderUserId,
+        params.senderRole,
+        params.message ?? null,
+        JSON.stringify(params.attachments ?? []),
+    ]);
+    if (!result.rows[0]) {
+        throw new Error("Failed to create chat message");
+    }
+    return mapTruckChatMessageRow(result.rows[0]);
+}
+async function listTruckChatMessages(chatId) {
+    const result = await database_1.pool.query(`
+      SELECT
+        id::text,
+        chat_id::text,
+        sender_user_id::text,
+        sender_role,
+        message,
+        attachments,
+        created_at
+      FROM truck_availability_messages
+      WHERE chat_id = $1
+      ORDER BY created_at ASC
+    `, [chatId]);
+    return result.rows.map(mapTruckChatMessageRow);
 }
 async function getLoadDetails(loadId) {
     const result = await database_1.pool.query(`

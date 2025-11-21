@@ -14,6 +14,7 @@ export const SOCKET_EVENTS = {
   DISPUTE_CREATED: "marketplace:dispute:created",
   DISPUTE_UPDATED: "marketplace:dispute:updated",
   DISPUTE_MESSAGE: "marketplace:dispute:message",
+  TRUCK_CHAT_MESSAGE: "marketplace:truck-chat:message",
 } as const;
 
 export type SocketEvent = typeof SOCKET_EVENTS[keyof typeof SOCKET_EVENTS];

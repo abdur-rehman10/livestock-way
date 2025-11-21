@@ -104,6 +104,25 @@ export interface LoadBookingRecord {
     created_at: string;
     updated_at: string;
 }
+export interface TruckChatRecord {
+    id: string;
+    truck_availability_id: string;
+    shipper_id: string;
+    load_id: string | null;
+    status: string;
+    created_by_user_id: string;
+    created_at: string;
+    updated_at: string;
+}
+export interface TruckChatMessageRecord {
+    id: string;
+    chat_id: string;
+    sender_user_id: string;
+    sender_role: string;
+    message: string | null;
+    attachments: any[];
+    created_at: string;
+}
 export declare function getLoadOfferById(offerId: string): Promise<LoadOfferRecord | null>;
 export declare function getLatestOfferForHauler(loadId: string, haulerId: string): Promise<LoadOfferRecord | null>;
 export interface TripRecord {
@@ -204,6 +223,22 @@ export declare function createTruckAvailability(input: CreateTruckAvailabilityIn
 export declare function updateTruckAvailability(id: string, patch: Partial<CreateTruckAvailabilityInput> & {
     isActive?: boolean;
 }): Promise<TruckAvailabilityRecord | null>;
+export declare function getTruckChatById(id: string): Promise<TruckChatRecord | null>;
+export declare function getTruckChatForShipper(availabilityId: string, shipperId: string, loadId?: string | null): Promise<TruckChatRecord | null>;
+export declare function createTruckChat(params: {
+    availabilityId: string;
+    shipperId: string;
+    loadId?: string | null;
+    createdByUserId: string;
+}): Promise<TruckChatRecord>;
+export declare function createTruckChatMessage(params: {
+    chatId: string;
+    senderUserId: string;
+    senderRole: string;
+    message?: string | null;
+    attachments?: unknown[];
+}): Promise<TruckChatMessageRecord>;
+export declare function listTruckChatMessages(chatId: string): Promise<TruckChatMessageRecord[]>;
 export declare function createBookingFromOffer(params: {
     offerId: string;
     shipperUserId: string;

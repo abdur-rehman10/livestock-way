@@ -388,6 +388,16 @@ async function resolveShipperId(user) {
     const ensured = await (0, profileHelpers_1.ensureShipperProfile)(Number(user.id));
     return String(ensured);
 }
+async function getTruckChatContext(chatId) {
+    const chat = await (0, marketplaceService_1.getTruckChatById)(chatId);
+    if (!chat)
+        return null;
+    const availability = await (0, marketplaceService_1.getTruckAvailabilityById)(chat.truck_availability_id);
+    if (!availability) {
+        return null;
+    }
+    return { chat, availability };
+}
 function isShipperForLoad(user, load) {
     const companyId = getCompanyId(user);
     const userId = user?.id ? String(user.id) : null;
@@ -1274,6 +1284,126 @@ router.post("/truck-board/:id/bookings", auth_1.default, async (req, res) => {
     catch (err) {
         console.error("createBookingForAvailability error", err);
         res.status(400).json({ error: err?.message ?? "Failed to request booking" });
+    }
+});
+router.post("/truck-board/:id/chat", auth_1.default, async (req, res) => {
+    try {
+        const authUser = getAuthUser(req);
+        if (!isShipperUser(authUser)) {
+            return res.status(403).json({ error: "Only shippers can start chats" });
+        }
+        const shipperId = await resolveShipperId(authUser);
+        if (!shipperId) {
+            return res.status(400).json({ error: "Unable to resolve shipper profile" });
+        }
+        const availabilityId = req.params.id;
+        if (!availabilityId) {
+            return res.status(400).json({ error: "Missing availability id" });
+        }
+        const availability = await (0, marketplaceService_1.getTruckAvailabilityById)(availabilityId);
+        if (!availability) {
+            return res.status(404).json({ error: "Listing not found" });
+        }
+        let loadId = null;
+        if (req.body?.load_id) {
+            const load = await (0, marketplaceService_1.getLoadById)(String(req.body.load_id));
+            if (!load) {
+                return res.status(404).json({ error: "Load not found" });
+            }
+            if (!isShipperForLoad(authUser, load)) {
+                return res.status(403).json({ error: "You can only reference your own load" });
+            }
+            loadId = load.id;
+        }
+        const chat = await (0, marketplaceService_1.createTruckChat)({
+            availabilityId,
+            shipperId,
+            loadId,
+            createdByUserId: String(authUser.id ?? ""),
+        });
+        let message = null;
+        if (req.body?.message) {
+            message = await (0, marketplaceService_1.createTruckChatMessage)({
+                chatId: chat.id,
+                senderUserId: String(authUser.id ?? ""),
+                senderRole: String(authUser.user_type ?? "SHIPPER"),
+                message: req.body.message,
+                attachments: req.body.attachments,
+            });
+            (0, socket_1.emitEvent)(socket_1.SOCKET_EVENTS.TRUCK_CHAT_MESSAGE, { message });
+        }
+        res.status(201).json({ chat, message });
+    }
+    catch (err) {
+        console.error("createTruckChat error", err);
+        res.status(400).json({ error: err?.message ?? "Failed to start chat" });
+    }
+});
+router.post("/truck-chats/:chatId/messages", auth_1.default, async (req, res) => {
+    try {
+        const chatId = req.params.chatId;
+        if (!chatId) {
+            return res.status(400).json({ error: "Missing chat id" });
+        }
+        const authUser = getAuthUser(req);
+        const context = await getTruckChatContext(chatId);
+        if (!context) {
+            return res.status(404).json({ error: "Chat not found" });
+        }
+        const shipperId = isShipperUser(authUser)
+            ? await resolveShipperId(authUser)
+            : null;
+        const haulerId = isHaulerUser(authUser)
+            ? await resolveHaulerId(authUser)
+            : null;
+        const isShipperParticipant = shipperId !== null && context.chat.shipper_id === shipperId;
+        const isHaulerParticipant = haulerId !== null && context.availability.hauler_id === haulerId;
+        if (!isShipperParticipant && !isHaulerParticipant && !isSuperAdminUser(authUser)) {
+            return res.status(403).json({ error: "Forbidden" });
+        }
+        const message = await (0, marketplaceService_1.createTruckChatMessage)({
+            chatId,
+            senderUserId: String(authUser.id ?? ""),
+            senderRole: String(authUser.user_type ?? "unknown"),
+            message: req.body?.message,
+            attachments: req.body?.attachments,
+        });
+        (0, socket_1.emitEvent)(socket_1.SOCKET_EVENTS.TRUCK_CHAT_MESSAGE, { message });
+        res.status(201).json({ message });
+    }
+    catch (err) {
+        console.error("truck chat message error", err);
+        res.status(400).json({ error: err?.message ?? "Failed to send message" });
+    }
+});
+router.get("/truck-chats/:chatId/messages", auth_1.default, async (req, res) => {
+    try {
+        const chatId = req.params.chatId;
+        if (!chatId) {
+            return res.status(400).json({ error: "Missing chat id" });
+        }
+        const authUser = getAuthUser(req);
+        const context = await getTruckChatContext(chatId);
+        if (!context) {
+            return res.status(404).json({ error: "Chat not found" });
+        }
+        const shipperId = isShipperUser(authUser)
+            ? await resolveShipperId(authUser)
+            : null;
+        const haulerId = isHaulerUser(authUser)
+            ? await resolveHaulerId(authUser)
+            : null;
+        const isShipperParticipant = shipperId !== null && context.chat.shipper_id === shipperId;
+        const isHaulerParticipant = haulerId !== null && context.availability.hauler_id === haulerId;
+        if (!isShipperParticipant && !isHaulerParticipant && !isSuperAdminUser(authUser)) {
+            return res.status(403).json({ error: "Forbidden" });
+        }
+        const items = await (0, marketplaceService_1.listTruckChatMessages)(chatId);
+        res.json({ items });
+    }
+    catch (err) {
+        console.error("list truck chat messages error", err);
+        res.status(500).json({ error: "Failed to load messages" });
     }
 });
 router.get("/bookings", auth_1.default, async (req, res) => {

@@ -56,6 +56,10 @@ import {
   createTruckAvailability,
   updateTruckAvailability,
   getTruckAvailabilityById,
+  createTruckChat,
+  createTruckChatMessage,
+  listTruckChatMessages,
+  getTruckChatById,
   createBookingFromOffer,
   createBookingForAvailability,
   listBookingsForHauler,
@@ -511,6 +515,16 @@ async function resolveShipperId(user: AuthUser): Promise<string | null> {
   if (user.id === undefined || user.id === null) return null;
   const ensured = await ensureShipperProfile(Number(user.id));
   return String(ensured);
+}
+
+async function getTruckChatContext(chatId: string) {
+  const chat = await getTruckChatById(chatId);
+  if (!chat) return null;
+  const availability = await getTruckAvailabilityById(chat.truck_availability_id);
+  if (!availability) {
+    return null;
+  }
+  return { chat, availability };
 }
 
 function isShipperForLoad(
@@ -1457,6 +1471,140 @@ router.post(
     } catch (err: any) {
       console.error("createBookingForAvailability error", err);
       res.status(400).json({ error: err?.message ?? "Failed to request booking" });
+    }
+  }
+);
+
+router.post(
+  "/truck-board/:id/chat",
+  authRequired,
+  async (req, res) => {
+    try {
+      const authUser = getAuthUser(req);
+      if (!isShipperUser(authUser)) {
+        return res.status(403).json({ error: "Only shippers can start chats" });
+      }
+      const shipperId = await resolveShipperId(authUser);
+      if (!shipperId) {
+        return res.status(400).json({ error: "Unable to resolve shipper profile" });
+      }
+      const availabilityId = req.params.id;
+      if (!availabilityId) {
+        return res.status(400).json({ error: "Missing availability id" });
+      }
+      const availability = await getTruckAvailabilityById(availabilityId);
+      if (!availability) {
+        return res.status(404).json({ error: "Listing not found" });
+      }
+      let loadId: string | null = null;
+      if (req.body?.load_id) {
+        const load = await getLoadById(String(req.body.load_id));
+        if (!load) {
+          return res.status(404).json({ error: "Load not found" });
+        }
+        if (!isShipperForLoad(authUser, load)) {
+          return res.status(403).json({ error: "You can only reference your own load" });
+        }
+        loadId = load.id;
+      }
+      const chat = await createTruckChat({
+        availabilityId,
+        shipperId,
+        loadId,
+        createdByUserId: String(authUser.id ?? ""),
+      });
+      let message = null;
+      if (req.body?.message) {
+        message = await createTruckChatMessage({
+          chatId: chat.id,
+          senderUserId: String(authUser.id ?? ""),
+          senderRole: String(authUser.user_type ?? "SHIPPER"),
+          message: req.body.message,
+          attachments: req.body.attachments,
+        });
+        emitEvent(SOCKET_EVENTS.TRUCK_CHAT_MESSAGE, { message });
+      }
+      res.status(201).json({ chat, message });
+    } catch (err: any) {
+      console.error("createTruckChat error", err);
+      res.status(400).json({ error: err?.message ?? "Failed to start chat" });
+    }
+  }
+);
+
+router.post(
+  "/truck-chats/:chatId/messages",
+  authRequired,
+  async (req, res) => {
+    try {
+      const chatId = req.params.chatId;
+      if (!chatId) {
+        return res.status(400).json({ error: "Missing chat id" });
+      }
+      const authUser = getAuthUser(req);
+      const context = await getTruckChatContext(chatId);
+      if (!context) {
+        return res.status(404).json({ error: "Chat not found" });
+      }
+      const shipperId = isShipperUser(authUser)
+        ? await resolveShipperId(authUser)
+        : null;
+      const haulerId = isHaulerUser(authUser)
+        ? await resolveHaulerId(authUser)
+        : null;
+      const isShipperParticipant = shipperId !== null && context.chat.shipper_id === shipperId;
+      const isHaulerParticipant =
+        haulerId !== null && context.availability.hauler_id === haulerId;
+      if (!isShipperParticipant && !isHaulerParticipant && !isSuperAdminUser(authUser)) {
+        return res.status(403).json({ error: "Forbidden" });
+      }
+      const message = await createTruckChatMessage({
+        chatId,
+        senderUserId: String(authUser.id ?? ""),
+        senderRole: String(authUser.user_type ?? "unknown"),
+        message: req.body?.message,
+        attachments: req.body?.attachments,
+      });
+      emitEvent(SOCKET_EVENTS.TRUCK_CHAT_MESSAGE, { message });
+      res.status(201).json({ message });
+    } catch (err: any) {
+      console.error("truck chat message error", err);
+      res.status(400).json({ error: err?.message ?? "Failed to send message" });
+    }
+  }
+);
+
+router.get(
+  "/truck-chats/:chatId/messages",
+  authRequired,
+  async (req, res) => {
+    try {
+      const chatId = req.params.chatId;
+      if (!chatId) {
+        return res.status(400).json({ error: "Missing chat id" });
+      }
+      const authUser = getAuthUser(req);
+      const context = await getTruckChatContext(chatId);
+      if (!context) {
+        return res.status(404).json({ error: "Chat not found" });
+      }
+      const shipperId = isShipperUser(authUser)
+        ? await resolveShipperId(authUser)
+        : null;
+      const haulerId = isHaulerUser(authUser)
+        ? await resolveHaulerId(authUser)
+        : null;
+      const isShipperParticipant = shipperId !== null && context.chat.shipper_id === shipperId;
+      const isHaulerParticipant =
+        haulerId !== null && context.availability.hauler_id === haulerId;
+      if (!isShipperParticipant && !isHaulerParticipant && !isSuperAdminUser(authUser)) {
+        return res.status(403).json({ error: "Forbidden" });
+      }
+      const items = await listTruckChatMessages(chatId);
+      res.json({ items });
+    } catch (err) {
+      console.error("list truck chat messages error", err);
+      res.status(500).json({ error: "Failed to load messages" });
     }
   }
 );
