@@ -23,11 +23,33 @@ router.get("/truck-board", auth_1.default, async (req, res) => {
             if (resolved)
                 haulerId = resolved;
         }
+        const nearLat = req.query?.near_lat !== undefined ? Number(req.query.near_lat) : undefined;
+        const nearLng = req.query?.near_lng !== undefined ? Number(req.query.near_lng) : undefined;
+        const radiusKm = req.query?.radius_km !== undefined ? Number(req.query.radius_km) : undefined;
+        if ((nearLat !== undefined || nearLng !== undefined) && (nearLat === undefined || nearLng === undefined)) {
+            return res.status(400).json({ error: "near_lat and near_lng must both be provided." });
+        }
+        if (nearLat !== undefined && (Number.isNaN(nearLat) || nearLat < -90 || nearLat > 90)) {
+            return res.status(400).json({ error: "near_lat must be between -90 and 90." });
+        }
+        if (nearLng !== undefined && (Number.isNaN(nearLng) || nearLng < -180 || nearLng > 180)) {
+            return res.status(400).json({ error: "near_lng must be between -180 and 180." });
+        }
+        if (radiusKm !== undefined && (Number.isNaN(radiusKm) || radiusKm <= 0)) {
+            return res.status(400).json({ error: "radius_km must be greater than zero." });
+        }
         const options = {};
         if (haulerId)
             options.haulerId = haulerId;
         if (origin)
             options.originSearch = origin;
+        if (nearLat !== undefined && nearLng !== undefined) {
+            options.near = {
+                lat: nearLat,
+                lng: nearLng,
+                radiusKm: radiusKm ?? 200,
+            };
+        }
         options.limit = Number(req.query?.limit ?? 50);
         const items = await (0, marketplaceService_1.listTruckAvailability)(options);
         res.json({ items });
@@ -58,6 +80,10 @@ router.post("/truck-board", auth_1.default, async (req, res) => {
             capacityWeightKg: req.body?.capacity_weight_kg ?? null,
             allowShared: req.body?.allow_shared ?? true,
             notes: req.body?.notes ?? null,
+            originLat: req.body?.origin_lat ?? null,
+            originLng: req.body?.origin_lng ?? null,
+            destinationLat: req.body?.destination_lat ?? null,
+            destinationLng: req.body?.destination_lng ?? null,
         });
         res.status(201).json({ availability });
     }
@@ -94,6 +120,10 @@ router.patch("/truck-board/:id", auth_1.default, async (req, res) => {
             capacityWeightKg: req.body?.capacity_weight_kg,
             allowShared: req.body?.allow_shared,
             notes: req.body?.notes,
+            originLat: req.body?.origin_lat,
+            originLng: req.body?.origin_lng,
+            destinationLat: req.body?.destination_lat,
+            destinationLng: req.body?.destination_lng,
             isActive: req.body?.is_active,
         });
         res.json({ availability: updated });
@@ -407,6 +437,19 @@ function isHaulerForTripUser(user, trip) {
     const companyId = getCompanyId(user);
     return !!companyId && !!trip.hauler_id && companyId === trip.hauler_id;
 }
+async function isAuthorizedHaulerForTrip(user, trip) {
+    if (isHaulerForTripUser(user, trip)) {
+        return true;
+    }
+    if (!isHaulerUser(user)) {
+        return false;
+    }
+    const resolved = await resolveHaulerId(user);
+    if (!resolved || !trip.hauler_id) {
+        return false;
+    }
+    return resolved === trip.hauler_id;
+}
 async function isDriverForTripUser(userId, trip) {
     if (!userId)
         return false;
@@ -551,7 +594,7 @@ router.get("/trips/:tripId", auth_1.default, async (req, res) => {
         }
         const user = getAuthUser(req);
         const isShipper = isShipperForLoad(user, context.load);
-        const isHauler = isHaulerForTripUser(user, context.trip);
+        const isHauler = await isAuthorizedHaulerForTrip(user, context.trip);
         const isDriver = await isDriverForTripUser(user.id, context.trip);
         if (!isShipper && !isHauler && !isDriver && !isSuperAdminUser(user)) {
             return res.status(403).json({ error: "Forbidden" });
@@ -562,6 +605,74 @@ router.get("/trips/:tripId", auth_1.default, async (req, res) => {
     catch (err) {
         console.error("getTrip error", err);
         res.status(500).json({ error: "Failed to load trip" });
+    }
+});
+router.get("/loads/:loadId/trip", auth_1.default, async (req, res) => {
+    try {
+        const loadId = req.params.loadId;
+        if (!loadId) {
+            return res.status(400).json({ error: "Missing loadId" });
+        }
+        let context;
+        try {
+            context = await (0, marketplaceService_1.getTripContextByLoadId)(loadId);
+        }
+        catch (err) {
+            return res.status(404).json({ error: err?.message ?? "Load not found" });
+        }
+        const user = getAuthUser(req);
+        const isShipper = isShipperForLoad(user, context.load);
+        let isHauler = false;
+        if (context.trip && isHaulerUser(user)) {
+            const resolved = await resolveHaulerId(user);
+            if (resolved && context.trip.hauler_id === resolved) {
+                isHauler = true;
+            }
+        }
+        if (!isShipper && !isHauler && !isSuperAdminUser(user)) {
+            return res.status(403).json({ error: "Forbidden" });
+        }
+        return res.json(context);
+    }
+    catch (err) {
+        console.error("getTripByLoad error", err);
+        res.status(500).json({ error: "Failed to load trip by load id" });
+    }
+});
+router.get("/hauler/drivers", auth_1.default, async (req, res) => {
+    try {
+        const user = getAuthUser(req);
+        if (!isHaulerUser(user)) {
+            return res.status(403).json({ error: "Only haulers can view drivers" });
+        }
+        const haulerId = await resolveHaulerId(user);
+        if (!haulerId) {
+            return res.status(400).json({ error: "Unable to resolve hauler profile" });
+        }
+        const items = await (0, marketplaceService_1.listDriversForHauler)(haulerId);
+        return res.json({ items });
+    }
+    catch (err) {
+        console.error("listHaulerDrivers error", err);
+        res.status(500).json({ error: "Failed to load drivers" });
+    }
+});
+router.get("/hauler/vehicles", auth_1.default, async (req, res) => {
+    try {
+        const user = getAuthUser(req);
+        if (!isHaulerUser(user)) {
+            return res.status(403).json({ error: "Only haulers can view vehicles" });
+        }
+        const haulerId = await resolveHaulerId(user);
+        if (!haulerId) {
+            return res.status(400).json({ error: "Unable to resolve hauler profile" });
+        }
+        const items = await (0, marketplaceService_1.listVehiclesForHauler)(haulerId);
+        return res.json({ items });
+    }
+    catch (err) {
+        console.error("listHaulerVehicles error", err);
+        res.status(500).json({ error: "Failed to load vehicles" });
     }
 });
 router.patch("/trips/:tripId/assign-driver", auth_1.default, async (req, res) => {
@@ -575,7 +686,7 @@ router.patch("/trips/:tripId/assign-driver", auth_1.default, async (req, res) =>
             return res.status(404).json({ error: "Trip not found" });
         }
         const user = getAuthUser(req);
-        if (!isHaulerForTripUser(user, trip) && !isSuperAdminUser(user)) {
+        if (!(await isAuthorizedHaulerForTrip(user, trip)) && !isSuperAdminUser(user)) {
             return res.status(403).json({ error: "Forbidden" });
         }
         if (![marketplaceService_1.TripStatus.PENDING_ESCROW, marketplaceService_1.TripStatus.READY_TO_START].includes(trip.status)) {
@@ -608,7 +719,7 @@ router.patch("/trips/:tripId/assign-vehicle", auth_1.default, async (req, res) =
             return res.status(404).json({ error: "Trip not found" });
         }
         const user = getAuthUser(req);
-        if (!isHaulerForTripUser(user, trip) && !isSuperAdminUser(user)) {
+        if (!(await isAuthorizedHaulerForTrip(user, trip)) && !isSuperAdminUser(user)) {
             return res.status(403).json({ error: "Forbidden" });
         }
         if (![marketplaceService_1.TripStatus.PENDING_ESCROW, marketplaceService_1.TripStatus.READY_TO_START].includes(trip.status)) {
@@ -641,7 +752,7 @@ router.post("/trips/:tripId/start", auth_1.default, async (req, res) => {
             return res.status(404).json({ error: "Trip not found" });
         }
         const user = getAuthUser(req);
-        const isHauler = isHaulerForTripUser(user, context.trip);
+        const isHauler = await isAuthorizedHaulerForTrip(user, context.trip);
         const isDriver = await isDriverForTripUser(user.id, context.trip);
         const isShipper = isShipperForLoad(user, context.load);
         if (!isHauler && !isDriver && !isShipper && !isSuperAdminUser(user)) {
@@ -679,7 +790,7 @@ router.post("/trips/:tripId/mark-delivered", auth_1.default, async (req, res) =>
             return res.status(404).json({ error: "Trip not found" });
         }
         const user = getAuthUser(req);
-        const isHauler = isHaulerForTripUser(user, context.trip);
+        const isHauler = await isAuthorizedHaulerForTrip(user, context.trip);
         const isDriver = await isDriverForTripUser(user.id, context.trip);
         if (!isHauler && !isDriver && !isSuperAdminUser(user)) {
             return res.status(403).json({ error: "Forbidden" });
@@ -787,7 +898,7 @@ router.get("/trips/:tripId/payment", auth_1.default, async (req, res) => {
         }
         const user = getAuthUser(req);
         const isShipper = isShipperForLoad(user, context.load);
-        const isHauler = isHaulerForTripUser(user, context.trip);
+        const isHauler = await isAuthorizedHaulerForTrip(user, context.trip);
         if (!isShipper && !isHauler && !isSuperAdminUser(user)) {
             return res.status(403).json({ error: "Forbidden" });
         }
@@ -847,7 +958,7 @@ router.post("/trips/:tripId/disputes", auth_1.default, async (req, res) => {
         }
         const user = getAuthUser(req);
         const isShipper = isShipperForLoad(user, context.load);
-        const isHauler = isHaulerForTripUser(user, context.trip);
+        const isHauler = await isAuthorizedHaulerForTrip(user, context.trip);
         if (!isShipper && !isHauler && !isSuperAdminUser(user)) {
             return res.status(403).json({ error: "Forbidden" });
         }
@@ -908,7 +1019,7 @@ router.get("/trips/:tripId/disputes", auth_1.default, async (req, res) => {
         }
         const user = getAuthUser(req);
         const isShipper = isShipperForLoad(user, context.load);
-        const isHauler = isHaulerForTripUser(user, context.trip);
+        const isHauler = await isAuthorizedHaulerForTrip(user, context.trip);
         if (!isShipper && !isHauler && !isSuperAdminUser(user)) {
             return res.status(403).json({ error: "Forbidden" });
         }
@@ -932,7 +1043,7 @@ router.get("/disputes/:disputeId", auth_1.default, async (req, res) => {
         }
         const user = getAuthUser(req);
         const isShipper = isShipperForLoad(user, context.load);
-        const isHauler = isHaulerForTripUser(user, context.trip);
+        const isHauler = await isAuthorizedHaulerForTrip(user, context.trip);
         if (!isShipper && !isHauler && !isSuperAdminUser(user)) {
             return res.status(403).json({ error: "Forbidden" });
         }
@@ -955,7 +1066,7 @@ router.post("/disputes/:disputeId/messages", auth_1.default, async (req, res) =>
         }
         const user = getAuthUser(req);
         const isShipper = isShipperForLoad(user, context.load);
-        const isHauler = isHaulerForTripUser(user, context.trip);
+        const isHauler = await isAuthorizedHaulerForTrip(user, context.trip);
         if (!isShipper && !isHauler && !isSuperAdminUser(user)) {
             return res.status(403).json({ error: "Forbidden" });
         }
@@ -986,7 +1097,7 @@ router.get("/disputes/:disputeId/messages", auth_1.default, async (req, res) => 
         }
         const user = getAuthUser(req);
         const isShipper = isShipperForLoad(user, context.load);
-        const isHauler = isHaulerForTripUser(user, context.trip);
+        const isHauler = await isAuthorizedHaulerForTrip(user, context.trip);
         if (!isShipper && !isHauler && !isSuperAdminUser(user)) {
             return res.status(403).json({ error: "Forbidden" });
         }
@@ -1500,6 +1611,35 @@ router.post("/bookings/:bookingId/reject", auth_1.default, async (req, res) => {
     catch (err) {
         console.error("rejectBooking error", err);
         res.status(400).json({ error: err?.message ?? "Failed to reject booking" });
+    }
+});
+router.get("/truck-chats", auth_1.default, async (req, res) => {
+    try {
+        const authUser = getAuthUser(req);
+        if (isHaulerUser(authUser)) {
+            const haulerId = await resolveHaulerId(authUser);
+            if (!haulerId) {
+                return res.status(400).json({ error: "Unable to resolve hauler profile" });
+            }
+            const items = await (0, marketplaceService_1.listTruckChatsForHauler)(haulerId);
+            return res.json({ items });
+        }
+        if (isShipperUser(authUser)) {
+            const shipperId = await resolveShipperId(authUser);
+            if (!shipperId) {
+                return res.status(400).json({ error: "Unable to resolve shipper profile" });
+            }
+            const items = await (0, marketplaceService_1.listTruckChatsForShipper)(shipperId);
+            return res.json({ items });
+        }
+        if (isSuperAdminUser(authUser)) {
+            return res.json({ items: [] });
+        }
+        res.status(403).json({ error: "Forbidden" });
+    }
+    catch (err) {
+        console.error("listTruckChats error", err);
+        res.status(500).json({ error: "Failed to load truck chats" });
     }
 });
 exports.default = router;

@@ -49,6 +49,12 @@ import {
   SOCKET_EVENTS,
   subscribeToSocketEvent,
 } from "../lib/socket";
+import {
+  fetchTripByLoadId as fetchMarketplaceTripByLoad,
+  startMarketplaceTrip,
+  markMarketplaceTripDelivered,
+  type TripEnvelope,
+} from "../api/marketplace";
 
 const FILTERS = ["all", "assigned", "in_transit", "delivered", "pending"] as const;
 type FilterOption = (typeof FILTERS)[number];
@@ -108,6 +114,7 @@ export default function HaulerMyLoads() {
     load: null,
   });
   const loadsRef = useRef<Load[]>([]);
+  const tripContextCache = useRef<Record<number, TripEnvelope | null>>({});
   const dialogLoad = detailsDialog.load;
   const navigate = useNavigate();
   const haulerId = storage.get<string | null>(STORAGE_KEYS.USER_ID, null);
@@ -136,6 +143,7 @@ export default function HaulerMyLoads() {
 
   useEffect(() => {
     loadsRef.current = loads;
+    tripContextCache.current = {};
   }, [loads]);
 
   useEffect(() => {
@@ -168,6 +176,19 @@ export default function HaulerMyLoads() {
     return loads.filter((load) => normalizeLoadStatus(load.status) === filter);
   }, [filter, loads]);
 
+  const getTripContext = useCallback(async (loadId: number) => {
+    if (!tripContextCache.current[loadId]) {
+      try {
+        const ctx = await fetchMarketplaceTripByLoad(loadId);
+        tripContextCache.current[loadId] = ctx;
+      } catch (err) {
+        console.error("failed to fetch trip context", err);
+        tripContextCache.current[loadId] = null;
+      }
+    }
+    return tripContextCache.current[loadId];
+  }, []);
+
   const openConfirm = (type: "start" | "deliver", load: Load) => {
     setConfirmDialog({ open: true, type, load });
   };
@@ -183,7 +204,13 @@ export default function HaulerMyLoads() {
   const handleStart = async (loadId: number) => {
     try {
       setBusyId(loadId);
-      await startLoad(loadId);
+      const context = await getTripContext(loadId);
+      if (context?.trip?.id) {
+        await startMarketplaceTrip(context.trip.id);
+        tripContextCache.current[loadId] = await fetchMarketplaceTripByLoad(loadId);
+      } else {
+        await startLoad(loadId);
+      }
       toast.success("Trip started");
       await refresh();
     } catch (err: any) {
@@ -196,12 +223,18 @@ export default function HaulerMyLoads() {
   const handleComplete = async (loadId: number) => {
     try {
       setBusyId(loadId);
-      let epodUrl: string | undefined;
-      const file = epodFile[loadId] ?? null;
-      if (file) {
-        epodUrl = await uploadEpod(file);
+      const context = await getTripContext(loadId);
+      if (context?.trip?.id) {
+        await markMarketplaceTripDelivered(context.trip.id);
+        tripContextCache.current[loadId] = await fetchMarketplaceTripByLoad(loadId);
+      } else {
+        let epodUrl: string | undefined;
+        const file = epodFile[loadId] ?? null;
+        if (file) {
+          epodUrl = await uploadEpod(file);
+        }
+        await completeLoad(loadId, epodUrl);
       }
-      await completeLoad(loadId, epodUrl);
       toast.success("Load marked as delivered");
       await refresh();
     } catch (err: any) {
