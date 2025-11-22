@@ -67,7 +67,7 @@ app.use("/api/marketplace", marketplaceRoutes_1.default);
 const PORT = Number(process.env.PORT) || 4000;
 const server = http_1.default.createServer(app);
 (0, socket_1.initSocket)(server);
-server.listen(PORT, () => {
-    console.log(`✅ Server running on http://localhost:${PORT}`);
+server.listen(PORT, "0.0.0.0", () => {
+    console.log(`✅ Server running on http://0.0.0.0:${PORT}`);
 });
 //# sourceMappingURL=server.js.map

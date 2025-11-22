@@ -1,2 +1,6 @@
 node_modules/
 .DS_Store
+.env
+backend/.env
+frontend/.env
+frontend/vite.config.ts
