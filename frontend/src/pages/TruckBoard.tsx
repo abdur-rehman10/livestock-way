@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   fetchTruckAvailability,
   createTruckAvailabilityEntry,
@@ -6,6 +6,7 @@ import {
   startTruckChat,
   type TruckAvailability,
 } from "../api/marketplace";
+import { fetchLoadsForShipper, type LoadSummary } from "../lib/api";
 import { Card, CardContent, CardHeader, CardTitle } from "../components/ui/card";
 import { Button } from "../components/ui/button";
 import { Input } from "../components/ui/input";
@@ -15,6 +16,7 @@ import { toast } from "sonner";
 import { storage, STORAGE_KEYS } from "../lib/storage";
 import { Badge } from "../components/ui/badge";
 import { Switch } from "../components/ui/switch";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../components/ui/select";
 
 export default function TruckBoard() {
   const [listings, setListings] = useState<TruckAvailability[]>([]);
@@ -44,6 +46,9 @@ export default function TruckBoard() {
   >({});
   const [posting, setPosting] = useState(false);
   const userRole = storage.get<string | null>(STORAGE_KEYS.USER_ROLE, null);
+  const userId = storage.get<string | null>(STORAGE_KEYS.USER_ID, null);
+  const [shipperLoads, setShipperLoads] = useState<LoadSummary[]>([]);
+  const [shipperLoadsLoading, setShipperLoadsLoading] = useState(false);
 
   const refresh = async (nextQuery?: { origin?: string; nearLat?: number; nearLng?: number; radiusKm?: number }) => {
     try {
@@ -64,6 +69,34 @@ export default function TruckBoard() {
   useEffect(() => {
     refresh();
   }, []);
+
+  useEffect(() => {
+    if (userRole !== "shipper" || !userId) return;
+    let active = true;
+    setShipperLoadsLoading(true);
+    fetchLoadsForShipper(userId)
+      .then((loads) => {
+        if (!active) return;
+        setShipperLoads(loads);
+      })
+      .catch((err: any) => {
+        if (!active) return;
+        toast.error(err?.message ?? "Failed to load your loads");
+      })
+      .finally(() => {
+        if (active) {
+          setShipperLoadsLoading(false);
+        }
+      });
+    return () => {
+      active = false;
+    };
+  }, [userRole, userId]);
+
+  const selectableLoads = useMemo(() => {
+    if (userRole !== "shipper") return [];
+    return shipperLoads.filter((load) => load.status === "open");
+  }, [shipperLoads, userRole]);
 
   const parseOptionalCoordinate = (
     value: string,
@@ -250,7 +283,7 @@ export default function TruckBoard() {
   const handleRequestBooking = async (availabilityId: string) => {
     const interest = interestForm[availabilityId] ?? { loadId: "", message: "" };
     if (!interest.loadId.trim()) {
-      toast.error("Enter the load ID you want to assign.");
+      toast.error("Select which load you want to book onto this truck.");
       return;
     }
     try {
@@ -333,10 +366,35 @@ export default function TruckBoard() {
                   listing.destination_lat,
                   listing.destination_lng
                 );
+                const listingInterest = interestForm[listing.id] ?? { loadId: "", message: "" };
+                const selectedLoad = listingInterest.loadId
+                  ? selectableLoads.find((load) => String(load.id) === listingInterest.loadId)
+                  : undefined;
+                const selectedLoadBudget =
+                  selectedLoad?.offer_price != null
+                    ? (() => {
+                        const numericBudget = Number(selectedLoad.offer_price);
+                        return Number.isNaN(numericBudget)
+                          ? selectedLoad.offer_price
+                          : numericBudget.toLocaleString();
+                      })()
+                    : null;
+                const capacitySummary = [
+                  typeof listing.capacity_headcount === "number" && listing.capacity_headcount > 0
+                    ? `${listing.capacity_headcount} head`
+                    : null,
+                  typeof listing.capacity_weight_kg === "number" && listing.capacity_weight_kg > 0
+                    ? `${listing.capacity_weight_kg} kg`
+                    : null,
+                ]
+                  .filter(Boolean)
+                  .join(" • ") || "Not specified";
+                const requestDisabled =
+                  !listingInterest.loadId || shipperLoadsLoading || selectableLoads.length === 0;
                 return (
                   <div
                     key={listing.id}
-                    className="border rounded-xl p-4 flex flex-col gap-2 md:flex-row md:items-center md:justify-between"
+                    className="border rounded-xl p-4 flex flex-col gap-3 md:flex-row md:items-start md:justify-between"
                   >
                     <div>
                       <div className="text-sm font-medium text-gray-900">
@@ -373,23 +431,78 @@ export default function TruckBoard() {
                       )}
                     </div>
                     {userRole === "shipper" && (
-                      <div className="flex flex-col gap-2 w-full md:w-64">
-                        <Badge className="self-end text-[10px]">
-                          {listing.allow_shared ? "Shared" : "Exclusive"}
-                        </Badge>
-                        <Input
-                          placeholder="Your load ID"
-                          value={interestForm[listing.id]?.loadId ?? ""}
-                          onChange={(e) =>
-                            updateInterest(listing.id, "loadId", e.target.value)
-                          }
-                        />
+                      <div className="flex flex-col gap-3 w-full md:max-w-sm md:pl-4 md:border-l md:border-dashed md:border-gray-200">
+                        <div className="rounded-lg border bg-muted/40 px-3 py-2 text-[11px] text-gray-600 space-y-1">
+                          <div className="flex items-center justify-between">
+                            <span className="text-xs font-semibold text-gray-900">Truck snapshot</span>
+                            <Badge
+                              variant={listing.allow_shared ? "outline" : "default"}
+                              className="text-[10px] uppercase tracking-wide"
+                            >
+                              {listing.allow_shared ? "Shared" : "Exclusive"}
+                            </Badge>
+                          </div>
+                          <div>
+                            Route:{" "}
+                            {listing.destination_location_text
+                              ? `${listing.origin_location_text} → ${listing.destination_location_text}`
+                              : listing.origin_location_text}
+                          </div>
+                          <div>Capacity: {capacitySummary}</div>
+                          <div>
+                            Available from {new Date(listing.available_from).toLocaleDateString()}
+                          </div>
+                          {listing.notes && <div>Notes: {listing.notes}</div>}
+                        </div>
+
+                        <div className="space-y-1">
+                          <Label className="text-xs uppercase tracking-wide text-gray-500">
+                            Attach one of your loads
+                          </Label>
+                          {shipperLoadsLoading ? (
+                            <p className="text-xs text-gray-500">Loading your loads…</p>
+                          ) : selectableLoads.length === 0 ? (
+                            <p className="text-xs text-gray-500">
+                              You do not have any open loads yet. Post a load first from the Loadboard.
+                            </p>
+                          ) : (
+                            <Select
+                              value={listingInterest.loadId || undefined}
+                              onValueChange={(value) => updateInterest(listing.id, "loadId", value)}
+                            >
+                              <SelectTrigger>
+                                <SelectValue placeholder="Select load" />
+                              </SelectTrigger>
+                              <SelectContent>
+                                {selectableLoads.map((load) => (
+                                  <SelectItem key={load.id} value={String(load.id)}>
+                                    {load.title || `Load #${load.id}`} · {load.pickup_location} →{" "}
+                                    {load.dropoff_location}
+                                  </SelectItem>
+                                ))}
+                              </SelectContent>
+                            </Select>
+                          )}
+                        </div>
+
+                        {selectedLoad && (
+                          <div className="rounded-md border px-3 py-2 text-[11px] text-gray-600 space-y-0.5">
+                            <div className="text-xs font-semibold text-gray-900">Selected load</div>
+                            <div>
+                              {selectedLoad.pickup_location} → {selectedLoad.dropoff_location}
+                            </div>
+                            <div>
+                              {selectedLoad.quantity} {selectedLoad.species}
+                            </div>
+                            {selectedLoadBudget && <div>Budget: ${selectedLoadBudget}</div>}
+                          </div>
+                        )}
+
                         <Textarea
-                          placeholder="Message to hauler"
-                          value={interestForm[listing.id]?.message ?? ""}
-                          onChange={(e) =>
-                            updateInterest(listing.id, "message", e.target.value)
-                          }
+                          placeholder="Message to hauler (optional)"
+                          value={listingInterest.message ?? ""}
+                          onChange={(e) => updateInterest(listing.id, "message", e.target.value)}
+                          rows={3}
                         />
                         <div className="flex gap-2">
                           <Button
@@ -403,6 +516,7 @@ export default function TruckBoard() {
                           <Button
                             size="sm"
                             className="flex-1"
+                            disabled={requestDisabled}
                             onClick={() => handleRequestBooking(listing.id)}
                           >
                             Request Booking
