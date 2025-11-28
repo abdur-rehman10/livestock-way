@@ -66,6 +66,9 @@ export function MarketplaceDevLab() {
   const [tripLookupId, setTripLookupId] = useState("");
   const [tripSummary, setTripSummary] = useState<Awaited<ReturnType<typeof fetchTrip>> | null>(null);
   const [isLoadingTrip, setIsLoadingTrip] = useState(false);
+  const tripRecord = tripSummary?.trip ?? null;
+  const loadRecord = tripSummary?.load ?? null;
+  const paymentRecord = tripSummary?.payment ?? null;
 
   const selectedOffer = useMemo(
     () => offers.find((offer) => offer.id === selectedOfferId) ?? null,
@@ -424,30 +427,36 @@ export function MarketplaceDevLab() {
                   <p className="text-xs uppercase tracking-wide text-muted-foreground">
                     Trip
                   </p>
-                  <p className="text-lg font-semibold">{tripSummary.trip.id}</p>
+                  <p className="text-lg font-semibold">{tripRecord ? tripRecord.id : "N/A"}</p>
                   <p className="text-sm text-muted-foreground">
-                    Status: {tripSummary.trip.status}
+                    Status: {tripRecord ? tripRecord.status : "Unavailable"}
                   </p>
                 </div>
                 <div>
                   <p className="text-xs uppercase tracking-wide text-muted-foreground">
                     Load
                   </p>
-                  <p className="text-lg font-semibold">{tripSummary.load.id}</p>
+                  <p className="text-lg font-semibold">{loadRecord ? loadRecord.id : "N/A"}</p>
                   <p className="text-sm text-muted-foreground">
-                    State: {tripSummary.load.status}
+                    State: {loadRecord ? loadRecord.status : "Unavailable"}
                   </p>
                 </div>
                 <div>
                   <p className="text-xs uppercase tracking-wide text-muted-foreground">
                     Assignment
                   </p>
-                    <p className="text-sm">
-                      Driver #{tripSummary.trip.assigned_driver_id || "—"}
-                    </p>
-                    <p className="text-sm">
-                      Vehicle #{tripSummary.trip.assigned_vehicle_id || "—"}
-                    </p>
+                    {tripRecord ? (
+                      <>
+                        <p className="text-sm">
+                          Driver #{tripRecord.assigned_driver_id || "—"}
+                        </p>
+                        <p className="text-sm">
+                          Vehicle #{tripRecord.assigned_vehicle_id || "—"}
+                        </p>
+                      </>
+                    ) : (
+                      <p className="text-sm text-muted-foreground">Trip record unavailable</p>
+                    )}
                 </div>
               </div>
               <Separator />
@@ -457,27 +466,27 @@ export function MarketplaceDevLab() {
                     Timing
                   </p>
                   <ul className="text-sm text-muted-foreground">
-                    <li>Started: {tripSummary.trip.started_at ? new Date(tripSummary.trip.started_at).toLocaleString() : "—"}</li>
-                    <li>Delivered: {tripSummary.trip.delivered_at ? new Date(tripSummary.trip.delivered_at).toLocaleString() : "—"}</li>
-                    <li>Confirmed: {tripSummary.trip.delivered_confirmed_at ? new Date(tripSummary.trip.delivered_confirmed_at).toLocaleString() : "—"}</li>
+                    <li>Started: {tripRecord?.started_at ? new Date(tripRecord.started_at).toLocaleString() : "—"}</li>
+                    <li>Delivered: {tripRecord?.delivered_at ? new Date(tripRecord.delivered_at).toLocaleString() : "—"}</li>
+                    <li>Confirmed: {tripRecord?.delivered_confirmed_at ? new Date(tripRecord.delivered_confirmed_at).toLocaleString() : "—"}</li>
                   </ul>
                 </div>
                 <div>
                   <p className="text-xs uppercase tracking-wide text-muted-foreground">
                     Payment
                   </p>
-                  {tripSummary.payment ? (
+                  {paymentRecord ? (
                     <div>
                       <p className="text-lg font-semibold">
-                        {formatCurrency(tripSummary.payment.amount, tripSummary.payment.currency)}
+                        {formatCurrency(paymentRecord.amount, paymentRecord.currency)}
                       </p>
                       <p className="text-sm text-muted-foreground">
-                        Status: {tripSummary.payment.status}
+                        Status: {paymentRecord.status}
                       </p>
                       <p className="text-xs text-muted-foreground">
                         Auto release:{" "}
-                        {tripSummary.payment.auto_release_at
-                          ? new Date(tripSummary.payment.auto_release_at).toLocaleString()
+                        {paymentRecord.auto_release_at
+                          ? new Date(paymentRecord.auto_release_at).toLocaleString()
                           : "—"}
                       </p>
                     </div>

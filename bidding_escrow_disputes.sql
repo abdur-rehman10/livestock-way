@@ -90,6 +90,7 @@ CREATE TABLE IF NOT EXISTS dispute_messages (
     dispute_id      BIGINT NOT NULL REFERENCES payment_disputes(id) ON DELETE CASCADE,
     sender_user_id  BIGINT NOT NULL REFERENCES app_users(id) ON DELETE RESTRICT,
     sender_role     VARCHAR(32) NOT NULL,
+    recipient_role  VARCHAR(32) NOT NULL DEFAULT 'ADMIN',
     text            TEXT,
     attachments     JSONB DEFAULT '[]'::jsonb,
     created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()

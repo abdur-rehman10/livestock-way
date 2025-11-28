@@ -97,7 +97,8 @@ export async function getLoads(req: Request, res: Response) {
         assigned_at,
         started_at,
         completed_at,
-        epod_url
+        epod_url,
+        awarded_offer_id
       FROM loads
       WHERE is_deleted = FALSE
     `;

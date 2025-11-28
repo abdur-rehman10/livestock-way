@@ -53,11 +53,33 @@ export default function WalletTab() {
     let debited = 0;
 
     for (const p of payments) {
-      if (userId && p.payee_id === userId && p.payee_role === role) {
-        credited += Number(p.amount || 0);
+      const baseAmount = Number(p.amount || 0);
+      const splitCredit =
+        p.split_amount_to_hauler !== undefined && p.split_amount_to_hauler !== null
+          ? Number(p.split_amount_to_hauler)
+          : null;
+      const splitRefund =
+        p.split_amount_to_shipper !== undefined && p.split_amount_to_shipper !== null
+          ? Number(p.split_amount_to_shipper)
+          : null;
+      const isCredit = userId && p.payee_id === userId && p.payee_role === role;
+      const isDebit = userId && p.payer_id === userId && p.payer_role === role;
+
+      if (isCredit) {
+        const creditAmount =
+          p.status === "SPLIT_BETWEEN_PARTIES" && splitCredit !== null
+            ? splitCredit
+            : baseAmount;
+        credited += creditAmount;
       }
-      if (userId && p.payer_id === userId && p.payer_role === role) {
-        debited += Number(p.amount || 0);
+
+      if (isDebit) {
+        let debitAmount = baseAmount;
+        if (p.status === "SPLIT_BETWEEN_PARTIES" && splitRefund !== null) {
+          debitAmount = Math.max(baseAmount - splitRefund, 0);
+          credited += splitRefund;
+        }
+        debited += debitAmount;
       }
     }
 
@@ -106,6 +128,14 @@ export default function WalletTab() {
     RELEASED: {
       label: "Released",
       badgeClass: "bg-emerald-50 text-emerald-700 border border-emerald-200",
+    },
+    REFUNDED_TO_SHIPPER: {
+      label: "Refunded",
+      badgeClass: "bg-blue-50 text-blue-700 border border-blue-200",
+    },
+    SPLIT_BETWEEN_PARTIES: {
+      label: "Split payout",
+      badgeClass: "bg-purple-50 text-purple-700 border border-purple-200",
     },
   };
 
@@ -169,59 +199,118 @@ export default function WalletTab() {
                 {payments.map((p) => {
                   const isCredit = p.payee_id === userId && p.payee_role === role;
                   const isDebit = p.payer_id === userId && p.payer_role === role;
-
                   const date = p.released_at || p.created_at;
-
                   const routeLabel =
                     p.pickup_location && p.dropoff_location
                       ? `${p.pickup_location} → ${p.dropoff_location}`
                       : `Trip #${p.load_id}`;
 
+                  const splitCredit =
+                    p.split_amount_to_hauler !== undefined && p.split_amount_to_hauler !== null
+                      ? Number(p.split_amount_to_hauler)
+                      : null;
+                  const splitRefund =
+                    p.split_amount_to_shipper !== undefined && p.split_amount_to_shipper !== null
+                      ? Number(p.split_amount_to_shipper)
+                      : null;
+
                   let directionLabel = "";
                   if (isCredit) directionLabel = "Incoming payment";
                   if (isDebit) directionLabel = "Outgoing payment";
+                  if (p.status === "SPLIT_BETWEEN_PARTIES") {
+                    directionLabel = isCredit ? "Split payout" : "Split debit";
+                  }
+
+                  const creditAmount =
+                    isCredit && p.status === "SPLIT_BETWEEN_PARTIES" && splitCredit !== null
+                      ? splitCredit
+                      : isCredit
+                      ? Number(p.amount || 0)
+                      : null;
+                  const debitAmount =
+                    isDebit && p.status === "SPLIT_BETWEEN_PARTIES" && splitRefund !== null
+                      ? Math.max(Number(p.amount || 0) - splitRefund, 0)
+                      : isDebit
+                      ? Number(p.amount || 0)
+                      : null;
+                  const showRefundRow =
+                    splitRefund !== null &&
+                    splitRefund > 0 &&
+                    p.status === "SPLIT_BETWEEN_PARTIES" &&
+                    isDebit;
 
                   return (
-                    <tr
-                      key={p.id}
-                      className="border-t border-gray-100 hover:bg-gray-50/50"
-                    >
-                      <td className="px-4 py-2 text-gray-600">
-                        {date ? new Date(date).toLocaleString() : "—"}
-                      </td>
-                      <td className="px-4 py-2 text-gray-700">{routeLabel}</td>
-                      <td className="px-4 py-2 text-gray-600">
-                        {directionLabel || "—"}
-                      </td>
-                      <td className="px-4 py-2">
-                        {isCredit && (
-                          <span className="font-semibold text-emerald-700">
-                            +${Number(p.amount).toFixed(2)}
+                    <React.Fragment key={`payment-${p.id}`}>
+                      <tr className="border-t border-gray-100 hover:bg-gray-50/50">
+                        <td className="px-4 py-2 text-gray-600">
+                          {date ? new Date(date).toLocaleString() : "—"}
+                          {p.status === "SPLIT_BETWEEN_PARTIES" && p.split_resolved_at && (
+                            <div className="text-[10px] text-gray-400">
+                              Resolved {new Date(p.split_resolved_at).toLocaleDateString()}
+                            </div>
+                          )}
+                        </td>
+                        <td className="px-4 py-2 text-gray-700">
+                          {routeLabel}
+                          {p.status === "SPLIT_BETWEEN_PARTIES" && (
+                            <div className="text-[10px] text-gray-500">Escrow split</div>
+                          )}
+                        </td>
+                        <td className="px-4 py-2 text-gray-600">
+                          {directionLabel || "—"}
+                        </td>
+                        <td className="px-4 py-2">
+                          {creditAmount !== null && (
+                            <span className="font-semibold text-emerald-700">
+                              +${creditAmount.toFixed(2)}
+                            </span>
+                          )}
+                          {creditAmount === null && debitAmount !== null && (
+                            <span className="font-semibold text-rose-600">
+                              -${debitAmount.toFixed(2)}
+                            </span>
+                          )}
+                          {creditAmount === null && debitAmount === null && (
+                            <span className="text-gray-500">
+                              ${Number(p.amount).toFixed(2)}
+                            </span>
+                          )}
+                        </td>
+                        <td className="px-4 py-2">
+                          <span
+                            className={[
+                              "inline-flex rounded-full px-2 py-[1px] text-[10px] font-medium capitalize",
+                              paymentStatusMeta[p.status]?.badgeClass ||
+                                "bg-gray-100 text-gray-600 border border-gray-200",
+                            ].join(" ")}
+                          >
+                            {paymentStatusMeta[p.status]?.label || p.status}
                           </span>
-                        )}
-                        {isDebit && (
-                          <span className="font-semibold text-rose-600">
-                            -${Number(p.amount).toFixed(2)}
-                          </span>
-                        )}
-                        {!isCredit && !isDebit && (
-                          <span className="text-gray-500">
-                            ${Number(p.amount).toFixed(2)}
-                          </span>
-                        )}
-                      </td>
-                      <td className="px-4 py-2">
-                        <span
-                          className={[
-                            "inline-flex rounded-full px-2 py-[1px] text-[10px] font-medium capitalize",
-                            paymentStatusMeta[p.status]?.badgeClass ||
-                              "bg-gray-100 text-gray-600 border border-gray-200",
-                          ].join(" ")}
-                        >
-                          {paymentStatusMeta[p.status]?.label || p.status}
-                        </span>
-                      </td>
-                    </tr>
+                        </td>
+                      </tr>
+                      {showRefundRow && splitRefund !== null && (
+                        <tr className="border-t border-gray-50 bg-emerald-50/40 text-[10px] text-emerald-800">
+                          <td className="px-4 py-2">
+                            {p.split_resolved_at
+                              ? new Date(p.split_resolved_at).toLocaleString()
+                              : date
+                              ? new Date(date).toLocaleString()
+                              : "—"}
+                          </td>
+                          <td className="px-4 py-2" colSpan={2}>
+                            Refund to shipper from split decision
+                          </td>
+                          <td className="px-4 py-2 font-semibold">
+                            +${splitRefund.toFixed(2)}
+                          </td>
+                          <td className="px-4 py-2">
+                            <span className="inline-flex rounded-full border border-emerald-200 px-2 py-[1px] text-[10px] font-semibold text-emerald-700">
+                              Refund
+                            </span>
+                          </td>
+                        </tr>
+                      )}
+                    </React.Fragment>
                   );
                 })}
               </tbody>

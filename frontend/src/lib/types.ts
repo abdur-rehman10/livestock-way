@@ -21,6 +21,9 @@ export interface Payment {
   quantity?: number;
   pickup_location?: string;
   dropoff_location?: string;
+  split_amount_to_hauler?: number | null;
+  split_amount_to_shipper?: number | null;
+  split_resolved_at?: string | null;
 }
 
 export interface SupportTicket {
@@ -33,8 +36,18 @@ export interface SupportTicket {
   priority: string;
   created_at: string;
   updated_at: string;
+  resolution_notes?: string | null;
 }
 
+export interface SupportTicketMessage {
+  id: number;
+  ticket_id: number;
+  sender_user_id: string | null;
+  sender_role: string | null;
+  message: string;
+  attachments?: unknown[];
+  created_at: string;
+}
 export interface TripExpense {
   id: number;
   trip_id: number;
@@ -62,12 +75,4 @@ export interface TripRecord {
   rest_stop_plan_json: any;
   created_at: string;
   updated_at: string | null;
-}
-
-export interface TripMessage {
-  id: number;
-  trip_id: number;
-  sender: "shipper" | "hauler";
-  message: string;
-  created_at: string;
 }

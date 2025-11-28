@@ -1,6 +1,8 @@
 import { Router, Request, Response } from "express";
 import { pool } from "../config/database";
 import authRequired from "../middlewares/auth";
+import { requireRoles } from "../middlewares/rbac";
+import { auditRequest } from "../middlewares/auditLogger";
 import { ensureHaulerProfile } from "../utils/profileHelpers";
 
 type AuthenticatedRequest = Request & {
@@ -75,7 +77,11 @@ function mapTruckRow(row: any) {
 }
 
 // CREATE TRUCK
-router.post("/", async (req: AuthedRequest, res: Response) => {
+router.post(
+  "/",
+  requireRoles(["hauler"], { allowSuperAdminOverride: false }),
+  auditRequest("truck:create"),
+  async (req: AuthedRequest, res: Response) => {
   try {
     const {
       truck_name,
@@ -96,15 +102,8 @@ router.post("/", async (req: AuthedRequest, res: Response) => {
     }
 
     const userId = req.user?.id ? Number(req.user.id) : null;
-    const userType = (req.user?.user_type || "").toUpperCase();
     if (!userId) {
       return res.status(401).json({ message: "Unauthorized" });
-    }
-
-    if (!userType.includes("HAULER") && !userType.includes("SUPER_ADMIN")) {
-      return res
-        .status(403)
-        .json({ message: "Only haulers can post trucks" });
     }
 
     const haulerId = await ensureHaulerProfile(userId);
@@ -155,14 +154,15 @@ router.post("/", async (req: AuthedRequest, res: Response) => {
     console.error("POST /trucks error:", err);
     res.status(500).json({ message: "Failed to create truck" });
   }
-});
+  }
+);
 
 // GET ALL TRUCKS
-router.get("/", async (req: AuthedRequest, res: Response) => {
+router.get("/", requireRoles(["hauler"]), async (req: AuthedRequest, res: Response) => {
   try {
-    const userType = (req.user?.user_type || "").toUpperCase();
-    const isHauler = userType.includes("HAULER");
-    const isAdmin = userType.includes("SUPER_ADMIN");
+    const userRole = req.user?.user_type ?? "";
+    const isHauler = userRole === "hauler";
+    const isAdmin = userRole === "super-admin";
     let haulerId: number | null = null;
     if (isHauler) {
       haulerId = await ensureHaulerProfile(Number(req.user?.id));
@@ -201,7 +201,7 @@ router.get("/", async (req: AuthedRequest, res: Response) => {
 });
 
 // GET truck detail
-router.get("/:id", async (req: AuthedRequest, res: Response) => {
+router.get("/:id", requireRoles(["hauler"]), async (req: AuthedRequest, res: Response) => {
   const id = Number(req.params.id);
   if (Number.isNaN(id)) {
     return res.status(400).json({ message: "Invalid truck id" });
@@ -228,9 +228,9 @@ router.get("/:id", async (req: AuthedRequest, res: Response) => {
     }
 
     const truck = result.rows[0];
-    const userType = (req.user?.user_type || "").toUpperCase();
+    const userRole = req.user?.user_type ?? "";
     if (
-      !userType.includes("SUPER_ADMIN") &&
+      userRole !== "super-admin" &&
       Number(truck.hauler_id) !== (await ensureHaulerProfile(Number(req.user?.id)))
     ) {
       return res.status(403).json({ message: "Forbidden" });
@@ -243,13 +243,16 @@ router.get("/:id", async (req: AuthedRequest, res: Response) => {
   }
 });
 
-router.delete("/:id", async (req: AuthedRequest, res: Response) => {
+router.delete(
+  "/:id",
+  requireRoles(["hauler"], { allowSuperAdminOverride: false }),
+  auditRequest("truck:delete", (req) => `truck:${req.params.id}`),
+  async (req: AuthedRequest, res: Response) => {
   try {
     const id = Number(req.params.id);
     if (Number.isNaN(id)) {
       return res.status(400).json({ message: "Invalid truck id" });
     }
-    const userType = (req.user?.user_type || "").toUpperCase();
     const haulerId = await ensureHaulerProfile(Number(req.user?.id));
     const result = await pool.query(
       `
@@ -268,6 +271,7 @@ router.delete("/:id", async (req: AuthedRequest, res: Response) => {
     console.error("DELETE /trucks/:id error:", err);
     res.status(500).json({ message: "Failed to deactivate truck" });
   }
-});
+  }
+);
 
 export default router;

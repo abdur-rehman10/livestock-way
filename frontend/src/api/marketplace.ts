@@ -111,9 +111,17 @@ export interface PaymentRecord {
   external_charge_id?: string | null;
 }
 
+export interface TripEnvelopeLoad {
+  id: string;
+  status: string;
+  title?: string | null;
+  awarded_offer_id?: string | null;
+  shipper_id?: string | null;
+}
+
 export interface TripEnvelope {
-  trip: TripRecord;
-  load: { id: string; title?: string; status: string };
+  trip: TripRecord | null;
+  load: TripEnvelopeLoad;
   payment: PaymentRecord | null;
 }
 
@@ -150,6 +158,7 @@ export interface TruckAvailability {
   origin_lng: number | null;
   destination_lat: number | null;
   destination_lng: number | null;
+  is_active?: boolean;
 }
 
 export interface LoadBooking {
@@ -385,6 +394,7 @@ export async function createTruckAvailabilityEntry(payload: {
 export async function updateTruckAvailabilityEntry(
   id: string,
   payload: Partial<{
+    truck_id: string | null;
     origin_location_text: string;
     destination_location_text: string | null;
     available_from: string;

@@ -1,0 +1,4 @@
+ALTER TABLE support_tickets
+  ADD COLUMN IF NOT EXISTS resolution_notes TEXT,
+  ADD COLUMN IF NOT EXISTS resolved_by_user_id BIGINT REFERENCES app_users(id) ON DELETE SET NULL,
+  ADD COLUMN IF NOT EXISTS resolved_at TIMESTAMPTZ;

@@ -3,7 +3,7 @@ import jwt from "jsonwebtoken";
 
 interface JwtPayload {
   id: string;
-  user_type?: string;
+  user_type?: string | null;
   company_id?: string | null;
   iat?: number;
   exp?: number;
@@ -31,7 +31,13 @@ export function authRequired(
 
   try {
     const decoded = jwt.verify(token, secret) as JwtPayload;
-    (req as Request & { user?: JwtPayload }).user = decoded;
+    const normalizedRole = decoded.user_type
+      ? decoded.user_type.toLowerCase().replace(/_/g, "-")
+      : null;
+    (req as Request & { user?: JwtPayload }).user = {
+      ...decoded,
+      user_type: normalizedRole,
+    };
     return next();
   } catch (err) {
     return res.status(401).json({ message: "Invalid token" });

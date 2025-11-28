@@ -1,6 +1,8 @@
 import { Router } from "express";
 import { getPaymentsForUser } from "../controllers/paymentController";
 import authRequired from "../middlewares/auth";
+import { requireRoles } from "../middlewares/rbac";
+import { auditRequest } from "../middlewares/auditLogger";
 import {
   fundPayment,
   getPaymentById,
@@ -53,7 +55,12 @@ router.get("/:id", authRequired, async (req, res) => {
 });
 
 // POST /api/payments/:id/fund
-router.post("/:id/fund", authRequired, async (req, res) => {
+router.post(
+  "/:id/fund",
+  authRequired,
+  requireRoles(["shipper"]),
+  auditRequest("escrow:fund", (req) => `payment:${req.params.id}`),
+  async (req, res) => {
   const paymentId = Number(req.params.id);
   if (Number.isNaN(paymentId)) {
     return res.status(400).json({ error: "Invalid payment id" });
@@ -65,8 +72,8 @@ router.post("/:id/fund", authRequired, async (req, res) => {
       return res.status(404).json({ error: "Payment not found" });
     }
 
-    const user = (req as any).user as { id?: string | number; user_type?: string };
-    const userType = user?.user_type?.toLowerCase();
+    const user = req.user;
+    const userType = user?.user_type;
     const actorId = user?.id ? String(user.id) : null;
 
     if (userType !== "shipper" || actorId !== payment.payer_id) {
@@ -89,6 +96,7 @@ router.post("/:id/fund", authRequired, async (req, res) => {
     console.error("POST /api/payments/:id/fund error", error);
     res.status(500).json({ error: "Internal server error" });
   }
-});
+  }
+);
 
 export default router;

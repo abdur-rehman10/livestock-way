@@ -209,6 +209,7 @@ export interface TruckAvailabilityRecord {
   origin_lng: number | null;
   destination_lat: number | null;
   destination_lng: number | null;
+  is_active: boolean;
   created_at: string;
   updated_at: string;
 }
@@ -454,9 +455,218 @@ function mapTruckAvailabilityRow(row: any): TruckAvailabilityRecord {
       row.destination_lng === null || row.destination_lng === undefined
         ? null
         : Number(row.destination_lng),
+    is_active: row.is_active ?? true,
     created_at: row.created_at,
     updated_at: row.updated_at,
   };
+}
+
+const ACTIVE_TRIP_STATUS_VALUES: string[] = [
+  mapTripStatusToDb(TripStatus.PENDING_ESCROW).toLowerCase(),
+  mapTripStatusToDb(TripStatus.READY_TO_START).toLowerCase(),
+  mapTripStatusToDb(TripStatus.IN_PROGRESS).toLowerCase(),
+  mapTripStatusToDb(TripStatus.DELIVERED_AWAITING_CONFIRMATION).toLowerCase(),
+  mapTripStatusToDb(TripStatus.DISPUTED).toLowerCase(),
+  "planned",
+  "assigned",
+  "en_route",
+  "in_progress",
+];
+
+function toNumericId(value: string | number | null | undefined) {
+  if (value === null || value === undefined) return null;
+  const parsed = Number(value);
+  if (Number.isNaN(parsed)) return null;
+  return parsed;
+}
+
+async function truckHasBlockingTrip(truckId: string | null, options: { ignoreTripId?: string } = {}) {
+  const numericTruckId = toNumericId(truckId);
+  if (numericTruckId === null) return false;
+  const params: any[] = [numericTruckId, ACTIVE_TRIP_STATUS_VALUES];
+  let clause = "";
+  const numericTripId = toNumericId(options.ignoreTripId ?? null);
+  if (numericTripId !== null) {
+    clause = `AND id <> $${params.length + 1}`;
+    params.push(numericTripId);
+  }
+  const result = await pool.query(
+    `
+      SELECT 1
+      FROM trips
+      WHERE truck_id = $1
+        AND LOWER(status::text) = ANY($2)
+        ${clause}
+      LIMIT 1
+    `,
+    params
+  );
+  return (result.rowCount ?? 0) > 0;
+}
+
+async function truckHasActiveAvailability(
+  truckId: string | null,
+  options: { ignoreAvailabilityId?: string } = {}
+) {
+  const numericTruckId = toNumericId(truckId);
+  if (numericTruckId === null) return false;
+  const params: any[] = [numericTruckId];
+  let clause = "";
+  const numericAvailabilityId = toNumericId(options.ignoreAvailabilityId ?? null);
+  if (numericAvailabilityId !== null) {
+    clause = `AND id <> $2`;
+    params.push(numericAvailabilityId);
+  }
+  const result = await pool.query(
+    `
+      SELECT 1
+      FROM truck_availability
+      WHERE truck_id = $1
+        AND is_active = TRUE
+        ${clause}
+      LIMIT 1
+    `,
+    params
+  );
+  return (result.rowCount ?? 0) > 0;
+}
+
+async function ensureTruckAvailableForListing(
+  truckId: string | null | undefined,
+  haulerId: string,
+  options: { ignoreAvailabilityId?: string } = {}
+) {
+  if (!truckId) {
+    throw new Error("Select the specific truck you want to post.");
+  }
+  const ownsTruck = await vehicleBelongsToHauler(truckId, haulerId);
+  if (!ownsTruck) {
+    throw new Error("Truck not found for this hauler.");
+  }
+  if (await truckHasBlockingTrip(truckId)) {
+    throw new Error("Truck is currently assigned to an active trip.");
+  }
+  if (await truckHasActiveAvailability(truckId, options)) {
+    throw new Error("Truck already has an active availability listing.");
+  }
+}
+
+async function ensureTruckAvailableForTrip(truckId: string | null) {
+  if (!truckId) {
+    throw new Error("Truck must be assigned before creating the trip.");
+  }
+  if (await truckHasBlockingTrip(truckId)) {
+    throw new Error("Truck is already assigned to another active trip.");
+  }
+}
+
+async function refreshTruckAvailabilityState(availabilityId: string) {
+  const numericAvailabilityId = toNumericId(availabilityId);
+  if (numericAvailabilityId === null) return;
+  const availabilityResult = await pool.query(
+    `
+      SELECT
+        id,
+        truck_id::text,
+        allow_shared,
+        capacity_headcount,
+        capacity_weight_kg,
+        available_until,
+        is_active
+      FROM truck_availability
+      WHERE id = $1
+    `,
+    [numericAvailabilityId]
+  );
+  const availability = availabilityResult.rows[0];
+  if (!availability) {
+    return;
+  }
+
+  let shouldStayActive = true;
+  const now = Date.now();
+
+  if (availability.available_until && new Date(availability.available_until).getTime() < now) {
+    shouldStayActive = false;
+  }
+
+  if (shouldStayActive && (await truckHasBlockingTrip(availability.truck_id))) {
+    shouldStayActive = false;
+  }
+
+  if (shouldStayActive) {
+    const usage = await pool.query(
+      `
+        SELECT
+          COALESCE(
+            SUM(
+              CASE WHEN status IN ($2,$3)
+                THEN COALESCE(requested_headcount,0)
+                ELSE 0
+              END
+            ),
+            0
+          )::numeric AS total_headcount,
+          COALESCE(
+            SUM(
+              CASE WHEN status IN ($2,$3)
+                THEN COALESCE(requested_weight_kg,0)
+                ELSE 0
+              END
+            ),
+            0
+          )::numeric AS total_weight,
+          COUNT(*) FILTER (WHERE status IN ($2,$3))::int AS active_count,
+          COUNT(*) FILTER (WHERE status = $3)::int AS accepted_count
+        FROM load_bookings
+        WHERE truck_availability_id = $1
+      `,
+      [numericAvailabilityId, BookingStatus.REQUESTED, BookingStatus.ACCEPTED]
+    );
+    const usageRow = usage.rows[0] ?? {
+      total_headcount: 0,
+      total_weight: 0,
+      active_count: 0,
+      accepted_count: 0,
+    };
+    const usedHeadcount = Number(usageRow.total_headcount ?? 0);
+    const usedWeight = Number(usageRow.total_weight ?? 0);
+    const activeCount = Number(usageRow.active_count ?? 0);
+    const acceptedCount = Number(usageRow.accepted_count ?? 0);
+
+    if (!availability.allow_shared && activeCount > 0) {
+      shouldStayActive = false;
+    }
+    if (acceptedCount > 0) {
+      shouldStayActive = false;
+    }
+    if (
+      availability.capacity_headcount !== null &&
+      availability.capacity_headcount !== undefined &&
+      usedHeadcount >= Number(availability.capacity_headcount)
+    ) {
+      shouldStayActive = false;
+    }
+    if (
+      availability.capacity_weight_kg !== null &&
+      availability.capacity_weight_kg !== undefined &&
+      usedWeight >= Number(availability.capacity_weight_kg)
+    ) {
+      shouldStayActive = false;
+    }
+  }
+
+  if (availability.is_active !== shouldStayActive) {
+    await pool.query(
+      `
+        UPDATE truck_availability
+        SET is_active = $2,
+            updated_at = NOW()
+        WHERE id = $1
+      `,
+      [numericAvailabilityId, shouldStayActive]
+    );
+  }
 }
 
 function mapBookingRow(row: any): LoadBookingRecord {
@@ -708,11 +918,11 @@ export async function getTruckAvailabilityById(id: string): Promise<TruckAvailab
         origin_lng,
         destination_lat,
         destination_lng,
+        is_active,
         created_at,
         updated_at
       FROM truck_availability
       WHERE id = $1
-        AND is_active = TRUE
     `,
     [id]
   );
@@ -769,6 +979,7 @@ export async function listTruckAvailability(options: {
         origin_lng,
         destination_lat,
         destination_lng,
+        is_active,
         created_at,
         updated_at
       FROM truck_availability
@@ -802,6 +1013,22 @@ export async function createTruckAvailability(input: CreateTruckAvailabilityInpu
   if (!input.origin.trim()) {
     throw new Error("Origin is required");
   }
+  const availableFromDate = new Date(input.availableFrom);
+  if (Number.isNaN(availableFromDate.getTime())) {
+    throw new Error("Available from must be a valid date.");
+  }
+  let availableUntilIso: string | null = null;
+  if (input.availableUntil) {
+    const untilDate = new Date(input.availableUntil);
+    if (Number.isNaN(untilDate.getTime())) {
+      throw new Error("Available until must be a valid date.");
+    }
+    if (untilDate.getTime() < availableFromDate.getTime()) {
+      throw new Error("Available until must be after the start date.");
+    }
+    availableUntilIso = untilDate.toISOString();
+  }
+  const availableFromIso = availableFromDate.toISOString();
   const normalizedHeadcount =
     input.capacityHeadcount === undefined || input.capacityHeadcount === null
       ? null
@@ -836,6 +1063,7 @@ export async function createTruckAvailability(input: CreateTruckAvailabilityInpu
   const originLng = originLngRaw === undefined ? null : originLngRaw;
   const destinationLat = destinationLatRaw === undefined ? null : destinationLatRaw;
   const destinationLng = destinationLngRaw === undefined ? null : destinationLngRaw;
+  await ensureTruckAvailableForListing(input.truckId, input.haulerId);
   if (input.truckId) {
     const conflict = await pool.query(
       `
@@ -914,6 +1142,7 @@ export async function createTruckAvailability(input: CreateTruckAvailabilityInpu
         origin_lng,
         destination_lat,
         destination_lng,
+        is_active,
         created_at,
         updated_at
     `,
@@ -922,8 +1151,8 @@ export async function createTruckAvailability(input: CreateTruckAvailabilityInpu
       input.truckId ?? null,
       input.origin,
       input.destination ?? null,
-      input.availableFrom,
-      input.availableUntil ?? null,
+      availableFromIso,
+      availableUntilIso,
       normalizedHeadcount,
       normalizedWeight,
       input.allowShared ?? true,
@@ -945,6 +1174,22 @@ export async function updateTruckAvailability(
   id: string,
   patch: Partial<CreateTruckAvailabilityInput> & { isActive?: boolean }
 ): Promise<TruckAvailabilityRecord | null> {
+  const availabilityResult = await pool.query(
+    `
+      SELECT
+        hauler_id::text AS hauler_id,
+        truck_id::text AS truck_id,
+        available_from,
+        available_until
+      FROM truck_availability
+      WHERE id = $1
+    `,
+    [id]
+  );
+  const existingAvailability = availabilityResult.rows[0];
+  if (!existingAvailability) {
+    return null;
+  }
   const sets: string[] = [];
   const values: any[] = [];
   const normalizedHeadcount =
@@ -981,6 +1226,34 @@ export async function updateTruckAvailability(
   ) {
     throw new Error("Destination latitude and longitude must both be provided.");
   }
+  let nextAvailableFromIso =
+    existingAvailability.available_from instanceof Date
+      ? existingAvailability.available_from.toISOString()
+      : existingAvailability.available_from ?? null;
+  if (patch.availableFrom !== undefined) {
+    const parsed = new Date(patch.availableFrom);
+    if (Number.isNaN(parsed.getTime())) {
+      throw new Error("Available from must be a valid date.");
+    }
+    nextAvailableFromIso = parsed.toISOString();
+    sets.push(`available_from = $${sets.length + 2}`);
+    values.push(nextAvailableFromIso);
+  }
+  if (patch.availableUntil !== undefined) {
+    let normalized: string | null = null;
+    if (patch.availableUntil !== null) {
+      const parsed = new Date(patch.availableUntil);
+      if (Number.isNaN(parsed.getTime())) {
+        throw new Error("Available until must be a valid date.");
+      }
+      if (nextAvailableFromIso && new Date(nextAvailableFromIso).getTime() > parsed.getTime()) {
+        throw new Error("Available until must be after the start date.");
+      }
+      normalized = parsed.toISOString();
+    }
+    sets.push(`available_until = $${sets.length + 2}`);
+    values.push(normalized);
+  }
   if (patch.origin !== undefined) {
     sets.push(`origin_location_text = $${sets.length + 2}`);
     values.push(patch.origin);
@@ -988,14 +1261,6 @@ export async function updateTruckAvailability(
   if (patch.destination !== undefined) {
     sets.push(`destination_location_text = $${sets.length + 2}`);
     values.push(patch.destination);
-  }
-  if (patch.availableFrom !== undefined) {
-    sets.push(`available_from = $${sets.length + 2}`);
-    values.push(patch.availableFrom);
-  }
-  if (patch.availableUntil !== undefined) {
-    sets.push(`available_until = $${sets.length + 2}`);
-    values.push(patch.availableUntil);
   }
   if (patch.capacityHeadcount !== undefined) {
     sets.push(`capacity_headcount = $${sets.length + 2}`);
@@ -1010,6 +1275,14 @@ export async function updateTruckAvailability(
     values.push(patch.allowShared);
   }
   if (patch.truckId !== undefined) {
+    if (patch.truckId === null) {
+      throw new Error("Truck must be specified.");
+    }
+    if (patch.truckId !== existingAvailability.truck_id) {
+      await ensureTruckAvailableForListing(patch.truckId, existingAvailability.hauler_id, {
+        ignoreAvailabilityId: id,
+      });
+    }
     sets.push(`truck_id = $${sets.length + 2}`);
     values.push(patch.truckId);
   }
@@ -1036,6 +1309,13 @@ export async function updateTruckAvailability(
     const normalized = destinationLngRaw ?? null;
     sets.push(`destination_lng = $${sets.length + 2}`);
     values.push(normalized);
+  }
+  if (patch.isActive === true) {
+    await ensureTruckAvailableForListing(
+      patch.truckId ?? existingAvailability.truck_id,
+      existingAvailability.hauler_id,
+      { ignoreAvailabilityId: id }
+    );
   }
   if (patch.isActive !== undefined) {
     sets.push(`is_active = $${sets.length + 2}`);
@@ -1066,6 +1346,7 @@ export async function updateTruckAvailability(
         origin_lng,
         destination_lat,
         destination_lng,
+        is_active,
         created_at,
         updated_at
     `,
@@ -1539,6 +1820,18 @@ export async function createBookingForAvailability(params: {
   if (!availability) {
     throw new Error("Truck availability not found.");
   }
+  if (!availability.is_active) {
+    throw new Error("This truck listing is no longer active.");
+  }
+  if (!availability.truck_id) {
+    throw new Error(
+      "Hauler must attach a specific truck to this listing before bookings can be requested."
+    );
+  }
+  await ensureTruckAvailableForTrip(availability.truck_id);
+  if (await loadHasActiveBooking(params.loadId)) {
+    throw new Error("Load already has an active booking.");
+  }
   let loadDetails: Awaited<ReturnType<typeof getLoadDetails>> | null = null;
   async function ensureLoadDetailsFetched() {
     if (!loadDetails) {
@@ -1594,7 +1887,9 @@ export async function createBookingForAvailability(params: {
       params.shipperUserId,
     ]
   );
-  return mapBookingRow(insert.rows[0]);
+  const bookingRow = mapBookingRow(insert.rows[0]);
+  await refreshTruckAvailabilityState(params.truckAvailabilityId);
+  return bookingRow;
 }
 
 export async function getBookingById(id: string): Promise<LoadBookingRecord | null> {
@@ -1644,6 +1939,7 @@ async function createTripFromTruckBooking(
   if (!availability) {
     throw new Error("Truck availability not found");
   }
+  await ensureTruckAvailableForTrip(availability.truck_id);
   const loadRow = await getLoadById(booking.load_id);
   if (!loadRow) {
     throw new Error("Load not found");
@@ -1734,6 +2030,7 @@ async function createTripFromTruckBooking(
     `,
     [booking.load_id, mapLoadStatusToDb(LoadStatus.AWAITING_ESCROW), haulerUserId]
   );
+  await refreshTruckAvailabilityState(availability.id);
   return { trip, payment };
 }
 
@@ -1754,6 +2051,9 @@ export async function respondToBooking(params: {
   if (params.action === "REJECT") {
     const updated = await updateBookingStatus(booking.id, BookingStatus.REJECTED, params.actingUserId);
     if (!updated) throw new Error("Failed to update booking");
+    if (booking.truck_availability_id) {
+      await refreshTruckAvailabilityState(booking.truck_availability_id);
+    }
     return { booking: updated };
   }
 
@@ -1791,6 +2091,9 @@ export async function respondToBooking(params: {
   const updated = await updateBookingStatus(booking.id, BookingStatus.ACCEPTED, params.actingUserId);
   if (!updated) {
     throw new Error("Failed to update booking");
+  }
+  if (booking.truck_availability_id) {
+    await refreshTruckAvailabilityState(booking.truck_availability_id);
   }
   return { booking: updated, trip, payment };
 }
@@ -1872,42 +2175,77 @@ export async function acceptOfferAndCreateTrip(params: {
   const client = await pool.connect();
 
   async function ensureTruckId(): Promise<string> {
-    const existing = await client.query(
+    let truckRows = (
+      await client.query(
+        `
+          SELECT id::text
+          FROM trucks
+          WHERE hauler_id = $1
+          ORDER BY updated_at DESC
+        `,
+        [params.haulerId]
+      )
+    ).rows;
+    if (truckRows.length === 0) {
+      const inserted = await client.query(
+        `
+          INSERT INTO trucks (
+            hauler_id,
+            plate_number,
+            truck_type,
+            status,
+            created_at,
+            updated_at
+          )
+          VALUES (
+            $1,
+            $2,
+            'mixed_livestock',
+            'active',
+            NOW(),
+            NOW()
+          )
+          RETURNING id::text
+        `,
+        [params.haulerId, `AUTO-${Date.now()}`]
+      );
+      truckRows = inserted.rows;
+    }
+    const busyTripRows = await client.query(
       `
-        SELECT id::text
-        FROM trucks
-        WHERE hauler_id = $1
-        ORDER BY updated_at DESC
-        LIMIT 1
+        SELECT DISTINCT truck_id::text AS truck_id
+        FROM trips
+        WHERE truck_id IS NOT NULL
+          AND hauler_id = $1
+          AND status = ANY($2)
+      `,
+      [params.haulerId, ACTIVE_TRIP_STATUS_VALUES]
+    );
+    const busyAvailabilityRows = await client.query(
+      `
+        SELECT DISTINCT truck_id::text AS truck_id
+        FROM truck_availability
+        WHERE truck_id IS NOT NULL
+          AND hauler_id = $1
+          AND is_active = TRUE
       `,
       [params.haulerId]
     );
-    if (existing.rowCount && existing.rows[0]?.id) {
-      return existing.rows[0].id;
+    const busySet = new Set<string>();
+    busyTripRows.rows.forEach((row) => {
+      if (row?.truck_id) busySet.add(row.truck_id);
+    });
+    busyAvailabilityRows.rows.forEach((row) => {
+      if (row?.truck_id) busySet.add(row.truck_id);
+    });
+    const available = truckRows.find((row) => row?.id && !busySet.has(row.id));
+    if (!available?.id) {
+      throw new Error(
+        "All trucks are already booked or posted as unavailable. Update your fleet availability before accepting this load."
+      );
     }
-    const inserted = await client.query(
-      `
-        INSERT INTO trucks (
-          hauler_id,
-          plate_number,
-          truck_type,
-          status,
-          created_at,
-          updated_at
-        )
-        VALUES (
-          $1,
-          $2,
-          'mixed_livestock',
-          'active',
-          NOW(),
-          NOW()
-        )
-        RETURNING id::text
-      `,
-      [params.haulerId, `AUTO-${Date.now()}`]
-    );
-    return inserted.rows[0].id;
+    await ensureTruckAvailableForTrip(available.id);
+    return available.id;
   }
 
   async function ensureDriverId(): Promise<string | null> {
@@ -2799,7 +3137,7 @@ export async function createPaymentDispute(input: CreateDisputeInput): Promise<D
         requested_action
       )
       VALUES (
-        $1,$2,$3,$4,$5,$6,$7
+        $1,$2,$3,$4,$5,$6,$7,$8
       )
       RETURNING *
     `,
@@ -2873,29 +3211,28 @@ export async function addDisputeMessage(input: {
   disputeId: string;
   senderUserId: string;
   senderRole: string;
+  recipientRole?: string | null;
   text?: string;
   attachments?: unknown[];
 }) {
   const result = await pool.query(
     `
       INSERT INTO dispute_messages (
-        id,
         dispute_id,
         sender_user_id,
         sender_role,
+        recipient_role,
         text,
         attachments
       )
-      VALUES (
-        gen_random_uuid(),
-        $1,$2,$3,$4,$5
-      )
+      VALUES ($1,$2,$3,$4,$5,$6)
       RETURNING *
     `,
     [
       input.disputeId,
       input.senderUserId,
       input.senderRole,
+      input.recipientRole ?? "ALL",
       input.text ?? null,
       JSON.stringify(input.attachments ?? []),
     ]

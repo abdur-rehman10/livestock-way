@@ -13,6 +13,7 @@ import { normalizeLoadStatus } from "../lib/status";
 import { Card, CardContent } from "../components/ui/card";
 import { Button } from "../components/ui/button";
 import { Badge } from "../components/ui/badge";
+import { Label } from "../components/ui/label";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -30,6 +31,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "../components/ui/dialog";
+import { Textarea } from "../components/ui/textarea";
 import { Separator } from "../components/ui/separator";
 import {
   ArrowRight,
@@ -53,8 +55,20 @@ import {
   fetchTripByLoadId as fetchMarketplaceTripByLoad,
   startMarketplaceTrip,
   markMarketplaceTripDelivered,
+  fetchTripDisputes,
   type TripEnvelope,
+  type DisputeRecord,
 } from "../api/marketplace";
+import {
+  fetchDisputeMessages,
+  sendDisputeMessage,
+  type DisputeMessage,
+} from "../api/disputes";
+import {
+  filterMessagesForPerspective,
+  formatDisputeRoleLabel,
+  normalizeDisputeRole,
+} from "../lib/disputeMessages";
 
 const FILTERS = ["all", "assigned", "in_transit", "delivered", "pending"] as const;
 type FilterOption = (typeof FILTERS)[number];
@@ -109,10 +123,23 @@ export default function HaulerMyLoads() {
     type: null,
     load: null,
   });
-  const [detailsDialog, setDetailsDialog] = useState<DetailsDialogState>({
-    open: false,
-    load: null,
-  });
+const [detailsDialog, setDetailsDialog] = useState<DetailsDialogState>({
+  open: false,
+  load: null,
+});
+const [disputeDialog, setDisputeDialog] = useState<{
+  open: boolean;
+  loadId: number | null;
+  tripId: number | null;
+  disputes: DisputeRecord[];
+  loading: boolean;
+}>({ open: false, loadId: null, tripId: null, disputes: [], loading: false });
+const [selectedDisputeId, setSelectedDisputeId] = useState<string | null>(null);
+const [disputeMessages, setDisputeMessages] = useState<DisputeMessage[]>([]);
+const [disputeMessagesLoading, setDisputeMessagesLoading] = useState(false);
+const [disputeMessageError, setDisputeMessageError] = useState<string | null>(null);
+const [disputeMessageDraft, setDisputeMessageDraft] = useState("");
+const [disputeMessageSending, setDisputeMessageSending] = useState(false);
   const loadsRef = useRef<Load[]>([]);
   const tripContextCache = useRef<Record<number, TripEnvelope | null>>({});
   const dialogLoad = detailsDialog.load;
@@ -176,19 +203,108 @@ export default function HaulerMyLoads() {
     return loads.filter((load) => normalizeLoadStatus(load.status) === filter);
   }, [filter, loads]);
 
-  const getTripContext = useCallback(async (loadId: number) => {
-    if (!tripContextCache.current[loadId]) {
-      try {
-        const ctx = await fetchMarketplaceTripByLoad(loadId);
-        tripContextCache.current[loadId] = ctx;
+const getTripContext = useCallback(async (loadId: number) => {
+  if (!tripContextCache.current[loadId]) {
+    try {
+      const ctx = await fetchMarketplaceTripByLoad(loadId);
+      tripContextCache.current[loadId] = ctx;
       } catch (err) {
         console.error("failed to fetch trip context", err);
         tripContextCache.current[loadId] = null;
       }
     }
-    return tripContextCache.current[loadId];
-  }, []);
+  return tripContextCache.current[loadId];
+}, []);
 
+const openDisputeDialog = async (loadId: number) => {
+  const context = await getTripContext(loadId);
+  const tripId = context?.trip?.id;
+  if (!tripId) {
+    toast.error("Trip has not been created yet.");
+    return;
+  }
+  setDisputeDialog({
+    open: true,
+    loadId,
+    tripId: Number(tripId),
+    disputes: [],
+    loading: true,
+  });
+  try {
+    const resp = await fetchTripDisputes(Number(tripId));
+    setDisputeDialog((prev) => ({ ...prev, disputes: resp.items, loading: false }));
+  } catch (err: any) {
+    setDisputeDialog((prev) => ({ ...prev, loading: false }));
+    toast.error(err?.message ?? "Failed to load disputes");
+  }
+};
+
+const loadDisputeMessages = useCallback(async (disputeId: string) => {
+  setDisputeMessagesLoading(true);
+  setDisputeMessageError(null);
+  try {
+    const resp = await fetchDisputeMessages(disputeId);
+    setDisputeMessages(resp.items ?? []);
+  } catch (err: any) {
+    setDisputeMessageError(err?.message ?? "Failed to load messages");
+  } finally {
+    setDisputeMessagesLoading(false);
+  }
+}, []);
+
+const handleSelectDispute = useCallback(
+  (disputeId: string) => {
+    setSelectedDisputeId(disputeId);
+    loadDisputeMessages(disputeId);
+  },
+  [loadDisputeMessages]
+);
+
+const filteredDisputeMessages = useMemo(
+  () => filterMessagesForPerspective(disputeMessages, "hauler"),
+  [disputeMessages]
+);
+
+const handleSendDisputeMessage = async () => {
+  if (!selectedDisputeId || !disputeMessageDraft.trim()) return;
+  try {
+    setDisputeMessageSending(true);
+    await sendDisputeMessage(selectedDisputeId, { text: disputeMessageDraft.trim() });
+    setDisputeMessageDraft("");
+    await loadDisputeMessages(selectedDisputeId);
+  } catch (err: any) {
+    setDisputeMessageError(err?.message ?? "Failed to send message");
+  } finally {
+    setDisputeMessageSending(false);
+  }
+};
+
+useEffect(() => {
+  if (!disputeDialog.open) {
+    setSelectedDisputeId(null);
+    setDisputeMessages([]);
+    setDisputeMessageDraft("");
+    setDisputeMessageError(null);
+    setDisputeMessagesLoading(false);
+    return;
+  }
+}, [disputeDialog.open]);
+
+useEffect(() => {
+  if (!disputeDialog.open) return;
+  if (disputeDialog.disputes.length === 0) {
+    setSelectedDisputeId(null);
+    setDisputeMessages([]);
+    return;
+  }
+  if (selectedDisputeId && disputeDialog.disputes.some((d) => d.id === selectedDisputeId)) {
+    return;
+  }
+  const first = disputeDialog.disputes[0];
+  setSelectedDisputeId(first.id);
+  loadDisputeMessages(first.id);
+  setDisputeMessageDraft("");
+}, [disputeDialog.disputes, disputeDialog.open, loadDisputeMessages, selectedDisputeId]);
   const openConfirm = (type: "start" | "deliver", load: Load) => {
     setConfirmDialog({ open: true, type, load });
   };
@@ -461,6 +577,13 @@ export default function HaulerMyLoads() {
                     >
                       View Details
                     </Button>
+                    <Button
+                      variant="outline"
+                      className="w-full rounded-full"
+                      onClick={() => openDisputeDialog(loadId)}
+                    >
+                      Disputes
+                    </Button>
                   </div>
                 </CardContent>
               </Card>
@@ -499,6 +622,142 @@ export default function HaulerMyLoads() {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      <Dialog
+        open={disputeDialog.open}
+        onOpenChange={(open) => setDisputeDialog((prev) => ({ ...prev, open }))}
+      >
+        <DialogContent className="max-w-3xl">
+          <DialogHeader>
+            <DialogTitle>Disputes for Load #{disputeDialog.loadId}</DialogTitle>
+          </DialogHeader>
+          {disputeDialog.loading ? (
+            <p className="text-sm text-slate-500">Loading disputes…</p>
+          ) : disputeDialog.disputes.length === 0 ? (
+            <div className="rounded-2xl border border-dashed border-slate-200 p-6 text-center text-sm text-slate-500">
+              No disputes have been filed for this trip yet.
+            </div>
+          ) : (
+            <div className="grid gap-6 md:grid-cols-[minmax(0,1.1fr)_minmax(0,1.6fr)]">
+              <div className="space-y-3">
+                <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+                  Dispute tickets
+                </p>
+                <div className="space-y-2 max-h-64 overflow-y-auto pr-1">
+                  {disputeDialog.disputes.map((dispute) => {
+                    const isActive = selectedDisputeId === dispute.id;
+                    return (
+                      <button
+                        key={dispute.id}
+                        type="button"
+                        onClick={() => handleSelectDispute(dispute.id)}
+                        className={[
+                          "w-full rounded-2xl border p-3 text-left text-xs transition",
+                          isActive
+                            ? "border-[#29CA8D] bg-[#29CA8D]/5 text-slate-900"
+                            : "border-slate-200 text-slate-600 hover:border-slate-300",
+                        ].join(" ")}
+                      >
+                        <p className="font-semibold text-slate-900">
+                          {dispute.reason_code || `Dispute #${dispute.id}`}
+                        </p>
+                        <p className="text-[11px] uppercase tracking-wide text-slate-500">
+                          Status: {dispute.status.replace(/_/g, " ")}
+                        </p>
+                        {dispute.requested_action && (
+                          <p className="mt-1 text-[11px] text-slate-500">
+                            Requested: {dispute.requested_action}
+                          </p>
+                        )}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+
+              <div className="space-y-3">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+                      Conversation with Compliance
+                    </p>
+                    <p className="text-[11px] text-slate-500">
+                      Only shows messages you or LivestockWay share with haulers.
+                    </p>
+                  </div>
+                  {selectedDisputeId && (
+                    <Badge variant="secondary" className="text-[10px] uppercase">
+                      Ticket #{selectedDisputeId}
+                    </Badge>
+                  )}
+                </div>
+
+                <div className="h-64 overflow-y-auto rounded-2xl border border-slate-200 bg-slate-50 p-3">
+                  {!selectedDisputeId ? (
+                    <p className="text-xs text-slate-500">
+                      Select a ticket on the left to view its messages.
+                    </p>
+                  ) : disputeMessagesLoading ? (
+                    <p className="text-xs text-slate-500">Loading conversation…</p>
+                  ) : filteredDisputeMessages.length === 0 ? (
+                    <p className="text-xs text-slate-500">
+                      No messages yet. Send an update to the admin team below.
+                    </p>
+                  ) : (
+                    <div className="space-y-2">
+                      {filteredDisputeMessages.map((msg) => (
+                        <div
+                          key={msg.id}
+                          className="rounded-xl border border-white bg-white p-2 text-sm shadow-sm"
+                        >
+                          <div className="flex items-center justify-between text-[11px] text-slate-500">
+                            <span className="font-semibold text-slate-900 text-xs">
+                              {formatDisputeRoleLabel(msg.sender_role)}
+                            </span>
+                            <span>{new Date(msg.created_at).toLocaleString()}</span>
+                          </div>
+                          {normalizeDisputeRole(msg.sender_role).startsWith("super-admin") && (
+                            <p className="text-[11px] text-slate-500">
+                              → {formatDisputeRoleLabel(msg.recipient_role || "hauler")}
+                            </p>
+                          )}
+                          {msg.text && <p className="mt-1 text-slate-700">{msg.text}</p>}
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+
+                {selectedDisputeId && (
+                  <div className="space-y-2">
+                    {disputeMessageError && (
+                      <p className="text-xs text-red-600">{disputeMessageError}</p>
+                    )}
+                    <Label className="text-xs text-slate-500">
+                      Send an update to Super Admin
+                    </Label>
+                    <Textarea
+                      rows={3}
+                      value={disputeMessageDraft}
+                      onChange={(e) => setDisputeMessageDraft(e.target.value)}
+                      placeholder="Share clarifications, supporting information, or your proposed resolution…"
+                    />
+                    <div className="flex justify-end">
+                      <Button
+                        size="sm"
+                        onClick={handleSendDisputeMessage}
+                        disabled={!disputeMessageDraft.trim() || disputeMessageSending}
+                      >
+                        {disputeMessageSending ? "Sending…" : "Send Message"}
+                      </Button>
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
 
       <Dialog
         open={detailsDialog.open}

@@ -2,6 +2,7 @@ import { Router } from "express";
 import bcrypt from "bcrypt";
 import jwt from "jsonwebtoken";
 import { pool } from "../config/database";
+import { logAuditEvent } from "../services/auditLogService";
 
 const router = Router();
 
@@ -83,6 +84,16 @@ router.post("/register", async (req, res) => {
       account_status: user.rows[0].account_status,
     });
 
+    await logAuditEvent({
+      action: "user_registered",
+      eventType: "user:register",
+      userId: user.rows[0].id,
+      userRole: user.rows[0].user_type ?? null,
+      resource: "app_users",
+      metadata: { account_mode, company_name: companyValue ?? undefined },
+      ipAddress: req.ip || null,
+    });
+
     res.json({
       message: "Registration successful",
       user: user.rows[0],
@@ -105,6 +116,13 @@ router.post("/login", async (req, res) => {
     );
 
     if (result.rowCount === 0) {
+      await logAuditEvent({
+        action: "login_failed",
+        eventType: "auth:failed",
+        resource: "auth",
+        metadata: { reason: "user_not_found", email },
+        ipAddress: req.ip || null,
+      });
       return res.status(404).json({ message: "User not found" });
     }
 
@@ -112,6 +130,15 @@ router.post("/login", async (req, res) => {
 
     const match = await bcrypt.compare(password, user.password_hash);
     if (!match) {
+      await logAuditEvent({
+        action: "login_failed",
+        eventType: "auth:failed",
+        userId: user.id,
+        userRole: user.user_type ?? null,
+        resource: "auth",
+        metadata: { reason: "invalid_password" },
+        ipAddress: req.ip || null,
+      });
       return res.status(401).json({ message: "Invalid password" });
     }
 
@@ -119,6 +146,16 @@ router.post("/login", async (req, res) => {
       id: user.id,
       user_type: user.user_type,
       account_status: user.account_status,
+    });
+
+    await logAuditEvent({
+      action: "login_success",
+      eventType: "auth:success",
+      userId: user.id,
+      userRole: user.user_type ?? null,
+      resource: "auth",
+      metadata: { method: "password" },
+      ipAddress: req.ip || null,
     });
 
     res.json({
