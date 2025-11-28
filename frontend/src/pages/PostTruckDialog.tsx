@@ -1,364 +1,366 @@
-import { useState } from 'react';
-import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '../components/ui/dialog';
-import { Button } from '../components/ui/button';
-import { Input } from '../components/ui/input';
-import { Label } from '../components/ui/label';
-import { Textarea } from '../components/ui/textarea';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../components/ui/select';
-import { Calendar } from '../components/ui/calendar';
-import { Popover, PopoverContent, PopoverTrigger } from '../components/ui/popover';
-import { Badge } from '../components/ui/badge';
-import { CalendarIcon, MapPin, Truck, DollarSign, X } from 'lucide-react';
-import { toast } from 'sonner';
-import { format } from 'date-fns';
+import { useEffect, useMemo, useState } from "react";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from "../components/ui/dialog";
+import { Button } from "../components/ui/button";
+import { Input } from "../components/ui/input";
+import { Label } from "../components/ui/label";
+import { Textarea } from "../components/ui/textarea";
+import { Switch } from "../components/ui/switch";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../components/ui/select";
+import { toast } from "sonner";
+import {
+  createTruckAvailabilityEntry,
+  fetchHaulerVehicles,
+  type HaulerVehicleOption,
+} from "../api/marketplace";
 
-interface PostTruckDialogProps {
-  open?: boolean;
-  onOpenChange?: (open: boolean) => void;
+type PostTruckDialogProps = {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  onPosted?: () => void;
+};
+
+const nowLocal = () => new Date().toISOString().slice(0, 16);
+
+function parseNumber(value: string, allowNull = true): number | null {
+  if (!value || value.trim() === "") return allowNull ? null : 0;
+  const num = Number(value);
+  if (Number.isNaN(num)) throw new Error("Enter a valid number.");
+  return num;
 }
 
-export function PostTruckDialog({ open = false, onOpenChange }: PostTruckDialogProps) {
-  const [step, setStep] = useState(1);
-  const [availableDate, setAvailableDate] = useState<Date>();
-  const [selectedRoute, setSelectedRoute] = useState<string[]>([]);
-  
-  // Form state
-  const [formData, setFormData] = useState({
-    vehicleId: '',
-    driverId: '',
-    origin: '',
-    destination: '',
-    capacity: '',
-    livestockType: [] as string[],
-    ratePerMile: '',
-    minimumRate: '',
-    notes: '',
+function parseCoordinate(value: string, label: string): number | null {
+  if (!value || value.trim() === "") return null;
+  const num = Number(value);
+  if (Number.isNaN(num)) throw new Error(`${label} must be a number.`);
+  return num;
+}
+
+export function PostTruckDialog({ open, onOpenChange, onPosted }: PostTruckDialogProps) {
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [trucks, setTrucks] = useState<HaulerVehicleOption[]>([]);
+  const [trucksLoading, setTrucksLoading] = useState(false);
+
+  const [form, setForm] = useState({
+    truck_id: "",
+    origin: "",
+    destination: "",
+    available_from: nowLocal(),
+    available_until: "",
+    capacity_headcount: "",
+    capacity_weight_kg: "",
+    origin_lat: "",
+    origin_lng: "",
+    destination_lat: "",
+    destination_lng: "",
+    allow_shared: true,
+    notes: "",
   });
 
-  const livestockTypes = [
-    'Cattle', 'Sheep', 'Pigs', 'Goats', 'Horses', 'Poultry'
-  ];
+  const primaryTruckLabel = useMemo(() => {
+    if (!form.truck_id) return "";
+    const t = trucks.find((truck) => String(truck.id) === String(form.truck_id));
+    if (!t) return "";
+    return t.truck_name || t.plate_number || `Truck #${t.id}`;
+  }, [form.truck_id, trucks]);
 
-  const vehicles = [
-    { id: 'TRK-001', name: 'TRK-001 - Gooseneck Trailer', capacity: '50 head' },
-    { id: 'TRK-002', name: 'TRK-002 - Semi Livestock', capacity: '100 head' },
-    { id: 'TRK-003', name: 'TRK-003 - Straight Truck', capacity: '30 head' },
-  ];
+  useEffect(() => {
+    if (!open) return;
+    let active = true;
+    setTrucksLoading(true);
+    fetchHaulerVehicles()
+      .then((resp) => {
+        if (!active) return;
+        const items = resp.items ?? [];
+        setTrucks(items);
+        if (!form.truck_id && items[0]?.id) {
+          setForm((prev) => ({ ...prev, truck_id: String(items[0].id) }));
+        }
+      })
+      .catch((err: any) => {
+        if (!active) return;
+        setError(err?.message ?? "Failed to load your trucks");
+      })
+      .finally(() => {
+        if (active) setTrucksLoading(false);
+      });
+    return () => {
+      active = false;
+    };
+  }, [open, form.truck_id]);
 
-  const drivers = [
-    { id: 'DRV-001', name: 'John Smith' },
-    { id: 'DRV-002', name: 'Maria Garcia' },
-    { id: 'DRV-003', name: 'Robert Johnson' },
-  ];
-
-  const handleLivestockToggle = (type: string) => {
-    setFormData(prev => ({
-      ...prev,
-      livestockType: prev.livestockType.includes(type)
-        ? prev.livestockType.filter(t => t !== type)
-        : [...prev.livestockType, type]
-    }));
-  };
-
-  const handleNext = () => {
-    if (step === 1) {
-      if (!formData.vehicleId || !formData.driverId) {
-        toast.error('Please select both vehicle and driver');
-        return;
-      }
-    } else if (step === 2) {
-      if (!formData.origin || !formData.destination || !availableDate) {
-        toast.error('Please fill in all route details');
-        return;
-      }
+  const handleSubmit = async () => {
+    setError(null);
+    if (!form.truck_id) {
+      setError("Select one of your trucks.");
+      return;
     }
-    setStep(step + 1);
-  };
+    if (!form.origin.trim()) {
+      setError("Origin is required.");
+      return;
+    }
+    const availableFromDate = new Date(form.available_from);
+    if (Number.isNaN(availableFromDate.getTime())) {
+      setError("Available from must be a valid date/time.");
+      return;
+    }
+    let availableUntilIso: string | null = null;
+    if (form.available_until) {
+      const until = new Date(form.available_until);
+      if (Number.isNaN(until.getTime())) {
+        setError("Available until must be a valid date/time.");
+        return;
+      }
+      if (until.getTime() < availableFromDate.getTime()) {
+        setError("End date must be after the start date.");
+        return;
+      }
+      availableUntilIso = until.toISOString();
+    }
 
-  const handleSubmit = () => {
-    if (!formData.ratePerMile || formData.livestockType.length === 0) {
-      toast.error('Please complete all required fields');
+    let capacityHeadcount: number | null = null;
+    let capacityWeight: number | null = null;
+    let originLat: number | null = null;
+    let originLng: number | null = null;
+    let destinationLat: number | null = null;
+    let destinationLng: number | null = null;
+    try {
+      capacityHeadcount = parseNumber(form.capacity_headcount);
+      capacityWeight = parseNumber(form.capacity_weight_kg);
+      originLat = parseCoordinate(form.origin_lat, "Origin latitude");
+      originLng = parseCoordinate(form.origin_lng, "Origin longitude");
+      destinationLat = parseCoordinate(form.destination_lat, "Destination latitude");
+      destinationLng = parseCoordinate(form.destination_lng, "Destination longitude");
+    } catch (err: any) {
+      setError(err?.message ?? "Invalid values.");
+      return;
+    }
+    if ((originLat !== null && originLng === null) || (originLat === null && originLng !== null)) {
+      setError("Provide both origin latitude and longitude.");
+      return;
+    }
+    if (
+      (destinationLat !== null && destinationLng === null) ||
+      (destinationLat === null && destinationLng !== null)
+    ) {
+      setError("Provide both destination latitude and longitude.");
       return;
     }
 
-    // Mock submission
-    toast.success('Truck availability posted successfully!', {
-      description: `${formData.vehicleId} is now listed on the marketplace`,
-    });
-    
-    // Reset and close
-    setStep(1);
-    setFormData({
-      vehicleId: '',
-      driverId: '',
-      origin: '',
-      destination: '',
-      capacity: '',
-      livestockType: [],
-      ratePerMile: '',
-      minimumRate: '',
-      notes: '',
-    });
-    setAvailableDate(undefined);
-    onOpenChange?.(false);
-  };
-
-  const renderStepContent = () => {
-    switch (step) {
-      case 1:
-        return (
-          <div className="space-y-4">
-            <div className="space-y-2">
-              <Label>Select Vehicle *</Label>
-              <Select value={formData.vehicleId} onValueChange={(value) => setFormData({ ...formData, vehicleId: value })}>
-                <SelectTrigger>
-                  <SelectValue placeholder="Choose a vehicle" />
-                </SelectTrigger>
-                <SelectContent>
-                  {vehicles.map(vehicle => (
-                    <SelectItem key={vehicle.id} value={vehicle.id}>
-                      <div className="flex items-center gap-2">
-                        <Truck className="w-4 h-4" />
-                        <span>{vehicle.name}</span>
-                        <span className="text-xs text-gray-500">({vehicle.capacity})</span>
-                      </div>
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-
-            <div className="space-y-2">
-              <Label>Assign Driver *</Label>
-              <Select value={formData.driverId} onValueChange={(value) => setFormData({ ...formData, driverId: value })}>
-                <SelectTrigger>
-                  <SelectValue placeholder="Choose a driver" />
-                </SelectTrigger>
-                <SelectContent>
-                  {drivers.map(driver => (
-                    <SelectItem key={driver.id} value={driver.id}>
-                      {driver.name}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-
-            <div className="space-y-2">
-              <Label>Load Capacity</Label>
-              <Input
-                type="number"
-                placeholder="e.g., 50"
-                value={formData.capacity}
-                onChange={(e) => setFormData({ ...formData, capacity: e.target.value })}
-              />
-              <p className="text-xs text-gray-500">Number of head (optional - will use vehicle default)</p>
-            </div>
-          </div>
-        );
-
-      case 2:
-        return (
-          <div className="space-y-4">
-            <div className="space-y-2">
-              <Label>Origin (Pickup) *</Label>
-              <div className="relative">
-                <MapPin className="absolute left-3 top-3 h-4 w-4 text-gray-400" />
-                <Input
-                  className="pl-9"
-                  placeholder="e.g., Austin, TX"
-                  value={formData.origin}
-                  onChange={(e) => setFormData({ ...formData, origin: e.target.value })}
-                />
-              </div>
-            </div>
-
-            <div className="space-y-2">
-              <Label>Destination (Dropoff) *</Label>
-              <div className="relative">
-                <MapPin className="absolute left-3 top-3 h-4 w-4 text-gray-400" />
-                <Input
-                  className="pl-9"
-                  placeholder="e.g., Dallas, TX"
-                  value={formData.destination}
-                  onChange={(e) => setFormData({ ...formData, destination: e.target.value })}
-                />
-              </div>
-            </div>
-
-            <div className="space-y-2">
-              <Label>Available Date *</Label>
-              <Popover>
-                <PopoverTrigger asChild>
-                  <Button
-                    variant="outline"
-                    className="w-full justify-start text-left"
-                  >
-                    <CalendarIcon className="mr-2 h-4 w-4" />
-                    {availableDate ? format(availableDate, 'PPP') : 'Select date'}
-                  </Button>
-                </PopoverTrigger>
-                <PopoverContent className="w-auto p-0" align="start">
-                  <Calendar
-                    mode="single"
-                    selected={availableDate}
-                    onSelect={setAvailableDate}
-                    initialFocus
-                  />
-                </PopoverContent>
-              </Popover>
-            </div>
-
-            <div className="p-3 bg-blue-50 border border-blue-200 rounded-lg">
-              <p className="text-sm text-blue-900">
-                💡 <span>Tip:</span> Setting specific routes helps shippers find you faster!
-              </p>
-            </div>
-          </div>
-        );
-
-      case 3:
-        return (
-          <div className="space-y-4">
-            <div className="space-y-2">
-              <Label>Livestock Types Accepted *</Label>
-              <div className="flex flex-wrap gap-2">
-                {livestockTypes.map(type => (
-                  <Badge
-                    key={type}
-                    variant={formData.livestockType.includes(type) ? 'default' : 'outline'}
-                    className={`cursor-pointer ${
-                      formData.livestockType.includes(type)
-                        ? 'bg-[#29CA8D] hover:bg-[#24b67d]'
-                        : 'hover:bg-gray-100'
-                    }`}
-                    onClick={() => handleLivestockToggle(type)}
-                  >
-                    {type}
-                  </Badge>
-                ))}
-              </div>
-            </div>
-
-            <div className="grid grid-cols-2 gap-4">
-              <div className="space-y-2">
-                <Label>Rate per Mile *</Label>
-                <div className="relative">
-                  <DollarSign className="absolute left-3 top-3 h-4 w-4 text-gray-400" />
-                  <Input
-                    type="number"
-                    step="0.01"
-                    className="pl-9"
-                    placeholder="2.85"
-                    value={formData.ratePerMile}
-                    onChange={(e) => setFormData({ ...formData, ratePerMile: e.target.value })}
-                  />
-                </div>
-              </div>
-
-              <div className="space-y-2">
-                <Label>Minimum Rate</Label>
-                <div className="relative">
-                  <DollarSign className="absolute left-3 top-3 h-4 w-4 text-gray-400" />
-                  <Input
-                    type="number"
-                    step="1"
-                    className="pl-9"
-                    placeholder="500"
-                    value={formData.minimumRate}
-                    onChange={(e) => setFormData({ ...formData, minimumRate: e.target.value })}
-                  />
-                </div>
-              </div>
-            </div>
-
-            <div className="space-y-2">
-              <Label>Additional Notes</Label>
-              <Textarea
-                placeholder="Special requirements, equipment, certifications, etc."
-                rows={3}
-                value={formData.notes}
-                onChange={(e) => setFormData({ ...formData, notes: e.target.value })}
-              />
-            </div>
-
-            <div className="p-3 bg-green-50 border border-green-200 rounded-lg">
-              <p className="text-sm text-green-900">
-                ✅ <span>Almost done!</span> Your truck will be visible to shippers immediately.
-              </p>
-            </div>
-          </div>
-        );
-
-      default:
-        return null;
+    try {
+      setSaving(true);
+      await createTruckAvailabilityEntry({
+        truck_id: form.truck_id,
+        origin_location_text: form.origin,
+        destination_location_text: form.destination || null,
+        available_from: availableFromDate.toISOString(),
+        available_until: availableUntilIso,
+        capacity_headcount: capacityHeadcount,
+        capacity_weight_kg: capacityWeight,
+        allow_shared: form.allow_shared,
+        notes: form.notes || null,
+        origin_lat: originLat,
+        origin_lng: originLng,
+        destination_lat: destinationLat,
+        destination_lng: destinationLng,
+      });
+      toast.success("Truck availability posted.", {
+        description: primaryTruckLabel ? `${primaryTruckLabel} is now on the board.` : undefined,
+      });
+      onPosted?.();
+      onOpenChange(false);
+      setForm({
+        truck_id: trucks[0]?.id ? String(trucks[0].id) : "",
+        origin: "",
+        destination: "",
+        available_from: nowLocal(),
+        available_until: "",
+        capacity_headcount: "",
+        capacity_weight_kg: "",
+        origin_lat: "",
+        origin_lng: "",
+        destination_lat: "",
+        destination_lng: "",
+        allow_shared: true,
+        notes: "",
+      });
+    } catch (err: any) {
+      const message = err?.message ?? "Failed to post truck.";
+      setError(message);
+      toast.error(message);
+    } finally {
+      setSaving(false);
     }
   };
 
+  const disabled = saving || (trucksLoading && !form.truck_id);
+
   return (
-    <Dialog open={open} onOpenChange={(value) => onOpenChange?.(value)}>
-      <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto">
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="max-w-3xl">
         <DialogHeader>
-          <DialogTitle className="flex items-center gap-2">
-            <div className="w-10 h-10 rounded-lg bg-[#29CA8D]/10 flex items-center justify-center">
-              <Truck className="w-5 h-5 text-[#29CA8D]" />
-            </div>
-            <div>
-              <div>Post Available Truck</div>
-              <div className="text-sm text-gray-500">
-                Step {step} of 3
-              </div>
-            </div>
-          </DialogTitle>
+          <DialogTitle>Post a Truck</DialogTitle>
           <DialogDescription>
-            {step === 1 && 'Select your vehicle and driver'}
-            {step === 2 && 'Set your route and availability'}
-            {step === 3 && 'Set your rates and preferences'}
+            Share an available truck with route and capacity so shippers can request bookings.
           </DialogDescription>
         </DialogHeader>
 
-        {/* Progress Indicator */}
-        <div className="flex gap-2 mb-4">
-          {[1, 2, 3].map((i) => (
-            <div
-              key={i}
-              className={`h-1 flex-1 rounded-full ${
-                i <= step ? 'bg-[#29CA8D]' : 'bg-gray-200'
-              }`}
+        <div className="space-y-4">
+          {error && <div className="text-sm text-rose-600">{error}</div>}
+
+          <div className="grid gap-3 md:grid-cols-2">
+            <div className="space-y-2">
+              <Label>Truck *</Label>
+              {trucksLoading ? (
+                <p className="text-xs text-gray-500">Loading your trucks…</p>
+              ) : trucks.length === 0 ? (
+                <p className="text-xs text-gray-500">Add a truck to your fleet before posting.</p>
+              ) : (
+                <Select
+                  value={form.truck_id || undefined}
+                  onValueChange={(value) => setForm((prev) => ({ ...prev, truck_id: value }))}
+                >
+                  <SelectTrigger>
+                    <SelectValue placeholder="Select truck" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {trucks.map((truck) => (
+                      <SelectItem key={truck.id} value={String(truck.id)}>
+                        {(truck.truck_name || truck.plate_number || `Truck #${truck.id}`) ?? `Truck #${truck.id}`} · {truck.truck_type || "—"}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              )}
+            </div>
+
+            <div className="space-y-2">
+              <Label>Availability window</Label>
+              <div className="grid grid-cols-2 gap-2">
+                <Input
+                  type="datetime-local"
+                  value={form.available_from}
+                  onChange={(e) => setForm((prev) => ({ ...prev, available_from: e.target.value }))}
+                />
+                <Input
+                  type="datetime-local"
+                  value={form.available_until}
+                  onChange={(e) => setForm((prev) => ({ ...prev, available_until: e.target.value }))}
+                  placeholder="Optional"
+                />
+              </div>
+            </div>
+          </div>
+
+          <div className="grid gap-3 md:grid-cols-2">
+            <div className="space-y-2">
+              <Label>Origin *</Label>
+              <Input
+                placeholder="City, State"
+                value={form.origin}
+                onChange={(e) => setForm((prev) => ({ ...prev, origin: e.target.value }))}
+              />
+            </div>
+            <div className="space-y-2">
+              <Label>Destination</Label>
+              <Input
+                placeholder="City, State"
+                value={form.destination}
+                onChange={(e) => setForm((prev) => ({ ...prev, destination: e.target.value }))}
+              />
+            </div>
+          </div>
+
+          <div className="grid gap-3 md:grid-cols-2">
+            <div className="grid grid-cols-2 gap-2">
+              <Input
+                type="number"
+                placeholder="Origin lat"
+                value={form.origin_lat}
+                onChange={(e) => setForm((prev) => ({ ...prev, origin_lat: e.target.value }))}
+              />
+              <Input
+                type="number"
+                placeholder="Origin lng"
+                value={form.origin_lng}
+                onChange={(e) => setForm((prev) => ({ ...prev, origin_lng: e.target.value }))}
+              />
+            </div>
+            <div className="grid grid-cols-2 gap-2">
+              <Input
+                type="number"
+                placeholder="Destination lat"
+                value={form.destination_lat}
+                onChange={(e) => setForm((prev) => ({ ...prev, destination_lat: e.target.value }))}
+              />
+              <Input
+                type="number"
+                placeholder="Destination lng"
+                value={form.destination_lng}
+                onChange={(e) => setForm((prev) => ({ ...prev, destination_lng: e.target.value }))}
+              />
+            </div>
+          </div>
+
+          <div className="grid gap-3 md:grid-cols-2">
+            <div className="space-y-2">
+              <Label>Capacity (headcount)</Label>
+              <Input
+                type="number"
+                placeholder="e.g. 80"
+                value={form.capacity_headcount}
+                onChange={(e) => setForm((prev) => ({ ...prev, capacity_headcount: e.target.value }))}
+              />
+            </div>
+            <div className="space-y-2">
+              <Label>Capacity (weight kg)</Label>
+              <Input
+                type="number"
+                placeholder="e.g. 12000"
+                value={form.capacity_weight_kg}
+                onChange={(e) => setForm((prev) => ({ ...prev, capacity_weight_kg: e.target.value }))}
+              />
+            </div>
+          </div>
+
+          <div className="flex items-center justify-between rounded-lg border px-3 py-2">
+            <div>
+              <Label className="text-xs">Allow shared loads</Label>
+              <p className="text-[11px] text-gray-500">Turn off for exclusive loads.</p>
+            </div>
+            <Switch
+              checked={form.allow_shared}
+              onCheckedChange={(checked) => setForm((prev) => ({ ...prev, allow_shared: checked }))}
             />
-          ))}
-        </div>
+          </div>
 
-        {renderStepContent()}
+          <div className="space-y-2">
+            <Label>Notes</Label>
+            <Textarea
+              rows={3}
+              placeholder="Equipment, special info, or constraints"
+              value={form.notes}
+              onChange={(e) => setForm((prev) => ({ ...prev, notes: e.target.value }))}
+            />
+          </div>
 
-        {/* Footer Actions */}
-        <div className="flex gap-3 pt-4 border-t">
-          {step > 1 && (
-            <Button
-              variant="outline"
-              onClick={() => setStep(step - 1)}
-              className="flex-1"
-            >
-              Back
+          <div className="flex justify-end gap-2">
+            <Button variant="outline" onClick={() => onOpenChange(false)} disabled={saving}>
+              Cancel
             </Button>
-          )}
-          {step < 3 ? (
-            <Button
-              onClick={handleNext}
-              className="flex-1 bg-[#29CA8D] hover:bg-[#24b67d]"
-            >
-              Continue
+            <Button onClick={handleSubmit} disabled={disabled || trucks.length === 0}>
+              {saving ? "Posting…" : "Post Truck"}
             </Button>
-          ) : (
-            <Button
-              onClick={handleSubmit}
-              className="flex-1 bg-[#29CA8D] hover:bg-[#24b67d]"
-            >
-              Post Truck
-            </Button>
-          )}
+          </div>
         </div>
       </DialogContent>
     </Dialog>
   );
 }
+
