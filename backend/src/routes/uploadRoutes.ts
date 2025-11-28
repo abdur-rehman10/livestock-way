@@ -58,7 +58,7 @@ router.post("/kyc", upload.single("file"), (req, res) => {
 });
 
 // Multer error handler to send clear messages
-router.use((err: any, _req, res, _next) => {
+router.use((err: any, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
   if (err instanceof multer.MulterError) {
     if (err.code === "LIMIT_FILE_SIZE") {
       return res.status(400).json({ status: "ERROR", message: "File too large (max 20MB)" });
