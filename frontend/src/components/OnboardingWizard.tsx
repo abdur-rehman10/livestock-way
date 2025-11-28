@@ -60,6 +60,7 @@ export default function OnboardingWizard({ role, onComplete, onSkip }: Onboardin
   // Common state
   const [licenseUploaded, setLicenseUploaded] = useState(false);
   const [kycUploaded, setKycUploaded] = useState(false);
+  const [kycSkipped, setKycSkipped] = useState(false);
   const [kycUploading, setKycUploading] = useState(false);
   const [kycError, setKycError] = useState<string | null>(null);
   const [kycRequest, setKycRequest] = useState<KycRequestRecord | null>(null);
@@ -106,6 +107,7 @@ export default function OnboardingWizard({ role, onComplete, onSkip }: Onboardin
       ]);
       setKycRequest(request);
       setKycUploaded(true);
+      setKycSkipped(false);
     } catch (err: any) {
       setKycError(err?.message || "Failed to upload documents");
     } finally {
@@ -187,17 +189,17 @@ export default function OnboardingWizard({ role, onComplete, onSkip }: Onboardin
 
   const canProceed = () => {
     if (role === 'hauler') {
-      if (currentStep === 0) return kycUploaded;
+      if (currentStep === 0) return kycUploaded || kycSkipped;
       if (currentStep === 1) return truckPlate && truckType && truckCapacity;
       return true; // Driver step is optional
     }
     if (role === 'shipper') {
-      if (currentStep === 0) return kycUploaded;
+      if (currentStep === 0) return kycUploaded || kycSkipped;
       if (currentStep === 1) return farmName && farmLocation;
       return true;
     }
     if (role === 'stakeholder') {
-      if (currentStep === 0) return kycUploaded;
+      if (currentStep === 0) return kycUploaded || kycSkipped;
       if (currentStep === 1) return serviceType && serviceName;
       return true;
     }
@@ -248,6 +250,12 @@ export default function OnboardingWizard({ role, onComplete, onSkip }: Onboardin
                     <span className="text-sm">Documents uploaded successfully</span>
                   </div>
                 )}
+                {kycSkipped && !kycUploaded && (
+                  <div className="flex items-center justify-center gap-2 text-amber-600">
+                    <CheckCircle className="w-5 h-5" />
+                    <span className="text-sm">Skipped for now — please upload later</span>
+                  </div>
+                )}
                 {kycRequest && (
                   <div className="flex items-center justify-center gap-2 text-xs text-muted-foreground">
                     <Badge
@@ -264,6 +272,19 @@ export default function OnboardingWizard({ role, onComplete, onSkip }: Onboardin
                 )}
                 {kycError && (
                   <p className="text-sm text-red-600">{kycError}</p>
+                )}
+                {!kycUploaded && !kycUploading && (
+                  <button
+                    type="button"
+                    className="text-xs text-gray-500 hover:underline"
+                    onClick={() => {
+                      setKycSkipped(true);
+                      setKycError(null);
+                      setKycUploaded(false);
+                    }}
+                  >
+                    Skip for now
+                  </button>
                 )}
               </div>
             </div>

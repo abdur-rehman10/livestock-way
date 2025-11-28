@@ -21,6 +21,7 @@ import { Badge } from "../components/ui/badge";
 import { Switch } from "../components/ui/switch";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../components/ui/select";
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "../components/ui/dialog";
+import { PostTruckDialog } from "./PostTruckDialog";
 
 function extractErrorMessage(error: unknown): string {
   if (!error) return "";
@@ -128,6 +129,7 @@ export default function TruckBoard() {
   const [haulerTrucks, setHaulerTrucks] = useState<HaulerVehicleOption[]>([]);
   const [haulerTrucksLoading, setHaulerTrucksLoading] = useState(false);
   const [haulerTruckError, setHaulerTruckError] = useState<string | null>(null);
+  const [postDialogOpen, setPostDialogOpen] = useState(false);
   const userRole = storage.get<string | null>(STORAGE_KEYS.USER_ROLE, null);
   const userId = storage.get<string | null>(STORAGE_KEYS.USER_ID, null);
   const [shipperLoads, setShipperLoads] = useState<LoadSummary[]>([]);
@@ -841,16 +843,18 @@ export default function TruckBoard() {
 
       {userRole === "hauler" && (
         <Card>
-          <CardHeader>
-            <CardTitle>My Truck Listings</CardTitle>
+          <CardHeader className="flex flex-row items-center justify-between">
+            <div>
+              <CardTitle>My Truck Listings</CardTitle>
+              <p className="text-sm text-gray-500">Manage active and paused postings</p>
+            </div>
+            <Button onClick={() => setPostDialogOpen(true)}>Post a Truck</Button>
           </CardHeader>
           <CardContent className="space-y-3">
             {myListingsLoading ? (
               <p className="text-sm text-gray-500">Loading your listings…</p>
             ) : myListings.length === 0 ? (
-              <p className="text-sm text-gray-500">
-                You haven't posted any trucks yet. Use the form below to publish availability.
-              </p>
+              <div className="text-sm text-gray-500">No listings yet. Use "Post a Truck" to share availability.</div>
             ) : (
               <div className="space-y-3">
                 {myListings.map((listing) => (
@@ -864,8 +868,7 @@ export default function TruckBoard() {
                         {listing.destination_location_text ? ` → ${listing.destination_location_text}` : ""}
                       </div>
                       <div className="text-xs text-gray-500">
-                        Window: {new Date(listing.available_from).toLocaleString()}{" "}
-                        {listing.available_until ? `- ${new Date(listing.available_until).toLocaleString()}` : ""}
+                        Window: {new Date(listing.available_from).toLocaleString()} {listing.available_until ? `- ${new Date(listing.available_until).toLocaleString()}` : ""}
                       </div>
                       <div className="text-xs text-gray-600">
                         Capacity:{" "}
@@ -893,177 +896,6 @@ export default function TruckBoard() {
                 ))}
               </div>
             )}
-          </CardContent>
-        </Card>
-      )}
-
-      {userRole === "hauler" && (
-        <Card>
-          <CardHeader>
-            <CardTitle>Post Available Truck</CardTitle>
-          </CardHeader>
-        <CardContent className="space-y-3">
-            <div>
-              <Label className="text-xs">Truck</Label>
-              {haulerTrucksLoading ? (
-                <p className="text-xs text-gray-500">Loading your trucks…</p>
-              ) : haulerTrucks.length === 0 ? (
-                <p className="text-xs text-gray-500">
-                  {haulerTruckError ?? "Add at least one truck in Fleet before posting availability."}
-                </p>
-              ) : (
-                <Select
-                  value={form.truck_id || undefined}
-                  onValueChange={(value) => setForm((prev) => ({ ...prev, truck_id: value }))}
-                >
-                  <SelectTrigger>
-                    <SelectValue placeholder="Select truck" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {haulerTrucks.map((truck) => (
-                      <SelectItem key={truck.id} value={String(truck.id)}>
-                        {(truck.truck_name || truck.plate_number || `Truck #${truck.id}`) ?? `Truck #${truck.id}`}{" "}
-                        · {truck.truck_type || "—"}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              )}
-              {haulerTruckError && haulerTrucks.length > 0 && (
-                <p className="text-[11px] text-amber-600 mt-1">{haulerTruckError}</p>
-              )}
-            </div>
-            <div>
-              <Label className="text-xs">Origin</Label>
-              <Input
-                value={form.origin}
-                onChange={(e) => setForm({ ...form, origin: e.target.value })}
-                placeholder="City, State"
-              />
-            </div>
-            <div>
-              <Label className="text-xs">Destination (optional)</Label>
-              <Input
-                value={form.destination}
-                onChange={(e) =>
-                  setForm({ ...form, destination: e.target.value })
-                }
-                placeholder="City, State"
-              />
-            </div>
-            <div>
-              <Label className="text-xs">Available From</Label>
-              <Input
-                type="datetime-local"
-                value={form.available_from}
-                onChange={(e) =>
-                  setForm({ ...form, available_from: e.target.value })
-                }
-              />
-            </div>
-            <div>
-              <Label className="text-xs">Available Until (optional)</Label>
-              <Input
-                type="datetime-local"
-                value={form.available_until}
-                onChange={(e) => setForm({ ...form, available_until: e.target.value })}
-              />
-            </div>
-            <div>
-              <Label className="text-xs">Capacity (headcount)</Label>
-              <Input
-                type="number"
-                value={form.capacity_headcount}
-                onChange={(e) =>
-                  setForm({ ...form, capacity_headcount: e.target.value })
-                }
-              />
-            </div>
-            <div>
-              <Label className="text-xs">Capacity (weight in kg)</Label>
-              <Input
-                type="number"
-                value={form.capacity_weight_kg}
-                onChange={(e) =>
-                  setForm({ ...form, capacity_weight_kg: e.target.value })
-                }
-              />
-            </div>
-            <div className="grid gap-2 md:grid-cols-2">
-              <div>
-                <Label className="text-xs">Origin latitude</Label>
-                <Input
-                  type="number"
-                  step="0.0001"
-                  value={form.origin_lat}
-                  onChange={(e) => setForm({ ...form, origin_lat: e.target.value })}
-                  placeholder="e.g. 34.0522"
-                />
-              </div>
-              <div>
-                <Label className="text-xs">Origin longitude</Label>
-                <Input
-                  type="number"
-                  step="0.0001"
-                  value={form.origin_lng}
-                  onChange={(e) => setForm({ ...form, origin_lng: e.target.value })}
-                  placeholder="-118.2437"
-                />
-              </div>
-            </div>
-            <div className="grid gap-2 md:grid-cols-2">
-              <div>
-                <Label className="text-xs">Destination latitude</Label>
-                <Input
-                  type="number"
-                  step="0.0001"
-                  value={form.destination_lat}
-                  onChange={(e) =>
-                    setForm({ ...form, destination_lat: e.target.value })
-                  }
-                  placeholder="Optional"
-                />
-              </div>
-              <div>
-                <Label className="text-xs">Destination longitude</Label>
-                <Input
-                  type="number"
-                  step="0.0001"
-                  value={form.destination_lng}
-                  onChange={(e) =>
-                    setForm({ ...form, destination_lng: e.target.value })
-                  }
-                  placeholder="Optional"
-                />
-              </div>
-            </div>
-            <div className="flex items-center justify-between rounded-lg border px-3 py-2">
-              <div>
-                <Label className="text-xs">Allow shared loads</Label>
-                <p className="text-[11px] text-gray-500">
-                  Disable this if the truck is exclusive to one booking.
-                </p>
-              </div>
-              <Switch
-                checked={form.allow_shared}
-                onCheckedChange={(checked) => setForm({ ...form, allow_shared: checked })}
-              />
-            </div>
-            <div>
-              <Label className="text-xs">Notes</Label>
-              <Textarea
-                value={form.notes}
-                onChange={(e) => setForm({ ...form, notes: e.target.value })}
-                placeholder="Equipment, special info, etc."
-                rows={3}
-              />
-            </div>
-            <Button
-              onClick={handlePostTruck}
-              disabled={posting || !form.truck_id || haulerTrucksLoading}
-            >
-              {posting ? "Posting…" : "Post Availability"}
-            </Button>
           </CardContent>
         </Card>
       )}
@@ -1236,6 +1068,23 @@ export default function TruckBoard() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {userRole === "hauler" && (
+        <PostTruckDialog
+          open={postDialogOpen}
+          onOpenChange={(open) => {
+            setPostDialogOpen(open);
+            if (!open) {
+              refreshMyListings();
+              refresh();
+            }
+          }}
+          onPosted={() => {
+            refreshMyListings();
+            refresh();
+          }}
+        />
+      )}
     </div>
   );
 }

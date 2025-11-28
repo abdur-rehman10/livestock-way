@@ -35,7 +35,6 @@ import { storage, STORAGE_KEYS, getPreferences, updatePreferences } from '../lib
 import { toast } from 'sonner';
 import { NotFound } from '../pages/ErrorPages';
 import MarketplaceDevLab from '../pages/MarketplaceDevLab';
-import TruckChatsTab from '../pages/TruckChatsTab';
 
 type UserRole = 'shipper' | 'driver' | 'hauler' | 'stakeholder' | 'super-admin' | null;
 type LandingRole = 'hauler' | 'shipper' | 'stakeholder';
@@ -259,7 +258,6 @@ export function AppRouter({ showKeyboardShortcuts, onKeyboardShortcutsToggle }: 
                   <Route path="team" element={<TeamManagement />} />
                   <Route path="truck-board" element={<TruckBoard />} />
                   <Route path="marketplace" element={<MarketplaceTab userRole="hauler" />} />
-                  <Route path="truck-chats" element={<TruckChatsTab />} />
                   <Route path="documents" element={<DocumentsTab />} />
                   <Route path="settings" element={<div>Hauler settings coming soon</div>} />
                   <Route path="support" element={<SupportTab />} />
@@ -290,7 +288,6 @@ export function AppRouter({ showKeyboardShortcuts, onKeyboardShortcutsToggle }: 
                   <Route path="documents" element={<DocumentsTab />} />
                   <Route path="truck-board" element={<TruckBoard />} />
                   <Route path="marketplace" element={<MarketplaceTab userRole="shipper" />} />
-                  <Route path="truck-chats" element={<TruckChatsTab />} />
                   <Route path="settings" element={<ProfileSettings role="shipper" onBack={() => navigate(-1)} />} />
                   <Route path="support" element={<SupportTab />} />
                   <Route path="*" element={<Navigate to="/shipper/dashboard" replace />} />
