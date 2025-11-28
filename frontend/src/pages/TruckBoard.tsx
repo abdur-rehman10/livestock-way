@@ -134,6 +134,14 @@ export default function TruckBoard() {
   const userId = storage.get<string | null>(STORAGE_KEYS.USER_ID, null);
   const [shipperLoads, setShipperLoads] = useState<LoadSummary[]>([]);
   const [shipperLoadsLoading, setShipperLoadsLoading] = useState(false);
+  const [requestDialog, setRequestDialog] = useState<{
+    open: boolean;
+    listing: TruckAvailability | null;
+    load: LoadSummary | null;
+    submitting: boolean;
+    error: string | null;
+  }>({ open: false, listing: null, load: null, submitting: false, error: null });
+  const [requestedPairs, setRequestedPairs] = useState<Set<string>>(new Set());
 
   const refresh = async (nextQuery?: { origin?: string; nearLat?: number; nearLng?: number; radiusKm?: number }) => {
     try {
@@ -595,14 +603,42 @@ export default function TruckBoard() {
       toast.error("Select which load you want to book onto this truck.");
       return;
     }
+    const load = selectableLoads.find((l) => String(l.id) === interest.loadId) || null;
+    const listing = listings.find((l) => l.id === availabilityId) || null;
+    setRequestDialog({
+      open: true,
+      listing,
+      load,
+      submitting: false,
+      error: null,
+    });
+  };
+
+  const handleConfirmRequest = async () => {
+    if (!requestDialog.listing || !requestDialog.load) {
+      setRequestDialog((prev) => ({ ...prev, error: "Select a load to request." }));
+      return;
+    }
+    const key = `${requestDialog.listing.id}-${requestDialog.load.id}`;
+    if (requestedPairs.has(key)) {
+      setRequestDialog((prev) => ({ ...prev, error: "You already requested this truck for that load." }));
+      return;
+    }
     try {
-      await requestBookingForTruckListing(availabilityId, {
-        load_id: interest.loadId,
+      setRequestDialog((prev) => ({ ...prev, submitting: true, error: null }));
+      await requestBookingForTruckListing(requestDialog.listing.id, {
+        load_id: requestDialog.load.id,
         requested_headcount: undefined,
       });
+      const nextSet = new Set(requestedPairs);
+      nextSet.add(key);
+      setRequestedPairs(nextSet);
       toast.success("Booking requested.");
+      setRequestDialog({ open: false, listing: null, load: null, submitting: false, error: null });
     } catch (err: any) {
-      toast.error(formatTruckBoardError(err, "Unable to request this booking."));
+      const msg = formatTruckBoardError(err, "Unable to request this booking.");
+      setRequestDialog((prev) => ({ ...prev, error: msg, submitting: false }));
+      toast.error(msg);
     }
   };
 
@@ -698,8 +734,12 @@ export default function TruckBoard() {
                 ]
                   .filter(Boolean)
                   .join(" • ") || "Not specified";
+                const key = listingInterest.loadId ? `${listing.id}-${listingInterest.loadId}` : "";
                 const requestDisabled =
-                  !listingInterest.loadId || shipperLoadsLoading || selectableLoads.length === 0;
+                  !listingInterest.loadId ||
+                  shipperLoadsLoading ||
+                  selectableLoads.length === 0 ||
+                  (key && requestedPairs.has(key));
                 return (
                   <div
                     key={listing.id}
@@ -1064,6 +1104,57 @@ export default function TruckBoard() {
             </Button>
             <Button onClick={handleSaveListing} disabled={editDialog.saving || haulerTrucks.length === 0}>
               {editDialog.saving ? "Saving…" : "Save Changes"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog
+        open={requestDialog.open}
+        onOpenChange={(open) => {
+          if (!open) setRequestDialog({ open: false, listing: null, load: null, submitting: false, error: null });
+        }}
+      >
+        <DialogContent className="max-w-lg">
+          <DialogHeader>
+            <DialogTitle>Request Booking</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-3">
+            {requestDialog.listing && (
+              <div className="text-sm text-gray-700">
+                <div className="font-semibold">
+                  {requestDialog.listing.origin_location_text}
+                  {requestDialog.listing.destination_location_text
+                    ? ` → ${requestDialog.listing.destination_location_text}`
+                    : ""}
+                </div>
+                <div className="text-xs text-gray-500">
+                  Available {new Date(requestDialog.listing.available_from).toLocaleString()}
+                </div>
+              </div>
+            )}
+            {requestDialog.load && (
+              <div className="rounded-md border px-3 py-2 text-sm">
+                <div className="font-semibold">{requestDialog.load.title || `Load #${requestDialog.load.id}`}</div>
+                <div className="text-xs text-gray-600">
+                  {requestDialog.load.pickup_location} → {requestDialog.load.dropoff_location}
+                </div>
+              </div>
+            )}
+            {requestDialog.error && <p className="text-sm text-rose-600">{requestDialog.error}</p>}
+          </div>
+          <DialogFooter className="gap-2">
+            <Button
+              variant="outline"
+              onClick={() =>
+                setRequestDialog({ open: false, listing: null, load: null, submitting: false, error: null })
+              }
+              disabled={requestDialog.submitting}
+            >
+              Cancel
+            </Button>
+            <Button onClick={handleConfirmRequest} disabled={requestDialog.submitting}>
+              {requestDialog.submitting ? "Submitting…" : "Submit Request"}
             </Button>
           </DialogFooter>
         </DialogContent>
