@@ -3,6 +3,7 @@ import express from "express";
 import cors from "cors";
 import dotenv from "dotenv";
 import path from "path";
+import bcrypt from "bcrypt";
 import { testDbConnection, pool } from "./config/database";
 import loadRoutes from "./routes/loadRoutes";
 import uploadRoutes from "./routes/uploadRoutes";
@@ -69,6 +70,41 @@ app.use("/api/trips", tripRoutes);
 app.use("/api/marketplace", marketplaceRoutes);
 app.use("/api/kyc", kycRoutes);
 app.use("/api/admin", adminRoutes);
+
+async function bootstrapSuperAdmin() {
+  const email = process.env.SUPER_ADMIN_EMAIL || "admin@test.com";
+  const password = process.env.SUPER_ADMIN_PASSWORD || "Test12345!";
+  const allowBootstrap = (process.env.SUPER_ADMIN_BOOTSTRAP || "false").toLowerCase() === "true";
+  if (!allowBootstrap) {
+    return;
+  }
+  try {
+    const existing = await pool.query(
+      `SELECT id FROM app_users WHERE lower(email) = lower($1) AND user_type = 'super_admin' LIMIT 1`,
+      [email]
+    );
+    if (existing.rowCount && existing.rows[0]?.id) {
+      console.log("Super admin already exists; bootstrap skipped.");
+      return;
+    }
+    const hashed = await bcrypt.hash(password, 10);
+    const insert = await pool.query(
+      `
+        INSERT INTO app_users (full_name, email, password_hash, user_type, account_status)
+        VALUES ($1, $2, $3, 'super_admin', 'active')
+        RETURNING id
+      `,
+      ["Super Admin", email, hashed]
+    );
+    console.log(
+      `Super admin bootstrapped with email ${email}. (User ID: ${insert.rows[0]?.id ?? "unknown"})`
+    );
+  } catch (err) {
+    console.error("Failed to bootstrap super admin:", err);
+  }
+}
+
+bootstrapSuperAdmin();
 
 const PORT = Number(process.env.PORT) || 4000;
 const server = http.createServer(app);
