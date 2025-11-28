@@ -739,7 +739,7 @@ export default function TruckBoard() {
                   !listingInterest.loadId ||
                   shipperLoadsLoading ||
                   selectableLoads.length === 0 ||
-                  (key && requestedPairs.has(key));
+                  (!!key && requestedPairs.has(key));
                 return (
                   <div
                     key={listing.id}
