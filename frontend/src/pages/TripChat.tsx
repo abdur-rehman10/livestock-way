@@ -1,7 +1,12 @@
-import React, { useEffect, useRef, useState } from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 import { useParams, useLocation, useNavigate } from "react-router-dom";
-import { fetchTripMessages, createTripMessage } from "../lib/api";
-import type { TripMessage } from "../lib/types";
+import {
+  fetchTripByLoadId,
+  fetchOfferMessages,
+  postOfferMessage,
+  type OfferMessage,
+  type TripEnvelope,
+} from "../api/marketplace";
 
 const TripChat: React.FC = () => {
   const { id } = useParams<{ id: string }>();
@@ -13,41 +18,72 @@ const TripChat: React.FC = () => {
   const senderRole: "hauler" | "shipper" = isHauler ? "hauler" : "shipper";
   const basePath = isHauler ? "/hauler" : "/shipper";
 
-  const [messages, setMessages] = useState<TripMessage[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  const [context, setContext] = useState<TripEnvelope | null>(null);
+  const [contextLoading, setContextLoading] = useState(true);
+  const [contextError, setContextError] = useState<string | null>(null);
+  const [offerId, setOfferId] = useState<string | null>(null);
+  const [messages, setMessages] = useState<OfferMessage[]>([]);
+  const [messagesLoading, setMessagesLoading] = useState(false);
+  const [messagesError, setMessagesError] = useState<string | null>(null);
   const [newMessage, setNewMessage] = useState("");
   const [sending, setSending] = useState(false);
   const [sendError, setSendError] = useState<string | null>(null);
   const messageInputRef = useRef<HTMLInputElement | null>(null);
 
+  const loadOfferMessages = useCallback(async (targetOfferId: string) => {
+    try {
+      setMessagesLoading(true);
+      setMessagesError(null);
+      const data = await fetchOfferMessages(targetOfferId);
+      setMessages(data.items ?? []);
+    } catch (err: any) {
+      console.error("Error loading offer messages", err);
+      setMessages([]);
+      setMessagesError(err?.message || "Failed to load chat history.");
+    } finally {
+      setMessagesLoading(false);
+    }
+  }, []);
+
   useEffect(() => {
     if (!loadId || Number.isNaN(loadId)) {
-      setError("Invalid trip id");
-      setLoading(false);
+      setContextError("Invalid trip id.");
+      setContextLoading(false);
       return;
     }
 
-    async function loadMessages() {
+    async function loadContext() {
       try {
-        setLoading(true);
-        setError(null);
-        const data = await fetchTripMessages(loadId);
-        setMessages(data);
+        setContextLoading(true);
+        setContextError(null);
+        const data = await fetchTripByLoadId(loadId);
+        setContext(data);
+        const awardedOfferId = data?.load?.awarded_offer_id ?? null;
+        if (!awardedOfferId) {
+          setOfferId(null);
+          setMessages([]);
+          setMessagesError("Chat will unlock once this load has an accepted offer.");
+        } else {
+          setOfferId(String(awardedOfferId));
+          loadOfferMessages(String(awardedOfferId));
+        }
       } catch (err: any) {
-        console.error("Error loading chat messages", err);
-        setError(err?.message || "Failed to load chat messages.");
+        console.error("Error fetching trip context", err);
+        setContextError(err?.message || "Failed to load trip context.");
       } finally {
-        setLoading(false);
+        setContextLoading(false);
       }
     }
 
-    loadMessages();
-  }, [loadId]);
+    loadContext();
+  }, [loadId, loadOfferMessages]);
 
   const handleSend = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!loadId || Number.isNaN(loadId)) return;
+    if (!offerId) {
+      setSendError("Chat is only available after the booking is accepted.");
+      return;
+    }
 
     const trimmed = newMessage.trim();
     if (!trimmed) {
@@ -58,11 +94,8 @@ const TripChat: React.FC = () => {
     try {
       setSending(true);
       setSendError(null);
-      const created = await createTripMessage(loadId, {
-        sender: senderRole,
-        message: trimmed,
-      });
-      setMessages((prev) => [...prev, created]);
+      const response = await postOfferMessage(offerId, { text: trimmed });
+      setMessages((prev) => [...prev, response.message]);
       setNewMessage("");
     } catch (err: any) {
       console.error("Error sending message", err);
@@ -93,7 +126,9 @@ const TripChat: React.FC = () => {
           <h1 className="text-sm font-semibold text-slate-900">
             {senderRole === "hauler" ? "Chat with shipper" : "Chat with hauler"}
           </h1>
-          <p className="text-[11px] text-slate-500">Trip ID: {Number.isNaN(loadId) ? "-" : loadId}</p>
+          <p className="text-[11px] text-slate-500">
+            Trip ID: {context?.trip?.id ?? "—"}
+          </p>
         </div>
         <div className="text-[10px] text-slate-400">
           You are: <span className="font-semibold">{senderRole}</span>
@@ -101,10 +136,18 @@ const TripChat: React.FC = () => {
       </div>
 
       <div className="flex-1 space-y-3 overflow-y-auto px-4 py-3">
-        {loading ? (
-          <div className="text-[11px] text-slate-500">Loading messages…</div>
-        ) : error ? (
-          <div className="text-[11px] text-red-600">{error}</div>
+        {contextLoading ? (
+          <div className="text-[11px] text-slate-500">Loading trip context…</div>
+        ) : contextError ? (
+          <div className="text-[11px] text-red-600">{contextError}</div>
+        ) : messagesLoading ? (
+          <div className="text-[11px] text-slate-500">Loading chat history…</div>
+        ) : messagesError ? (
+          <div className="text-[11px] text-red-600">{messagesError}</div>
+        ) : !offerId ? (
+          <div className="text-[11px] text-slate-500">
+            Chat becomes available once this load has an accepted booking.
+          </div>
         ) : messages.length === 0 ? (
           <div className="text-[11px] text-slate-500 space-y-2">
             <p>No messages yet. Start the conversation.</p>
@@ -118,7 +161,14 @@ const TripChat: React.FC = () => {
           </div>
         ) : (
           messages.map((msg) => {
-            const isMine = msg.sender === senderRole;
+            const normalizedRole = (msg.sender_role || "").toLowerCase();
+            const isMine = normalizedRole.startsWith(senderRole);
+            const senderLabel =
+              normalizedRole.length === 0
+                ? "User"
+                : normalizedRole
+                    .replace(/_/g, " ")
+                    .replace(/\b\w/g, (char) => char.toUpperCase());
             return (
               <div key={msg.id} className={`flex ${isMine ? "justify-end" : "justify-start"}`}>
                 <div
@@ -129,9 +179,9 @@ const TripChat: React.FC = () => {
                   }`}
                 >
                   <div className="mb-1 text-[10px] font-medium opacity-75">
-                    {msg.sender === "hauler" ? "Hauler" : "Shipper"}
+                    {senderLabel}
                   </div>
-                  <div>{msg.message}</div>
+                  <div>{msg.text || <span className="italic opacity-80">[no text]</span>}</div>
                   <div className="mt-1 text-[9px] opacity-75">
                     {new Date(msg.created_at).toLocaleString()}
                   </div>
@@ -157,7 +207,7 @@ const TripChat: React.FC = () => {
           />
           <button
             type="submit"
-            disabled={sending || !id}
+            disabled={sending || !offerId}
             className="rounded-md bg-emerald-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-emerald-700 disabled:opacity-60"
           >
             {sending ? "Sending…" : "Send"}

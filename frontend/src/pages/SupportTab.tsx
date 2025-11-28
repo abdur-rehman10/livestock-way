@@ -1,10 +1,12 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { useLocation } from "react-router-dom";
 import {
   fetchSupportTicketsForUser,
   createSupportTicket,
+  fetchSupportTicketMessagesForUser,
+  postSupportTicketMessageForUser,
 } from "../lib/api";
-import type { SupportTicket } from "../lib/types";
+import type { SupportTicket, SupportTicketMessage } from "../lib/types";
 import { Button } from "../components/ui/button";
 import { storage, STORAGE_KEYS } from "../lib/storage";
 
@@ -43,6 +45,12 @@ export default function SupportTab() {
   const [tickets, setTickets] = useState<SupportTicket[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [activeTicketId, setActiveTicketId] = useState<number | null>(null);
+  const [ticketMessages, setTicketMessages] = useState<SupportTicketMessage[]>([]);
+  const [messagesLoading, setMessagesLoading] = useState(false);
+  const [messageError, setMessageError] = useState<string | null>(null);
+  const [messageDraft, setMessageDraft] = useState("");
+  const [sendingMessage, setSendingMessage] = useState(false);
 
   const [subject, setSubject] = useState("");
   const [message, setMessage] = useState("");
@@ -74,6 +82,59 @@ export default function SupportTab() {
     load();
   }, [userId, role]);
 
+  const loadTicketMessages = useCallback(
+    async (ticketId: number) => {
+      if (!userId) return;
+      setMessagesLoading(true);
+      setMessageError(null);
+      try {
+        const items = await fetchSupportTicketMessagesForUser(ticketId, userId, role);
+        setTicketMessages(items);
+      } catch (err: any) {
+        setMessageError(err?.message || "Failed to load messages.");
+        setTicketMessages([]);
+      } finally {
+        setMessagesLoading(false);
+      }
+    },
+    [role, userId]
+  );
+
+  const handleToggleConversation = async (ticketId: number) => {
+    if (activeTicketId === ticketId) {
+      setActiveTicketId(null);
+      setTicketMessages([]);
+      setMessageDraft("");
+      setMessageError(null);
+      return;
+    }
+    setActiveTicketId(ticketId);
+    setMessageDraft("");
+    await loadTicketMessages(ticketId);
+  };
+
+  const handleSendMessage = useCallback(async () => {
+    if (!activeTicketId || !userId || !messageDraft.trim()) {
+      setMessageError("Please enter a message.");
+      return;
+    }
+    try {
+      setSendingMessage(true);
+      setMessageError(null);
+      await postSupportTicketMessageForUser(activeTicketId, {
+        user_id: userId,
+        role,
+        message: messageDraft.trim(),
+      });
+      setMessageDraft("");
+      await loadTicketMessages(activeTicketId);
+    } catch (err: any) {
+      setMessageError(err?.message || "Failed to send message.");
+    } finally {
+      setSendingMessage(false);
+    }
+  }, [activeTicketId, loadTicketMessages, messageDraft, role, userId]);
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!subject.trim() || !message.trim()) {
@@ -99,6 +160,9 @@ export default function SupportTab() {
       });
 
       setTickets((prev) => [newTicket, ...prev]);
+      setActiveTicketId(newTicket.id);
+      setTicketMessages([]);
+      setMessageDraft("");
       setSubject("");
       setMessage("");
       setPriority("normal");
@@ -226,7 +290,7 @@ export default function SupportTab() {
         ) : (
           <div className="divide-y divide-gray-100">
             {tickets.map((t) => (
-              <div key={t.id} className="px-4 py-3 text-[11px]">
+              <div key={t.id} className="px-4 py-3 text-[11px] space-y-2">
                 <div className="flex items-start justify-between gap-2">
                   <div>
                     <div className="font-semibold text-gray-900">
@@ -259,9 +323,76 @@ export default function SupportTab() {
                     </span>
                   </div>
                 </div>
-                <div className="mt-1 text-[10px] text-gray-400">
-                  Created: {new Date(t.created_at).toLocaleString()}
+                <div className="text-[10px] text-gray-400 flex items-center justify-between">
+                  <span>Created: {new Date(t.created_at).toLocaleString()}</span>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={() => handleToggleConversation(t.id)}
+                  >
+                    {activeTicketId === t.id ? "Hide conversation" : "View conversation"}
+                  </Button>
                 </div>
+                {activeTicketId === t.id && (
+                  <div className="mt-2 space-y-2 rounded-lg border border-gray-200 bg-white p-3">
+                    {messageError && (
+                      <div className="text-[10px] text-red-600">{messageError}</div>
+                    )}
+                    <div className="h-44 overflow-y-auto space-y-2">
+                      {messagesLoading ? (
+                        <p className="text-[10px] text-gray-500">Loading conversation…</p>
+                      ) : ticketMessages.length === 0 ? (
+                        <p className="text-[10px] text-gray-500">
+                          No replies yet. Share additional details below.
+                        </p>
+                      ) : (
+                        ticketMessages.map((msg) => {
+                          const isUser = msg.sender_user_id === userId;
+                          return (
+                            <div
+                              key={msg.id}
+                              className={`rounded-lg px-3 py-2 text-[10px] ${
+                                isUser
+                                  ? "bg-[#29CA8D] text-white"
+                                  : "bg-gray-100 text-gray-700 border border-gray-200"
+                              }`}
+                            >
+                              <div className="flex items-center justify-between opacity-75">
+                                <span>{msg.sender_role || (isUser ? role : "support")}</span>
+                                <span>{new Date(msg.created_at).toLocaleString()}</span>
+                              </div>
+                              <p className="mt-1">{msg.message}</p>
+                            </div>
+                          );
+                        })
+                      )}
+                    </div>
+                    <div className="space-y-1">
+                      <label className="text-[10px] font-medium text-gray-600">
+                        Reply to support
+                      </label>
+                      <textarea
+                        rows={3}
+                        value={messageDraft}
+                        onChange={(e) => setMessageDraft(e.target.value)}
+                        className="block w-full rounded-md border border-gray-300 px-3 py-1.5 text-xs text-gray-900 placeholder:text-gray-400 focus:border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-500"
+                        placeholder="Type your reply…"
+                      />
+                    </div>
+                    <div className="flex justify-end">
+                      <Button
+                        type="button"
+                        size="sm"
+                        className={submitButtonClass}
+                        onClick={handleSendMessage}
+                        disabled={sendingMessage || !messageDraft.trim()}
+                      >
+                        {sendingMessage ? "Sending…" : "Send reply"}
+                      </Button>
+                    </div>
+                  </div>
+                )}
               </div>
             ))}
           </div>

@@ -6,8 +6,12 @@ import {
   releasePaymentForTrip,
 } from "../services/paymentsService";
 import { PoolClient } from "pg";
+import authRequired from "../middlewares/auth";
+import { requireRoles } from "../middlewares/rbac";
+import { auditRequest } from "../middlewares/auditLogger";
 
 const router = Router();
+router.use(authRequired);
 
 function getQueryValue(value: unknown) {
   if (typeof value === "string") return value;
@@ -145,7 +149,11 @@ async function getExpenseColumnProfile(): Promise<ExpenseColumnProfile> {
   return expenseColumnProfilePromise;
 }
 
-router.post("/", async (req: Request, res: Response) => {
+router.post(
+  "/",
+  requireRoles(["shipper", "hauler"]),
+  auditRequest("trip:create"),
+  async (req: Request, res: Response) => {
   const client = await pool.connect();
   try {
     const {
@@ -289,9 +297,13 @@ router.post("/", async (req: Request, res: Response) => {
   } finally {
     client.release();
   }
-});
+  }
+);
 
-router.get("/", async (req: Request, res: Response) => {
+router.get(
+  "/",
+  requireRoles(["shipper", "hauler", "driver"]),
+  async (req: Request, res: Response) => {
   try {
     const { status, hauler_id, driver_id, truck_id, load_id } = req.query;
     const conditions: string[] = [];
@@ -343,9 +355,13 @@ router.get("/", async (req: Request, res: Response) => {
     console.error("Error in GET /api/trips:", err);
     return res.status(500).json({ message: "Internal server error" });
   }
-});
+  }
+);
 
-router.get("/:id", async (req: Request, res: Response) => {
+router.get(
+  "/:id",
+  requireRoles(["shipper", "hauler", "driver"]),
+  async (req: Request, res: Response) => {
   try {
     const id = getTripIdParam(req);
     if (id === null) {
@@ -381,9 +397,14 @@ router.get("/:id", async (req: Request, res: Response) => {
     console.error("Error in GET /api/trips/:id:", err);
     return res.status(500).json({ message: "Internal server error" });
   }
-});
+  }
+);
 
-router.patch("/:id/status", async (req: Request, res: Response) => {
+router.patch(
+  "/:id/status",
+  requireRoles(["hauler", "driver"]),
+  auditRequest("trip:update-status", (req) => `trip:${req.params.id}`),
+  async (req: Request, res: Response) => {
   try {
     const id = getTripIdParam(req);
     const { status } = req.body;
@@ -432,9 +453,14 @@ router.patch("/:id/status", async (req: Request, res: Response) => {
     console.error("Error in PATCH /api/trips/:id/status:", err);
     return res.status(500).json({ message: "Internal server error" });
   }
-});
+  }
+);
 
-router.post("/:id/pre-trip-check", async (req: Request, res: Response) => {
+router.post(
+  "/:id/pre-trip-check",
+  requireRoles(["driver", "hauler"]),
+  auditRequest("trip:pretrip", (req) => `trip:${req.params.id}`),
+  async (req: Request, res: Response) => {
   try {
     const tripId = getTripIdParam(req);
     if (tripId === null) {
@@ -541,9 +567,13 @@ router.post("/:id/pre-trip-check", async (req: Request, res: Response) => {
     console.error("Error in POST /api/trips/:id/pre-trip-check:", err);
     return res.status(500).json({ message: "Internal server error" });
   }
-});
+  }
+);
 
-router.get("/:id/pre-trip-check", async (req: Request, res: Response) => {
+router.get(
+  "/:id/pre-trip-check",
+  requireRoles(["driver", "hauler", "shipper"]),
+  async (req: Request, res: Response) => {
   try {
     const tripId = getTripIdParam(req);
     if (tripId === null) {
@@ -569,9 +599,14 @@ router.get("/:id/pre-trip-check", async (req: Request, res: Response) => {
     console.error("Error in GET /api/trips/:id/pre-trip-check:", err);
     return res.status(500).json({ message: "Internal server error" });
   }
-});
+  }
+);
 
-router.post("/:id/epod", async (req: Request, res: Response) => {
+router.post(
+  "/:id/epod",
+  requireRoles(["driver", "hauler"]),
+  auditRequest("trip:epod-upload", (req) => `trip:${req.params.id}`),
+  async (req: Request, res: Response) => {
   const client = await pool.connect();
   try {
     const tripId = getTripIdParam(req);
@@ -669,9 +704,13 @@ router.post("/:id/epod", async (req: Request, res: Response) => {
   } finally {
     client.release();
   }
-});
+  }
+);
 
-router.get("/:id/epod", async (req: Request, res: Response) => {
+router.get(
+  "/:id/epod",
+  requireRoles(["driver", "hauler", "shipper"]),
+  async (req: Request, res: Response) => {
   try {
     const tripId = getTripIdParam(req);
     if (tripId === null) {
@@ -697,9 +736,14 @@ router.get("/:id/epod", async (req: Request, res: Response) => {
     console.error("Error in GET /api/trips/:id/epod:", err);
     return res.status(500).json({ message: "Internal server error" });
   }
-});
+  }
+);
 
-router.post("/:id/expenses", async (req: Request, res: Response) => {
+router.post(
+  "/:id/expenses",
+  requireRoles(["driver", "hauler"]),
+  auditRequest("trip:expense-create", (req) => `trip:${req.params.id}`),
+  async (req: Request, res: Response) => {
   try {
     const tripId = getTripIdParam(req);
     if (tripId === null) {
@@ -805,9 +849,13 @@ router.post("/:id/expenses", async (req: Request, res: Response) => {
     console.error("Error in POST /api/trips/:id/expenses:", err);
     return res.status(500).json({ message: "Internal server error" });
   }
-});
+  }
+);
 
-router.get("/:id/expenses", async (req: Request, res: Response) => {
+router.get(
+  "/:id/expenses",
+  requireRoles(["driver", "hauler", "shipper"]),
+  async (req: Request, res: Response) => {
   try {
     const tripId = getTripIdParam(req);
     if (tripId === null) {
@@ -841,6 +889,7 @@ router.get("/:id/expenses", async (req: Request, res: Response) => {
     console.error("Error in GET /api/trips/:id/expenses:", err);
     return res.status(500).json({ message: "Internal server error" });
   }
-});
+  }
+);
 
 export default router;

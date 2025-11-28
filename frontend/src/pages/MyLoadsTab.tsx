@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useRef, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import {
   fetchLoadsForShipper,
@@ -35,6 +35,16 @@ import {
   type DisputeRecord,
   type TripEnvelope,
 } from "../api/marketplace";
+import {
+  fetchDisputeMessages,
+  sendDisputeMessage,
+  type DisputeMessage,
+} from "../api/disputes";
+import {
+  filterMessagesForPerspective,
+  formatDisputeRoleLabel,
+  normalizeDisputeRole,
+} from "../lib/disputeMessages";
 
 const paymentStatusMeta: Record<
   string,
@@ -84,15 +94,21 @@ export default function MyLoadsTab() {
     open: boolean;
     loadId: number | null;
     tripId: number | null;
-    disputes: DisputeRecord[];
-    loading: boolean;
-  }>({ open: false, loadId: null, tripId: null, disputes: [], loading: false });
-  const [disputeForm, setDisputeForm] = useState({
-    reason_code: "",
-    description: "",
-    requested_action: "",
-  });
-  const tripContextCache = useRef<Record<number, TripEnvelope | null>>({});
+  disputes: DisputeRecord[];
+  loading: boolean;
+}>({ open: false, loadId: null, tripId: null, disputes: [], loading: false });
+const [disputeForm, setDisputeForm] = useState({
+  reason_code: "",
+  description: "",
+  requested_action: "",
+});
+const [selectedDisputeId, setSelectedDisputeId] = useState<string | null>(null);
+const [disputeMessages, setDisputeMessages] = useState<DisputeMessage[]>([]);
+const [disputeMessagesLoading, setDisputeMessagesLoading] = useState(false);
+const [disputeMessageError, setDisputeMessageError] = useState<string | null>(null);
+const [disputeMessageDraft, setDisputeMessageDraft] = useState("");
+const [disputeMessageSending, setDisputeMessageSending] = useState(false);
+const tripContextCache = useRef<Record<number, TripEnvelope | null>>({});
 
   const resetTripCache = useCallback(() => {
     tripContextCache.current = {};
@@ -247,18 +263,89 @@ export default function MyLoadsTab() {
     }
   };
 
-  const cancelExistingDispute = async (disputeId: string) => {
-    try {
-      await cancelDispute(disputeId);
-      toast.success("Dispute cancelled.");
-      if (disputeDialog.tripId) {
-        const resp = await fetchTripDisputes(disputeDialog.tripId);
-        setDisputeDialog((prev) => ({ ...prev, disputes: resp.items }));
-      }
-    } catch (err: any) {
-      toast.error(err?.message ?? "Failed to cancel dispute");
+const cancelExistingDispute = async (disputeId: string) => {
+  try {
+    await cancelDispute(disputeId);
+    toast.success("Dispute cancelled.");
+    if (disputeDialog.tripId) {
+      const resp = await fetchTripDisputes(disputeDialog.tripId);
+      setDisputeDialog((prev) => ({ ...prev, disputes: resp.items }));
     }
-  };
+  } catch (err: any) {
+    toast.error(err?.message ?? "Failed to cancel dispute");
+  }
+};
+
+const loadDisputeMessages = useCallback(async (disputeId: string) => {
+  setDisputeMessagesLoading(true);
+  setDisputeMessageError(null);
+  try {
+    const resp = await fetchDisputeMessages(disputeId);
+    setDisputeMessages(resp.items ?? []);
+  } catch (err: any) {
+    setDisputeMessageError(err?.message ?? "Failed to load messages");
+  } finally {
+    setDisputeMessagesLoading(false);
+  }
+}, []);
+
+const handleSelectDispute = useCallback(
+  (disputeId: string) => {
+    setSelectedDisputeId(disputeId);
+    loadDisputeMessages(disputeId);
+  },
+  [loadDisputeMessages]
+);
+
+const filteredDisputeMessages = useMemo(
+  () => filterMessagesForPerspective(disputeMessages, "shipper"),
+  [disputeMessages]
+);
+
+const handleSendDisputeMessage = async () => {
+  if (!selectedDisputeId || !disputeMessageDraft.trim()) return;
+  try {
+    setDisputeMessageSending(true);
+    await sendDisputeMessage(selectedDisputeId, { text: disputeMessageDraft.trim() });
+    setDisputeMessageDraft("");
+    await loadDisputeMessages(selectedDisputeId);
+  } catch (err: any) {
+    setDisputeMessageError(err?.message ?? "Failed to send message");
+  } finally {
+    setDisputeMessageSending(false);
+  }
+};
+
+useEffect(() => {
+  if (!disputeDialog.open) {
+    setSelectedDisputeId(null);
+    setDisputeMessages([]);
+    setDisputeMessageDraft("");
+    setDisputeMessageError(null);
+    setDisputeMessagesLoading(false);
+    return;
+  }
+}, [disputeDialog.open]);
+
+useEffect(() => {
+  if (!disputeDialog.open) return;
+  if (disputeDialog.disputes.length === 0) {
+    setSelectedDisputeId(null);
+    setDisputeMessages([]);
+    return;
+  }
+  // preserve existing selection if still available
+  if (
+    selectedDisputeId &&
+    disputeDialog.disputes.some((d) => d.id === selectedDisputeId)
+  ) {
+    return;
+  }
+  const firstDispute = disputeDialog.disputes[0];
+  setSelectedDisputeId(firstDispute.id);
+  loadDisputeMessages(firstDispute.id);
+  setDisputeMessageDraft("");
+}, [disputeDialog.disputes, disputeDialog.open, loadDisputeMessages, selectedDisputeId]);
 
   if (loading) {
     return (
@@ -410,42 +497,19 @@ export default function MyLoadsTab() {
         open={disputeDialog.open}
         onOpenChange={(open) => setDisputeDialog((prev) => ({ ...prev, open }))}
       >
-        <DialogContent className="max-w-lg">
+        <DialogContent className="max-w-4xl">
           <DialogHeader>
-            <DialogTitle>Dispute Load #{disputeDialog.loadId}</DialogTitle>
+            <DialogTitle>Disputes for Load #{disputeDialog.loadId}</DialogTitle>
           </DialogHeader>
           {disputeDialog.loading ? (
             <p className="text-sm text-gray-500">Loading disputes…</p>
-          ) : (
-            <div className="space-y-4">
-              {disputeDialog.disputes.length > 0 && (
-                <div className="space-y-2">
-                  <p className="text-xs text-gray-500">Existing disputes</p>
-                  <div className="space-y-2 max-h-48 overflow-y-auto">
-                    {disputeDialog.disputes.map((d) => (
-                      <div
-                        key={d.id}
-                        className="rounded border p-2 text-xs flex items-center justify-between"
-                      >
-                        <div>
-                          <p className="font-semibold">{d.reason_code}</p>
-                          <p className="text-gray-500">Status: {d.status}</p>
-                        </div>
-                        {d.status === "OPEN" && (
-                          <Button
-                            size="sm"
-                            variant="ghost"
-                            onClick={() => cancelExistingDispute(d.id)}
-                          >
-                            Cancel
-                          </Button>
-                        )}
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )}
-
+          ) : disputeDialog.disputes.length === 0 ? (
+            <div className="rounded-2xl border border-dashed border-gray-200 p-6 space-y-4">
+              <p className="text-sm font-semibold text-gray-800">Open a dispute</p>
+              <p className="text-xs text-gray-500">
+                Each load can have only one active dispute. Submit the form below to start the
+                investigation with LivestockWay’s compliance team.
+              </p>
               <div className="space-y-2">
                 <Label className="text-xs">Reason Code</Label>
                 <Input
@@ -473,7 +537,7 @@ export default function MyLoadsTab() {
                   onChange={(e) =>
                     setDisputeForm((prev) => ({ ...prev, description: e.target.value }))
                   }
-                  rows={4}
+                  rows={5}
                   placeholder="Describe the issue"
                 />
               </div>
@@ -485,6 +549,131 @@ export default function MyLoadsTab() {
                   Close
                 </Button>
                 <Button onClick={submitDispute}>Submit Dispute</Button>
+              </div>
+            </div>
+          ) : (
+            <div className="grid gap-6 md:grid-cols-[minmax(0,1.1fr)_minmax(0,1.6fr)]">
+              <div className="space-y-3">
+                <p className="text-xs font-semibold uppercase tracking-wide text-gray-500">
+                  Dispute tickets
+                </p>
+                <div className="space-y-2 max-h-64 overflow-y-auto pr-1">
+                  {disputeDialog.disputes.map((dispute) => {
+                    const isActive = selectedDisputeId === dispute.id;
+                    return (
+                      <div
+                        key={dispute.id}
+                        className={[
+                          "rounded-2xl border p-3 text-sm transition",
+                          isActive
+                            ? "border-[#172039] bg-[#172039]/5 text-gray-900"
+                            : "border-gray-200 text-gray-600",
+                        ].join(" ")}
+                      >
+                        <div className="flex items-center justify-between gap-3">
+                          <button
+                            type="button"
+                            onClick={() => handleSelectDispute(dispute.id)}
+                            className="flex-1 text-left"
+                          >
+                            <p className="font-semibold text-gray-900">
+                              {dispute.reason_code || `Dispute #${dispute.id}`}
+                            </p>
+                            <p className="text-[11px] uppercase tracking-wide text-gray-500">
+                              Status: {dispute.status.replace(/_/g, " ")}
+                            </p>
+                          </button>
+                          {dispute.status === "OPEN" && (
+                            <Button
+                              size="sm"
+                              variant="ghost"
+                              onClick={() => cancelExistingDispute(dispute.id)}
+                            >
+                              Cancel
+                            </Button>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+
+              <div className="space-y-3">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <p className="text-xs font-semibold uppercase tracking-wide text-gray-500">
+                      Conversation with Compliance
+                    </p>
+                    <p className="text-[11px] text-gray-500">
+                      Only shows messages you or LivestockWay share with shippers.
+                    </p>
+                  </div>
+                  {selectedDisputeId && (
+                    <Badge variant="secondary" className="text-[10px] uppercase">
+                      Ticket #{selectedDisputeId}
+                    </Badge>
+                  )}
+                </div>
+
+                <div className="h-64 overflow-y-auto rounded-2xl border border-gray-200 bg-gray-50 p-3">
+                  {!selectedDisputeId ? (
+                    <p className="text-xs text-gray-500">
+                      Select a ticket on the left to view its messages.
+                    </p>
+                  ) : disputeMessagesLoading ? (
+                    <p className="text-xs text-gray-500">Loading conversation…</p>
+                  ) : filteredDisputeMessages.length === 0 ? (
+                    <p className="text-xs text-gray-500">
+                      No messages yet. Send an update to the admin team below.
+                    </p>
+                  ) : (
+                    <div className="space-y-2">
+                      {filteredDisputeMessages.map((msg) => (
+                        <div
+                          key={msg.id}
+                          className="rounded-xl border border-white bg-white p-2 text-sm shadow-sm"
+                        >
+                          <div className="flex items-center justify-between text-[11px] text-gray-500">
+                            <span className="font-semibold text-gray-900 text-xs">
+                              {formatDisputeRoleLabel(msg.sender_role)}
+                            </span>
+                            <span>{new Date(msg.created_at).toLocaleString()}</span>
+                          </div>
+                          {normalizeDisputeRole(msg.sender_role).startsWith("super-admin") && (
+                            <p className="text-[11px] text-gray-500">
+                              → {formatDisputeRoleLabel(msg.recipient_role || "shipper")}
+                            </p>
+                          )}
+                          {msg.text && <p className="mt-1 text-gray-700">{msg.text}</p>}
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+
+                {selectedDisputeId && (
+                  <div className="space-y-2">
+                    {disputeMessageError && (
+                      <p className="text-xs text-red-600">{disputeMessageError}</p>
+                    )}
+                    <Textarea
+                      rows={3}
+                      value={disputeMessageDraft}
+                      onChange={(e) => setDisputeMessageDraft(e.target.value)}
+                      placeholder="Share an update or respond to the compliance team…"
+                    />
+                    <div className="flex justify-end">
+                      <Button
+                        size="sm"
+                        onClick={handleSendDisputeMessage}
+                        disabled={!disputeMessageDraft.trim() || disputeMessageSending}
+                      >
+                        {disputeMessageSending ? "Sending…" : "Send Message"}
+                      </Button>
+                    </div>
+                  </div>
+                )}
               </div>
             </div>
           )}

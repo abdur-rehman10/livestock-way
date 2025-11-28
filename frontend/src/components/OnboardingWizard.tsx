@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Button } from './ui/button';
 import { Input } from './ui/input';
 import { Label } from './ui/label';
@@ -7,6 +7,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '.
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from './ui/card';
 import { Progress } from './ui/progress';
 import { Checkbox } from './ui/checkbox';
+import { Badge } from './ui/badge';
 import { 
   Truck, 
   Home, 
@@ -19,6 +20,12 @@ import {
   ArrowLeft,
   Clock
 } from 'lucide-react';
+import {
+  fetchMyKycRequest,
+  submitKycRequest,
+  uploadKycDocument,
+  type KycRequestRecord,
+} from '../api/kyc';
 
 interface OnboardingWizardProps {
   role: 'hauler' | 'shipper' | 'stakeholder';
@@ -53,6 +60,59 @@ export default function OnboardingWizard({ role, onComplete, onSkip }: Onboardin
   // Common state
   const [licenseUploaded, setLicenseUploaded] = useState(false);
   const [kycUploaded, setKycUploaded] = useState(false);
+  const [kycUploading, setKycUploading] = useState(false);
+  const [kycError, setKycError] = useState<string | null>(null);
+  const [kycRequest, setKycRequest] = useState<KycRequestRecord | null>(null);
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
+
+  useEffect(() => {
+    let active = true;
+    fetchMyKycRequest()
+      .then((request) => {
+        if (!active) return;
+        setKycRequest(request);
+        if (request?.documents?.length) {
+          setKycUploaded(true);
+        }
+      })
+      .catch(() => {
+        // ignore initial load errors
+      });
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (kycRequest?.documents?.length) {
+      setKycUploaded(true);
+    }
+  }, [kycRequest]);
+
+  const handleKycUploadClick = () => {
+    setKycError(null);
+    fileInputRef.current?.click();
+  };
+
+  const handleKycFileChange = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+    setKycError(null);
+    setKycUploading(true);
+    try {
+      const { url } = await uploadKycDocument(file);
+      const request = await submitKycRequest([
+        { doc_type: "business_document", file_url: url },
+      ]);
+      setKycRequest(request);
+      setKycUploaded(true);
+    } catch (err: any) {
+      setKycError(err?.message || "Failed to upload documents");
+    } finally {
+      setKycUploading(false);
+      event.target.value = "";
+    }
+  };
 
   const getRoleConfig = () => {
     switch (role) {
@@ -159,6 +219,13 @@ export default function OnboardingWizard({ role, onComplete, onSkip }: Onboardin
             {/* KYC Documents */}
             <div className="space-y-3">
               <Label>Business Documents (KYC) *</Label>
+              <input
+                type="file"
+                ref={fileInputRef}
+                className="hidden"
+                accept=".pdf,.png,.jpg,.jpeg"
+                onChange={handleKycFileChange}
+              />
               <div className="border-2 border-dashed rounded-lg p-8 text-center space-y-3 hover:border-primary/50 transition-colors cursor-pointer">
                 <Upload className="w-12 h-12 mx-auto text-muted-foreground" />
                 <div>
@@ -166,9 +233,9 @@ export default function OnboardingWizard({ role, onComplete, onSkip }: Onboardin
                     <button 
                       type="button"
                       className="text-primary hover:underline"
-                      onClick={() => setKycUploaded(true)}
+                      onClick={handleKycUploadClick}
                     >
-                      Click to upload
+                      {kycUploading ? "Uploading..." : "Click to upload"}
                     </button> or drag and drop
                   </p>
                   <p className="text-xs text-muted-foreground">
@@ -180,6 +247,23 @@ export default function OnboardingWizard({ role, onComplete, onSkip }: Onboardin
                     <CheckCircle className="w-5 h-5" />
                     <span className="text-sm">Documents uploaded successfully</span>
                   </div>
+                )}
+                {kycRequest && (
+                  <div className="flex items-center justify-center gap-2 text-xs text-muted-foreground">
+                    <Badge
+                      variant={kycRequest.status === 'approved' ? 'default' : kycRequest.status === 'rejected' ? 'destructive' : 'secondary'}
+                    >
+                      {kycRequest.status.toUpperCase()}
+                    </Badge>
+                    {kycRequest.review_notes && (
+                      <span className="text-[11px]">
+                        Notes: {kycRequest.review_notes}
+                      </span>
+                    )}
+                  </div>
+                )}
+                {kycError && (
+                  <p className="text-sm text-red-600">{kycError}</p>
                 )}
               </div>
             </div>

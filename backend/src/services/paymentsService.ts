@@ -69,6 +69,9 @@ export interface PaymentRecord {
   hauler_payout_amount: number;
   pickup_location?: string | null;
   dropoff_location?: string | null;
+  split_amount_to_hauler?: number | null;
+  split_amount_to_shipper?: number | null;
+  split_resolved_at?: string | null;
 }
 
 export function mapPaymentRow(row: any): PaymentRecord {
