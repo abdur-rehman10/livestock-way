@@ -6,6 +6,8 @@ Object.defineProperty(exports, "__esModule", { value: true });
 const express_1 = require("express");
 const database_1 = require("../config/database");
 const auth_1 = __importDefault(require("../middlewares/auth"));
+const rbac_1 = require("../middlewares/rbac");
+const auditLogger_1 = require("../middlewares/auditLogger");
 const profileHelpers_1 = require("../utils/profileHelpers");
 const router = (0, express_1.Router)();
 router.use(auth_1.default);
@@ -59,7 +61,7 @@ function mapTruckRow(row) {
     };
 }
 // CREATE TRUCK
-router.post("/", async (req, res) => {
+router.post("/", (0, rbac_1.requireRoles)(["hauler"], { allowSuperAdminOverride: false }), (0, auditLogger_1.auditRequest)("truck:create"), async (req, res) => {
     try {
         const { truck_name, plate_number, capacity_lbs, capacity, equipment_type, truck_type, species_supported, notes, description, } = req.body;
         if (!truck_name || !plate_number) {
@@ -68,14 +70,8 @@ router.post("/", async (req, res) => {
                 .json({ message: "truck_name and plate_number are required" });
         }
         const userId = req.user?.id ? Number(req.user.id) : null;
-        const userType = (req.user?.user_type || "").toUpperCase();
         if (!userId) {
             return res.status(401).json({ message: "Unauthorized" });
-        }
-        if (!userType.includes("HAULER") && !userType.includes("SUPER_ADMIN")) {
-            return res
-                .status(403)
-                .json({ message: "Only haulers can post trucks" });
         }
         const haulerId = await (0, profileHelpers_1.ensureHaulerProfile)(userId);
         const normalizedType = normalizeTruckType(equipment_type || truck_type);
@@ -118,11 +114,11 @@ router.post("/", async (req, res) => {
     }
 });
 // GET ALL TRUCKS
-router.get("/", async (req, res) => {
+router.get("/", (0, rbac_1.requireRoles)(["hauler"]), async (req, res) => {
     try {
-        const userType = (req.user?.user_type || "").toUpperCase();
-        const isHauler = userType.includes("HAULER");
-        const isAdmin = userType.includes("SUPER_ADMIN");
+        const userRole = req.user?.user_type ?? "";
+        const isHauler = userRole === "hauler";
+        const isAdmin = userRole === "super-admin";
         let haulerId = null;
         if (isHauler) {
             haulerId = await (0, profileHelpers_1.ensureHaulerProfile)(Number(req.user?.id));
@@ -156,7 +152,7 @@ router.get("/", async (req, res) => {
     }
 });
 // GET truck detail
-router.get("/:id", async (req, res) => {
+router.get("/:id", (0, rbac_1.requireRoles)(["hauler"]), async (req, res) => {
     const id = Number(req.params.id);
     if (Number.isNaN(id)) {
         return res.status(400).json({ message: "Invalid truck id" });
@@ -177,8 +173,8 @@ router.get("/:id", async (req, res) => {
             return res.status(404).json({ message: "Truck not found" });
         }
         const truck = result.rows[0];
-        const userType = (req.user?.user_type || "").toUpperCase();
-        if (!userType.includes("SUPER_ADMIN") &&
+        const userRole = req.user?.user_type ?? "";
+        if (userRole !== "super-admin" &&
             Number(truck.hauler_id) !== (await (0, profileHelpers_1.ensureHaulerProfile)(Number(req.user?.id)))) {
             return res.status(403).json({ message: "Forbidden" });
         }
@@ -189,13 +185,12 @@ router.get("/:id", async (req, res) => {
         res.status(500).json({ message: "Failed to fetch truck" });
     }
 });
-router.delete("/:id", async (req, res) => {
+router.delete("/:id", (0, rbac_1.requireRoles)(["hauler"], { allowSuperAdminOverride: false }), (0, auditLogger_1.auditRequest)("truck:delete", (req) => `truck:${req.params.id}`), async (req, res) => {
     try {
         const id = Number(req.params.id);
         if (Number.isNaN(id)) {
             return res.status(400).json({ message: "Invalid truck id" });
         }
-        const userType = (req.user?.user_type || "").toUpperCase();
         const haulerId = await (0, profileHelpers_1.ensureHaulerProfile)(Number(req.user?.id));
         const result = await database_1.pool.query(`
         UPDATE trucks

@@ -7,6 +7,7 @@ const express_1 = require("express");
 const bcrypt_1 = __importDefault(require("bcrypt"));
 const jsonwebtoken_1 = __importDefault(require("jsonwebtoken"));
 const database_1 = require("../config/database");
+const auditLogService_1 = require("../services/auditLogService");
 const router = (0, express_1.Router)();
 const TOKEN_TTL = "7d";
 function signToken(payload) {
@@ -49,6 +50,15 @@ router.post("/register", async (req, res) => {
             user_type: user.rows[0].user_type,
             account_status: user.rows[0].account_status,
         });
+        await (0, auditLogService_1.logAuditEvent)({
+            action: "user_registered",
+            eventType: "user:register",
+            userId: user.rows[0].id,
+            userRole: user.rows[0].user_type ?? null,
+            resource: "app_users",
+            metadata: { account_mode, company_name: companyValue ?? undefined },
+            ipAddress: req.ip || null,
+        });
         res.json({
             message: "Registration successful",
             user: user.rows[0],
@@ -66,17 +76,42 @@ router.post("/login", async (req, res) => {
     try {
         const result = await database_1.pool.query("SELECT * FROM app_users WHERE email=$1", [email]);
         if (result.rowCount === 0) {
+            await (0, auditLogService_1.logAuditEvent)({
+                action: "login_failed",
+                eventType: "auth:failed",
+                resource: "auth",
+                metadata: { reason: "user_not_found", email },
+                ipAddress: req.ip || null,
+            });
             return res.status(404).json({ message: "User not found" });
         }
         const user = result.rows[0];
         const match = await bcrypt_1.default.compare(password, user.password_hash);
         if (!match) {
+            await (0, auditLogService_1.logAuditEvent)({
+                action: "login_failed",
+                eventType: "auth:failed",
+                userId: user.id,
+                userRole: user.user_type ?? null,
+                resource: "auth",
+                metadata: { reason: "invalid_password" },
+                ipAddress: req.ip || null,
+            });
             return res.status(401).json({ message: "Invalid password" });
         }
         const token = signToken({
             id: user.id,
             user_type: user.user_type,
             account_status: user.account_status,
+        });
+        await (0, auditLogService_1.logAuditEvent)({
+            action: "login_success",
+            eventType: "auth:success",
+            userId: user.id,
+            userRole: user.user_type ?? null,
+            resource: "auth",
+            metadata: { method: "password" },
+            ipAddress: req.ip || null,
         });
         res.json({
             message: "Login successful",

@@ -83,7 +83,8 @@ async function getLoads(req, res) {
         assigned_at,
         started_at,
         completed_at,
-        epod_url
+        epod_url,
+        awarded_offer_id
       FROM loads
       WHERE is_deleted = FALSE
     `;

@@ -69,9 +69,13 @@ router.post("/truck-board", auth_1.default, async (req, res) => {
         if (!haulerIdResolved) {
             return res.status(400).json({ error: "Unable to resolve hauler profile" });
         }
+        const truckId = req.body?.truck_id ? String(req.body.truck_id) : null;
+        if (!truckId) {
+            return res.status(400).json({ error: "truck_id is required" });
+        }
         const availability = await (0, marketplaceService_1.createTruckAvailability)({
             haulerId: haulerIdResolved,
-            truckId: req.body?.truck_id ?? null,
+            truckId,
             origin: req.body?.origin_location_text ?? "",
             destination: req.body?.destination_location_text ?? null,
             availableFrom: req.body?.available_from ?? new Date().toISOString(),
@@ -124,6 +128,7 @@ router.patch("/truck-board/:id", auth_1.default, async (req, res) => {
             originLng: req.body?.origin_lng,
             destinationLat: req.body?.destination_lat,
             destinationLng: req.body?.destination_lng,
+            truckId: req.body?.truck_id,
             isActive: req.body?.is_active,
         });
         res.json({ availability: updated });
@@ -380,8 +385,17 @@ async function getOfferAccess(offerId, userId, userRole) {
     const isAdmin = (userRole ?? "").toUpperCase() === "SUPER_ADMIN";
     return { offer, load, allowed: isShipper || isHauler || isAdmin, isShipper, isHauler, isAdmin };
 }
+function toRoleSlug(role) {
+    return (role ?? "")
+        .trim()
+        .toLowerCase()
+        .replace(/_/g, "-");
+}
 function normalizeRole(role) {
-    return (role ?? "").toUpperCase();
+    return (role ?? "")
+        .trim()
+        .toUpperCase()
+        .replace(/-/g, "_");
 }
 function getCompanyId(user) {
     if (user?.company_id === undefined || user?.company_id === null) {
@@ -390,7 +404,8 @@ function getCompanyId(user) {
     return String(user.company_id);
 }
 function isSuperAdminUser(user) {
-    return normalizeRole(user?.user_type) === "SUPER_ADMIN";
+    const slug = toRoleSlug(user?.user_type);
+    return slug === "super-admin" || slug === "superadmin" || slug === "admin";
 }
 function isHaulerUser(user) {
     const role = normalizeRole(user?.user_type);
@@ -463,6 +478,22 @@ async function getDisputeContext(disputeId) {
     const load = trip ? await (0, marketplaceService_1.getLoadById)(trip.load_id) : null;
     const payment = await (0, marketplaceService_1.getPaymentById)(dispute.payment_id);
     return { dispute, trip, load, payment };
+}
+const ADMIN_MESSAGE_TARGETS = new Set(["SHIPPER", "HAULER", "ALL"]);
+function resolveDisputeRecipientRole(senderRole, requestedTarget) {
+    if (senderRole === "SUPER_ADMIN") {
+        const normalizedRequest = normalizeRole(requestedTarget);
+        if (ADMIN_MESSAGE_TARGETS.has(normalizedRequest)) {
+            return normalizedRequest;
+        }
+        if (normalizedRequest === "BOTH" ||
+            normalizedRequest === "ALL_PARTIES" ||
+            normalizedRequest === "SHIPPER_AND_HAULER") {
+            return "ALL";
+        }
+        return "ALL";
+    }
+    return "ADMIN";
 }
 function emitOfferCreatedEvent(offer) {
     if (offer) {
@@ -1067,13 +1098,18 @@ router.post("/disputes/:disputeId/messages", auth_1.default, async (req, res) =>
         const user = getAuthUser(req);
         const isShipper = isShipperForLoad(user, context.load);
         const isHauler = await isAuthorizedHaulerForTrip(user, context.trip);
-        if (!isShipper && !isHauler && !isSuperAdminUser(user)) {
+        const senderRole = normalizeRole(user.user_type);
+        const isAdmin = senderRole === "SUPER_ADMIN";
+        if (!isShipper && !isHauler && !isAdmin) {
             return res.status(403).json({ error: "Forbidden" });
         }
+        const requestedTarget = typeof req.body?.recipient_role === "string" ? req.body.recipient_role : undefined;
+        const recipientRole = resolveDisputeRecipientRole(senderRole, requestedTarget);
         const message = await (0, marketplaceService_1.addDisputeMessage)({
             disputeId: context.dispute.id,
             senderUserId: String(user.id ?? ""),
-            senderRole: normalizeRole(user.user_type),
+            senderRole,
+            recipientRole,
             text: req.body?.text,
             attachments: req.body?.attachments,
         });

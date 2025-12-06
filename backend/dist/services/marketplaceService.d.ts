@@ -87,6 +87,7 @@ export interface TruckAvailabilityRecord {
     origin_lng: number | null;
     destination_lat: number | null;
     destination_lng: number | null;
+    is_active: boolean;
     created_at: string;
     updated_at: string;
 }
@@ -426,6 +427,7 @@ export declare function addDisputeMessage(input: {
     disputeId: string;
     senderUserId: string;
     senderRole: string;
+    recipientRole?: string | null;
     text?: string;
     attachments?: unknown[];
 }): Promise<any>;

@@ -9,6 +9,7 @@ const express_1 = __importDefault(require("express"));
 const cors_1 = __importDefault(require("cors"));
 const dotenv_1 = __importDefault(require("dotenv"));
 const path_1 = __importDefault(require("path"));
+const bcrypt_1 = __importDefault(require("bcrypt"));
 const database_1 = require("./config/database");
 const loadRoutes_1 = __importDefault(require("./routes/loadRoutes"));
 const uploadRoutes_1 = __importDefault(require("./routes/uploadRoutes"));
@@ -20,6 +21,8 @@ const loadboardRoutes_1 = __importDefault(require("./routes/loadboardRoutes"));
 const driverRoutes_1 = __importDefault(require("./routes/driverRoutes"));
 const tripRoutes_1 = __importDefault(require("./routes/tripRoutes"));
 const marketplaceRoutes_1 = __importDefault(require("./routes/marketplaceRoutes"));
+const kycRoutes_1 = __importDefault(require("./routes/kycRoutes"));
+const adminRoutes_1 = __importDefault(require("./routes/adminRoutes"));
 const socket_1 = require("./socket");
 dotenv_1.default.config();
 const app = (0, express_1.default)();
@@ -64,6 +67,34 @@ app.use("/api/loadboard", loadboardRoutes_1.default);
 app.use("/api/drivers", driverRoutes_1.default);
 app.use("/api/trips", tripRoutes_1.default);
 app.use("/api/marketplace", marketplaceRoutes_1.default);
+app.use("/api/kyc", kycRoutes_1.default);
+app.use("/api/admin", adminRoutes_1.default);
+async function bootstrapSuperAdmin() {
+    const email = process.env.SUPER_ADMIN_EMAIL || "admin@test.com";
+    const password = process.env.SUPER_ADMIN_PASSWORD || "Test12345!";
+    const allowBootstrap = (process.env.SUPER_ADMIN_BOOTSTRAP || "false").toLowerCase() === "true";
+    if (!allowBootstrap) {
+        return;
+    }
+    try {
+        const existing = await database_1.pool.query(`SELECT id FROM app_users WHERE lower(email) = lower($1) AND user_type = 'super_admin' LIMIT 1`, [email]);
+        if (existing.rowCount && existing.rows[0]?.id) {
+            console.log("Super admin already exists; bootstrap skipped.");
+            return;
+        }
+        const hashed = await bcrypt_1.default.hash(password, 10);
+        const insert = await database_1.pool.query(`
+        INSERT INTO app_users (full_name, email, password_hash, user_type, account_status)
+        VALUES ($1, $2, $3, 'super_admin', 'active')
+        RETURNING id
+      `, ["Super Admin", email, hashed]);
+        console.log(`Super admin bootstrapped with email ${email}. (User ID: ${insert.rows[0]?.id ?? "unknown"})`);
+    }
+    catch (err) {
+        console.error("Failed to bootstrap super admin:", err);
+    }
+}
+bootstrapSuperAdmin();
 const PORT = Number(process.env.PORT) || 4000;
 const server = http_1.default.createServer(app);
 (0, socket_1.initSocket)(server);

@@ -20,7 +20,13 @@ function authRequired(req, res, next) {
     }
     try {
         const decoded = jsonwebtoken_1.default.verify(token, secret);
-        req.user = decoded;
+        const normalizedRole = decoded.user_type
+            ? decoded.user_type.toLowerCase().replace(/_/g, "-")
+            : null;
+        req.user = {
+            ...decoded,
+            user_type: normalizedRole,
+        };
         return next();
     }
     catch (err) {

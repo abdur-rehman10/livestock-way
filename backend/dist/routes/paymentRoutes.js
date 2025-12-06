@@ -6,6 +6,8 @@ Object.defineProperty(exports, "__esModule", { value: true });
 const express_1 = require("express");
 const paymentController_1 = require("../controllers/paymentController");
 const auth_1 = __importDefault(require("../middlewares/auth"));
+const rbac_1 = require("../middlewares/rbac");
+const auditLogger_1 = require("../middlewares/auditLogger");
 const paymentsService_1 = require("../services/paymentsService");
 const router = (0, express_1.Router)();
 // GET /api/payments?user_id=...&role=shipper|hauler
@@ -49,7 +51,7 @@ router.get("/:id", auth_1.default, async (req, res) => {
     }
 });
 // POST /api/payments/:id/fund
-router.post("/:id/fund", auth_1.default, async (req, res) => {
+router.post("/:id/fund", auth_1.default, (0, rbac_1.requireRoles)(["shipper"]), (0, auditLogger_1.auditRequest)("escrow:fund", (req) => `payment:${req.params.id}`), async (req, res) => {
     const paymentId = Number(req.params.id);
     if (Number.isNaN(paymentId)) {
         return res.status(400).json({ error: "Invalid payment id" });
@@ -60,7 +62,7 @@ router.post("/:id/fund", auth_1.default, async (req, res) => {
             return res.status(404).json({ error: "Payment not found" });
         }
         const user = req.user;
-        const userType = user?.user_type?.toLowerCase();
+        const userType = user?.user_type;
         const actorId = user?.id ? String(user.id) : null;
         if (userType !== "shipper" || actorId !== payment.payer_id) {
             return res.status(403).json({ error: "Not allowed to fund this payment" });
