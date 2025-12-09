@@ -884,11 +884,17 @@ ALTER TYPE load_status_enum ADD VALUE IF NOT EXISTS 'DELIVERED';
 ALTER TYPE trip_status_enum ADD VALUE IF NOT EXISTS 'PENDING_ESCROW';
 ALTER TYPE trip_status_enum ADD VALUE IF NOT EXISTS 'pending_escrow';
 ALTER TYPE trip_status_enum ADD VALUE IF NOT EXISTS 'READY_TO_START';
+ALTER TYPE trip_status_enum ADD VALUE IF NOT EXISTS 'ready_to_start';
 ALTER TYPE trip_status_enum ADD VALUE IF NOT EXISTS 'IN_PROGRESS';
+ALTER TYPE trip_status_enum ADD VALUE IF NOT EXISTS 'in_progress';
 ALTER TYPE trip_status_enum ADD VALUE IF NOT EXISTS 'DELIVERED_AWAITING_CONFIRMATION';
 ALTER TYPE trip_status_enum ADD VALUE IF NOT EXISTS 'DELIVERED_CONFIRMED';
 ALTER TYPE trip_status_enum ADD VALUE IF NOT EXISTS 'DISPUTED';
 ALTER TYPE trip_status_enum ADD VALUE IF NOT EXISTS 'CLOSED';
+ALTER TYPE trip_status_enum ADD VALUE IF NOT EXISTS 'delivered_awaiting_confirmation';
+ALTER TYPE trip_status_enum ADD VALUE IF NOT EXISTS 'delivered_confirmed';
+ALTER TYPE trip_status_enum ADD VALUE IF NOT EXISTS 'disputed';
+ALTER TYPE trip_status_enum ADD VALUE IF NOT EXISTS 'closed';
 
 ALTER TYPE payment_status_enum ADD VALUE IF NOT EXISTS 'AWAITING_FUNDING';
 ALTER TYPE payment_status_enum ADD VALUE IF NOT EXISTS 'ESCROW_FUNDED';
