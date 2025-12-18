@@ -55,6 +55,13 @@ router.post("/kyc", upload.single("file"), (req, res) => {
     const url = `/uploads/${req.file.filename}`;
     return res.status(200).json({ status: "OK", url });
 });
+router.post("/service-image", upload.single("file"), (req, res) => {
+    if (!req.file) {
+        return res.status(400).json({ status: "ERROR", message: "No file uploaded" });
+    }
+    const url = `/uploads/${req.file.filename}`;
+    return res.status(200).json({ status: "OK", url });
+});
 // Multer error handler to send clear messages
 router.use((err, _req, res, _next) => {
     if (err instanceof multer_1.default.MulterError) {

@@ -51,3 +51,23 @@ export async function ensureHaulerProfile(userId: number) {
 
   return inserted.rows[0].id as number;
 }
+
+export async function ensureStakeholderProfile(userId: number) {
+  const existing = await pool.query(
+    "SELECT id FROM stakeholders WHERE user_id = $1 LIMIT 1",
+    [userId]
+  );
+  if (existing.rowCount) {
+    return existing.rows[0].id as number;
+  }
+
+  const fallbackName = (await getUserName(userId)) || "LivestockWay Service Provider";
+  const inserted = await pool.query(
+    `INSERT INTO stakeholders (user_id, service_type, company_name)
+     VALUES ($1, $2, $3)
+     RETURNING id`,
+    [userId, "general", fallbackName]
+  );
+
+  return inserted.rows[0].id as number;
+}

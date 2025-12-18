@@ -21,6 +21,7 @@ const loadboardRoutes_1 = __importDefault(require("./routes/loadboardRoutes"));
 const driverRoutes_1 = __importDefault(require("./routes/driverRoutes"));
 const tripRoutes_1 = __importDefault(require("./routes/tripRoutes"));
 const marketplaceRoutes_1 = __importDefault(require("./routes/marketplaceRoutes"));
+const serviceRoutes_1 = __importDefault(require("./routes/serviceRoutes"));
 const kycRoutes_1 = __importDefault(require("./routes/kycRoutes"));
 const adminRoutes_1 = __importDefault(require("./routes/adminRoutes"));
 const socket_1 = require("./socket");
@@ -67,6 +68,7 @@ app.use("/api/loadboard", loadboardRoutes_1.default);
 app.use("/api/drivers", driverRoutes_1.default);
 app.use("/api/trips", tripRoutes_1.default);
 app.use("/api/marketplace", marketplaceRoutes_1.default);
+app.use("/api/services", serviceRoutes_1.default);
 app.use("/api/kyc", kycRoutes_1.default);
 app.use("/api/admin", adminRoutes_1.default);
 async function bootstrapSuperAdmin() {
