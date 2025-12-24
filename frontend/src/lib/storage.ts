@@ -76,6 +76,7 @@ export const STORAGE_KEYS = {
   THEME: 'livestockway_theme',
   USER_ROLE: 'livestockway_user_role',
   USER_ID: 'livestockway_user_id',
+  ACCOUNT_MODE: 'livestockway_account_mode',
   LANDING_ROLE: 'livestockway_landing_role',
   USER_NAME: 'livestockway_user_name',
   USER_EMAIL: 'livestockway_user_email',

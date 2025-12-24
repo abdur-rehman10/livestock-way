@@ -364,6 +364,7 @@ export interface HaulerSummary {
   fleet_count: number;
   driver_count: number;
   completed_trips: number;
+  hauler_type?: string | null;
   rating: number | null;
 }
 
@@ -2980,6 +2981,7 @@ export async function getHaulerSummary(haulerId: string): Promise<HaulerSummary 
       SELECT
         h.id::text,
         COALESCE(h.legal_name, u.full_name) AS name,
+        h.hauler_type,
         (
           SELECT COUNT(*) FROM trucks t WHERE t.hauler_id = h.id
         )::int AS fleet_count,
@@ -3000,6 +3002,7 @@ export async function getHaulerSummary(haulerId: string): Promise<HaulerSummary 
   return {
     id: row.id,
     name: row.name ?? null,
+    hauler_type: row.hauler_type ?? null,
     fleet_count: Number(row.fleet_count ?? 0),
     driver_count: Number(row.driver_count ?? 0),
     completed_trips: Number(row.completed_trips ?? 0),

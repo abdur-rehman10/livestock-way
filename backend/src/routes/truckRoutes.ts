@@ -34,6 +34,22 @@ type TruckNotesMeta = {
   notes?: string | null;
 };
 
+async function getHaulerMeta(haulerId: number) {
+  const { rows } = await pool.query(
+    `
+      SELECT
+        hauler_type,
+        (SELECT COUNT(*) FROM trucks t WHERE t.hauler_id = h.id AND t.status <> 'inactive')::int AS truck_count,
+        (SELECT COUNT(*) FROM drivers d WHERE d.hauler_id = h.id)::int AS driver_count
+      FROM haulers h
+      WHERE h.id = $1
+      LIMIT 1
+    `,
+    [haulerId]
+  );
+  return rows[0] ?? null;
+}
+
 function normalizeTruckType(value: string) {
   if (!value) return "other";
   const normalized = value.trim().toLowerCase().replace(/[^a-z0-9]+/g, "_");
@@ -107,6 +123,11 @@ router.post(
     }
 
     const haulerId = await ensureHaulerProfile(userId);
+    const haulerMeta = await getHaulerMeta(haulerId);
+    const haulerType = (haulerMeta?.hauler_type ?? "company").toString().toLowerCase();
+    if (haulerType === "individual" && Number(haulerMeta?.truck_count ?? 0) >= 1) {
+      return res.status(400).json({ message: "Individual haulers can only register one truck." });
+    }
     const normalizedType = normalizeTruckType(equipment_type || truck_type);
 
     const capacityInput =
