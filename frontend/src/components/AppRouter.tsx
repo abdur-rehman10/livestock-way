@@ -32,6 +32,7 @@ import { ProfileSettings } from '../pages/ProfileSettings';
 import { KeyboardShortcutsDialog } from '../pages/KeyboardShortcutsDialog';
 import { OfflineIndicator } from './OfflineIndicator';
 import PostService from '../pages/PostService';
+import TripRoutePlan from '../pages/TripRoutePlan';
 import { Toaster } from './ui/sonner';
 import { storage, STORAGE_KEYS, getPreferences, updatePreferences } from '../lib/storage';
 import { toast } from 'sonner';
@@ -254,6 +255,7 @@ export function AppRouter({ showKeyboardShortcuts, onKeyboardShortcutsToggle }: 
                   <Route path="truck-board" element={<TruckBoard />} />
                   <Route path="fleet" element={<FleetManagement />} />
                   <Route path="trips" element={<TripsTab onViewTrip={() => toast.info('Trip view coming soon')} />} />
+                  <Route path="trips/:id/route-plan" element={<TripRoutePlan />} />
                   <Route path="trips/:id" element={<TripDetail />} />
                   <Route path="trips/:id/tracking" element={<TripTracking />} />
                   <Route path="trips/:id/chat" element={<TripChat />} />

@@ -165,6 +165,18 @@ export async function uploadEpod(file: File): Promise<string> {
 export type LoadDetail = Load;
 export type LoadSummary = Load;
 
+export interface TripRoutePlan {
+  id: number;
+  trip_id: number;
+  plan_json: any;
+  tolls_amount: number | null;
+  tolls_currency: string | null;
+  compliance_status: string | null;
+  compliance_notes: string | null;
+  created_at: string;
+  updated_at: string | null;
+}
+
 export async function fetchLoadsForHauler(
   haulerId: string
 ): Promise<LoadSummary[]> {
@@ -199,7 +211,16 @@ export async function fetchLoadById(id: number): Promise<LoadDetail> {
     throw new Error(`Failed to fetch load ${id} (${response.status})`);
   }
   const json = await response.json();
-  return json.data as LoadDetail;
+  const raw = json.data as Partial<Load> & {
+    pickup_location_text?: string | null;
+    dropoff_location_text?: string | null;
+  };
+  const normalized: Load = {
+    ...(raw as Load),
+    pickup_location: raw.pickup_location ?? raw.pickup_location_text ?? "",
+    dropoff_location: raw.dropoff_location ?? raw.dropoff_location_text ?? "",
+  };
+  return normalized as LoadDetail;
 }
 
 export async function fetchPaymentsForUser(
@@ -426,10 +447,68 @@ export async function fetchTripByLoadId(
 ): Promise<TripRecord | null> {
   const url = new URL(`${API_BASE_URL}/api/trips`);
   url.searchParams.set("load_id", String(loadId));
-  const response = await fetch(url.toString());
+  const response = await fetch(url.toString(), {
+    headers: getAuthHeaders(),
+  });
   if (!response.ok) {
     throw new Error(`Failed to fetch trip for load (${response.status})`);
   }
   const trips = (await response.json()) as TripRecord[];
   return trips[0] || null;
+}
+
+export async function fetchTripRoutePlan(
+  tripId: number
+): Promise<TripRoutePlan | null> {
+  const response = await fetch(`${API_BASE_URL}/api/trips/${tripId}/route-plan`, {
+    headers: getAuthHeaders(),
+  });
+  if (response.status === 404) {
+    return null;
+  }
+  if (!response.ok) {
+    const text = await response.text().catch(() => "");
+    throw new Error(`Failed to fetch route plan (${response.status}): ${text}`);
+  }
+  const json = await response.json();
+  return (json.plan ?? null) as TripRoutePlan | null;
+}
+
+export async function upsertTripRoutePlan(
+  tripId: number,
+  payload: {
+    plan_json: any;
+    tolls_amount?: number | null;
+    tolls_currency?: string | null;
+    compliance_status?: string | null;
+    compliance_notes?: string | null;
+  }
+): Promise<TripRoutePlan> {
+  const response = await fetch(`${API_BASE_URL}/api/trips/${tripId}/route-plan`, {
+    method: "POST",
+    headers: getAuthHeaders({ "Content-Type": "application/json" }),
+    body: JSON.stringify(payload),
+  });
+  if (!response.ok) {
+    const text = await response.text().catch(() => "");
+    throw new Error(`Failed to save route plan (${response.status}): ${text}`);
+  }
+  const json = await response.json();
+  return json.plan as TripRoutePlan;
+}
+
+export async function generateTripRoutePlan(tripId: number): Promise<TripRoutePlan> {
+  const response = await fetch(
+    `${API_BASE_URL}/api/trips/${tripId}/route-plan/generate`,
+    {
+      method: "POST",
+      headers: getAuthHeaders({ "Content-Type": "application/json" }),
+    }
+  );
+  if (!response.ok) {
+    const text = await response.text().catch(() => "");
+    throw new Error(`Failed to generate route plan (${response.status}): ${text}`);
+  }
+  const json = await response.json();
+  return json.plan as TripRoutePlan;
 }

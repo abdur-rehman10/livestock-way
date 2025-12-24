@@ -4,6 +4,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "../components/ui/card"
 import { Badge } from "../components/ui/badge";
 import { Input } from "../components/ui/input";
 import { Label } from "../components/ui/label";
+import { Checkbox } from "../components/ui/checkbox";
 import {
   Select,
   SelectContent,
@@ -101,6 +102,13 @@ const initialVehicleForm = {
   plate_number: "",
   truck_type: "cattle_trailer",
   capacity: "",
+  height_m: "",
+  width_m: "",
+  length_m: "",
+  axle_count: "",
+  max_gross_weight_kg: "",
+  max_axle_weight_kg: "",
+  hazmat_permitted: false,
   species_supported: "",
   notes: "",
 };
@@ -173,6 +181,17 @@ export function FleetManagement() {
         plate_number: vehicleForm.plate_number.trim(),
         truck_type: vehicleForm.truck_type,
         capacity_weight_kg: vehicleForm.capacity ? Number(vehicleForm.capacity) : null,
+        height_m: vehicleForm.height_m ? Number(vehicleForm.height_m) : null,
+        width_m: vehicleForm.width_m ? Number(vehicleForm.width_m) : null,
+        length_m: vehicleForm.length_m ? Number(vehicleForm.length_m) : null,
+        axle_count: vehicleForm.axle_count ? Number(vehicleForm.axle_count) : null,
+        max_gross_weight_kg: vehicleForm.max_gross_weight_kg
+          ? Number(vehicleForm.max_gross_weight_kg)
+          : null,
+        max_axle_weight_kg: vehicleForm.max_axle_weight_kg
+          ? Number(vehicleForm.max_axle_weight_kg)
+          : null,
+        hazmat_permitted: vehicleForm.hazmat_permitted,
         species_supported: vehicleForm.species_supported.trim() || null,
         notes: vehicleForm.notes.trim() || null,
       });
@@ -348,6 +367,56 @@ export function FleetManagement() {
                                 {vehicle.capacity ? `${vehicle.capacity} kg` : "—"}
                               </div>
                             </div>
+                          </div>
+                          <div className="mt-3 grid grid-cols-3 gap-4 text-sm">
+                            <div>
+                              <div className="text-gray-600">Height</div>
+                              <div className="text-gray-900">
+                                {vehicle.height_m ? `${vehicle.height_m} m` : "—"}
+                              </div>
+                            </div>
+                            <div>
+                              <div className="text-gray-600">Width</div>
+                              <div className="text-gray-900">
+                                {vehicle.width_m ? `${vehicle.width_m} m` : "—"}
+                              </div>
+                            </div>
+                            <div>
+                              <div className="text-gray-600">Length</div>
+                              <div className="text-gray-900">
+                                {vehicle.length_m ? `${vehicle.length_m} m` : "—"}
+                              </div>
+                            </div>
+                          </div>
+                          <div className="mt-3 grid grid-cols-3 gap-4 text-sm">
+                            <div>
+                              <div className="text-gray-600">Axles</div>
+                              <div className="text-gray-900">
+                                {vehicle.axle_count ? vehicle.axle_count : "—"}
+                              </div>
+                            </div>
+                            <div>
+                              <div className="text-gray-600">Max Gross</div>
+                              <div className="text-gray-900">
+                                {vehicle.max_gross_weight_kg
+                                  ? `${vehicle.max_gross_weight_kg} kg`
+                                  : "—"}
+                              </div>
+                            </div>
+                            <div>
+                              <div className="text-gray-600">Max Axle</div>
+                              <div className="text-gray-900">
+                                {vehicle.max_axle_weight_kg
+                                  ? `${vehicle.max_axle_weight_kg} kg`
+                                  : "—"}
+                              </div>
+                            </div>
+                          </div>
+                          <div className="mt-3 text-sm">
+                            <span className="text-gray-600">Hazmat:</span>{" "}
+                            <span className="text-gray-900">
+                              {vehicle.hazmat_permitted ? "Permitted" : "Not permitted"}
+                            </span>
                           </div>
                           {vehicle.species_supported && (
                             <p className="mt-2 text-sm text-gray-600">
@@ -558,6 +627,99 @@ export function FleetManagement() {
                   setVehicleForm((prev) => ({ ...prev, capacity: e.target.value }))
                 }
               />
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <div className="space-y-2">
+                <Label>Height (m)</Label>
+                <Input
+                  type="number"
+                  min="0"
+                  step="0.01"
+                  value={vehicleForm.height_m}
+                  onChange={(e) =>
+                    setVehicleForm((prev) => ({ ...prev, height_m: e.target.value }))
+                  }
+                />
+              </div>
+              <div className="space-y-2">
+                <Label>Width (m)</Label>
+                <Input
+                  type="number"
+                  min="0"
+                  step="0.01"
+                  value={vehicleForm.width_m}
+                  onChange={(e) =>
+                    setVehicleForm((prev) => ({ ...prev, width_m: e.target.value }))
+                  }
+                />
+              </div>
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <div className="space-y-2">
+                <Label>Length (m)</Label>
+                <Input
+                  type="number"
+                  min="0"
+                  step="0.01"
+                  value={vehicleForm.length_m}
+                  onChange={(e) =>
+                    setVehicleForm((prev) => ({ ...prev, length_m: e.target.value }))
+                  }
+                />
+              </div>
+              <div className="space-y-2">
+                <Label>Axle Count</Label>
+                <Input
+                  type="number"
+                  min="0"
+                  step="1"
+                  value={vehicleForm.axle_count}
+                  onChange={(e) =>
+                    setVehicleForm((prev) => ({ ...prev, axle_count: e.target.value }))
+                  }
+                />
+              </div>
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <div className="space-y-2">
+                <Label>Max Gross Weight (kg)</Label>
+                <Input
+                  type="number"
+                  min="0"
+                  step="1"
+                  value={vehicleForm.max_gross_weight_kg}
+                  onChange={(e) =>
+                    setVehicleForm((prev) => ({
+                      ...prev,
+                      max_gross_weight_kg: e.target.value,
+                    }))
+                  }
+                />
+              </div>
+              <div className="space-y-2">
+                <Label>Max Axle Weight (kg)</Label>
+                <Input
+                  type="number"
+                  min="0"
+                  step="1"
+                  value={vehicleForm.max_axle_weight_kg}
+                  onChange={(e) =>
+                    setVehicleForm((prev) => ({
+                      ...prev,
+                      max_axle_weight_kg: e.target.value,
+                    }))
+                  }
+                />
+              </div>
+            </div>
+            <div className="flex items-center gap-2">
+              <Checkbox
+                checked={vehicleForm.hazmat_permitted}
+                onCheckedChange={(checked) =>
+                  setVehicleForm((prev) => ({ ...prev, hazmat_permitted: !!checked }))
+                }
+              />
+              <Label>Hazmat Permitted</Label>
             </div>
             <div className="space-y-2">
               <Label>Supported Species</Label>

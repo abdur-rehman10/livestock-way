@@ -45,6 +45,13 @@ export interface TruckRecord {
   plate_number: string;
   truck_type: string;
   capacity: number | null;
+  height_m?: number | null;
+  width_m?: number | null;
+  length_m?: number | null;
+  axle_count?: number | null;
+  max_gross_weight_kg?: number | null;
+  max_axle_weight_kg?: number | null;
+  hazmat_permitted?: boolean | null;
   status: string;
   truck_name?: string | null;
   species_supported?: string | null;
@@ -96,6 +103,13 @@ export async function createTruck(payload: {
   plate_number: string;
   truck_type: string;
   capacity_weight_kg?: number | null;
+  height_m?: number | null;
+  width_m?: number | null;
+  length_m?: number | null;
+  axle_count?: number | null;
+  max_gross_weight_kg?: number | null;
+  max_axle_weight_kg?: number | null;
+  hazmat_permitted?: boolean | null;
   species_supported?: string | null;
   notes?: string | null;
 }) {
@@ -106,6 +120,13 @@ export async function createTruck(payload: {
       plate_number: payload.plate_number,
       truck_type: payload.truck_type,
       capacity: payload.capacity_weight_kg ?? null,
+      height_m: payload.height_m ?? null,
+      width_m: payload.width_m ?? null,
+      length_m: payload.length_m ?? null,
+      axle_count: payload.axle_count ?? null,
+      max_gross_weight_kg: payload.max_gross_weight_kg ?? null,
+      max_axle_weight_kg: payload.max_axle_weight_kg ?? null,
+      hazmat_permitted: payload.hazmat_permitted ?? false,
       species_supported: payload.species_supported ?? null,
       notes: payload.notes ?? null,
     }),

@@ -9,6 +9,9 @@ import {
   updateTripExpense,
   deleteTripExpense,
   fetchTripByLoadId,
+  fetchTripRoutePlan,
+  generateTripRoutePlan,
+  type TripRoutePlan,
 } from "../lib/api";
 import type { TripExpense, TripRecord, Payment } from "../lib/types";
 import { storage, STORAGE_KEYS } from "../lib/storage";
@@ -134,8 +137,44 @@ export function TripDetail() {
   const [vehicleOptions, setVehicleOptions] = useState<HaulerVehicleOption[]>([]);
   const [resourceLoading, setResourceLoading] = useState(false);
   const [resourceError, setResourceError] = useState<string | null>(null);
+  const [routePlan, setRoutePlan] = useState<TripRoutePlan | null>(null);
+  const [routePlanLoading, setRoutePlanLoading] = useState(false);
+  const [routePlanError, setRoutePlanError] = useState<string | null>(null);
+  const [routePlanSaving, setRoutePlanSaving] = useState(false);
   const marketplaceTripId = marketplaceContext?.trip ? Number(marketplaceContext.trip.id) : null;
   const tripId = trip?.id ?? marketplaceTripId;
+  const restStopPlan = useMemo(() => {
+    if (!trip?.rest_stop_plan_json) return null;
+    if (typeof trip.rest_stop_plan_json === "string") {
+      try {
+        return JSON.parse(trip.rest_stop_plan_json);
+      } catch {
+        return null;
+      }
+    }
+    return trip.rest_stop_plan_json;
+  }, [trip?.rest_stop_plan_json]);
+
+  const normalizedPlan = useMemo(() => {
+    if (!routePlan?.plan_json) return null;
+    return routePlan.plan_json;
+  }, [routePlan]);
+
+  const handleGenerateRoutePlan = async () => {
+    if (!tripId) return;
+    setRoutePlanSaving(true);
+    setRoutePlanError(null);
+    try {
+      const saved = await generateTripRoutePlan(tripId);
+      setRoutePlan(saved);
+      toast.success("Route plan generated");
+    } catch (err: any) {
+      setRoutePlanError(err?.message || "Failed to generate route plan");
+      toast.error(err?.message || "Failed to generate route plan");
+    } finally {
+      setRoutePlanSaving(false);
+    }
+  };
 
   useEffect(() => {
     if (!id) {
@@ -295,6 +334,29 @@ export function TripDetail() {
     loadExpenses();
     return () => {
       cancelled = true;
+    };
+  }, [tripId]);
+
+  useEffect(() => {
+    if (!tripId) return;
+    let active = true;
+    setRoutePlanLoading(true);
+    setRoutePlanError(null);
+    fetchTripRoutePlan(tripId)
+      .then((plan) => {
+        if (!active) return;
+        setRoutePlan(plan);
+      })
+      .catch((err: any) => {
+        if (!active) return;
+        setRoutePlanError(err?.message || "Failed to load route plan");
+      })
+      .finally(() => {
+        if (!active) return;
+        setRoutePlanLoading(false);
+      });
+    return () => {
+      active = false;
     };
   }, [tripId]);
 
@@ -1030,7 +1092,121 @@ export function TripDetail() {
             Live map and IoT telemetry will be integrated in later phases. For
             now, use the tracking view for a monitoring-friendly layout.
           </div>
+          <div className="rounded-md border border-gray-200 bg-gray-50 p-3 text-[11px] text-gray-700 space-y-2">
+            <div className="flex items-center justify-between">
+              <p className="text-xs font-semibold text-gray-900">Route plan</p>
+              <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-medium text-amber-800">
+                Draft
+              </span>
+            </div>
+            {routePlanLoading ? (
+              <div className="text-gray-500">Loading route plan…</div>
+            ) : routePlanError ? (
+              <div className="text-rose-600">{routePlanError}</div>
+            ) : null}
+            <div className="grid grid-cols-2 gap-2">
+              <div>
+                <div className="text-gray-500">Origin</div>
+                <div className="text-gray-900">{load?.pickup_location || "—"}</div>
+              </div>
+              <div>
+                <div className="text-gray-500">Destination</div>
+                <div className="text-gray-900">{load?.dropoff_location || "—"}</div>
+              </div>
+            </div>
+            <div className="grid grid-cols-3 gap-2">
+              <div>
+                <div className="text-gray-500">Distance</div>
+                <div className="text-gray-900">
+                  {normalizedPlan?.distance_km
+                    ? `${normalizedPlan.distance_km} km`
+                    : trip?.route_distance_km
+                    ? `${trip.route_distance_km} km`
+                    : "—"}
+                </div>
+              </div>
+              <div>
+                <div className="text-gray-500">Tolls</div>
+                <div className="text-gray-900">
+                  {routePlan?.tolls_amount
+                    ? `${routePlan.tolls_amount} ${routePlan.tolls_currency || "USD"}`
+                    : "Estimate pending"}
+                </div>
+              </div>
+              <div>
+                <div className="text-gray-500">Compliance</div>
+                <div className="text-gray-900">
+                  {routePlan?.compliance_status ||
+                    normalizedPlan?.compliance_status ||
+                    "Truck checks pending"}
+                </div>
+              </div>
+            </div>
+            {routePlan?.compliance_notes || normalizedPlan?.compliance_notes ? (
+              <div className="text-gray-600">
+                {routePlan?.compliance_notes || normalizedPlan?.compliance_notes}
+              </div>
+            ) : null}
+            <div>
+              <div className="text-gray-500">Rest stops</div>
+              {(normalizedPlan?.stops?.length || restStopPlan?.stops?.length) ? (
+                <div className="mt-1 space-y-1">
+                  {(normalizedPlan?.stops ?? restStopPlan?.stops ?? []).map((stop: any) => (
+                    <div
+                      key={`${stop.stop_number}-${stop.at_distance_km}`}
+                      className="flex items-start justify-between gap-3 rounded border border-gray-200 bg-white px-2 py-1"
+                    >
+                      <div>
+                        <div className="text-gray-900">
+                          {stop.label || `Stop ${stop.stop_number ?? ""}`.trim()}
+                        </div>
+                        <div className="text-gray-500">{stop.notes}</div>
+                      </div>
+                      <div className="text-gray-700">
+                        {stop.at_distance_km ? `${stop.at_distance_km} km` : "—"}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div className="text-gray-500">No rest stops planned yet.</div>
+              )}
+            </div>
+            <div className="grid grid-cols-2 gap-2">
+              <div>
+                <div className="text-gray-500">Washouts</div>
+                <div className="text-gray-900">
+                  {normalizedPlan?.washouts?.length
+                    ? `${normalizedPlan.washouts.length} planned`
+                    : "Not planned"}
+                </div>
+              </div>
+              <div>
+                <div className="text-gray-500">Feed/Hay</div>
+                <div className="text-gray-900">
+                  {normalizedPlan?.feed_stops?.length
+                    ? `${normalizedPlan.feed_stops.length} planned`
+                    : "Not planned"}
+                </div>
+              </div>
+            </div>
+          </div>
           <div className="flex flex-wrap gap-2">
+            <button
+              type="button"
+              onClick={handleGenerateRoutePlan}
+              className="inline-flex items-center rounded-md border border-slate-200 px-3 py-1.5 text-[11px] font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-60"
+              disabled={routePlanSaving || !tripId}
+            >
+              {routePlanSaving ? "Generating…" : "Generate route plan"}
+            </button>
+            <button
+              type="button"
+              onClick={() => navigate(`/hauler/trips/${load.id}/route-plan`)}
+              className="inline-flex items-center rounded-md border border-slate-200 px-3 py-1.5 text-[11px] font-medium text-slate-700 hover:bg-slate-50"
+            >
+              View full plan
+            </button>
             <button
               type="button"
               onClick={() => navigate(`${trackingBase}/trips/${load.id}/tracking`)}

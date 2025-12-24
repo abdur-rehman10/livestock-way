@@ -84,6 +84,13 @@ function mapTruckRow(row: any) {
     plate_number: row.plate_number,
     truck_type: row.truck_type,
     capacity: row.capacity,
+    height_m: row.height_m ?? null,
+    width_m: row.width_m ?? null,
+    length_m: row.length_m ?? null,
+    axle_count: row.axle_count ?? null,
+    max_gross_weight_kg: row.max_gross_weight_kg ?? null,
+    max_axle_weight_kg: row.max_axle_weight_kg ?? null,
+    hazmat_permitted: row.hazmat_permitted ?? false,
     status: row.status,
     notes: meta.notes ?? null,
     truck_name: meta.truck_name ?? null,
@@ -109,6 +116,13 @@ router.post(
       species_supported,
       notes,
       description,
+      height_m,
+      width_m,
+      length_m,
+      axle_count,
+      max_gross_weight_kg,
+      max_axle_weight_kg,
+      hazmat_permitted,
     } = req.body;
 
     if (!truck_name || !plate_number) {
@@ -141,6 +155,42 @@ router.post(
       return res.status(400).json({ message: "Capacity must be numeric" });
     }
 
+    const heightValue = height_m !== undefined && height_m !== null ? Number(height_m) : null;
+    if (heightValue !== null && Number.isNaN(heightValue)) {
+      return res.status(400).json({ message: "Height must be numeric" });
+    }
+
+    const widthValue = width_m !== undefined && width_m !== null ? Number(width_m) : null;
+    if (widthValue !== null && Number.isNaN(widthValue)) {
+      return res.status(400).json({ message: "Width must be numeric" });
+    }
+
+    const lengthValue = length_m !== undefined && length_m !== null ? Number(length_m) : null;
+    if (lengthValue !== null && Number.isNaN(lengthValue)) {
+      return res.status(400).json({ message: "Length must be numeric" });
+    }
+
+    const axleValue = axle_count !== undefined && axle_count !== null ? Number(axle_count) : null;
+    if (axleValue !== null && (Number.isNaN(axleValue) || !Number.isInteger(axleValue))) {
+      return res.status(400).json({ message: "Axle count must be an integer" });
+    }
+
+    const maxGrossValue =
+      max_gross_weight_kg !== undefined && max_gross_weight_kg !== null
+        ? Number(max_gross_weight_kg)
+        : null;
+    if (maxGrossValue !== null && Number.isNaN(maxGrossValue)) {
+      return res.status(400).json({ message: "Max gross weight must be numeric" });
+    }
+
+    const maxAxleValue =
+      max_axle_weight_kg !== undefined && max_axle_weight_kg !== null
+        ? Number(max_axle_weight_kg)
+        : null;
+    if (maxAxleValue !== null && Number.isNaN(maxAxleValue)) {
+      return res.status(400).json({ message: "Max axle weight must be numeric" });
+    }
+
     const notesPayload: TruckNotesMeta = {
       truck_name,
       species_supported: species_supported ?? null,
@@ -153,20 +203,47 @@ router.post(
         plate_number,
         truck_type,
         capacity_weight_kg,
+        height_m,
+        width_m,
+        length_m,
+        axle_count,
+        max_gross_weight_kg,
+        max_axle_weight_kg,
+        hazmat_permitted,
         status,
         notes
       )
-      VALUES ($1,$2,$3,$4,'active',$5)
+      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,'active',$12)
       RETURNING
         id,
         hauler_id,
         plate_number,
         truck_type,
         capacity_weight_kg AS capacity,
+        height_m,
+        width_m,
+        length_m,
+        axle_count,
+        max_gross_weight_kg,
+        max_axle_weight_kg,
+        hazmat_permitted,
         status,
         notes,
         created_at`,
-      [haulerId, plate_number, normalizedType, capacityNumber, serializeTruckNotes(notesPayload)]
+      [
+        haulerId,
+        plate_number,
+        normalizedType,
+        capacityNumber,
+        heightValue,
+        widthValue,
+        lengthValue,
+        axleValue,
+        maxGrossValue,
+        maxAxleValue,
+        Boolean(hazmat_permitted),
+        serializeTruckNotes(notesPayload),
+      ]
     );
 
     const truck = mapTruckRow(result.rows[0]);
@@ -205,6 +282,13 @@ router.get("/", requireRoles(["hauler"]), async (req: AuthedRequest, res: Respon
         plate_number,
         truck_type,
         capacity_weight_kg AS capacity,
+        height_m,
+        width_m,
+        length_m,
+        axle_count,
+        max_gross_weight_kg,
+        max_axle_weight_kg,
+        hazmat_permitted,
         status,
         notes,
         created_at
@@ -236,6 +320,13 @@ router.get("/:id", requireRoles(["hauler"]), async (req: AuthedRequest, res: Res
         plate_number,
         truck_type,
         capacity_weight_kg AS capacity,
+        height_m,
+        width_m,
+        length_m,
+        axle_count,
+        max_gross_weight_kg,
+        max_axle_weight_kg,
+        hazmat_permitted,
         status,
         notes,
         created_at
