@@ -43,6 +43,7 @@ export function AppLayout({ children, userRole, onLogout }: AppLayoutProps) {
   const [showNotifications, setShowNotifications] = useState(false);
   const navigate = useNavigate();
   const location = useLocation();
+  const accountMode = storage.get<string>(STORAGE_KEYS.ACCOUNT_MODE, 'COMPANY');
 
   const roleConfig = {
     hauler: {
@@ -114,6 +115,12 @@ export function AppLayout({ children, userRole, onLogout }: AppLayoutProps) {
   };
 
   const config = roleConfig[userRole];
+  const routes =
+    userRole === 'hauler' && accountMode === 'INDIVIDUAL'
+      ? config.routes.filter(
+          (route) => route.path !== '/hauler/fleet' && route.path !== '/hauler/team'
+        )
+      : config.routes;
   const userName = storage.get(STORAGE_KEYS.USER_NAME, 'User');
   const userEmail =
     storage.get(STORAGE_KEYS.USER_EMAIL, storage.get(STORAGE_KEYS.USER_PHONE, ''));
@@ -185,7 +192,7 @@ export function AppLayout({ children, userRole, onLogout }: AppLayoutProps) {
           {/* Navigation */}
           <nav className="flex-1 overflow-y-auto p-2">
             <div className="space-y-1">
-              {config.routes.map((route) => {
+              {routes.map((route) => {
                 const Icon = route.icon;
                 return (
                   <NavLink

@@ -194,6 +194,7 @@ export interface HaulerSummary {
     fleet_count: number;
     driver_count: number;
     completed_trips: number;
+    hauler_type?: string | null;
     rating: number | null;
 }
 export interface HaulerDriverRecord {

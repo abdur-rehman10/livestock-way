@@ -132,6 +132,7 @@ export default function SignupLogin({ preselectedRole, onAuth, onForgotPassword,
       const token: string = data?.token;
       const userRole: string = data?.user?.user_type;
       const userId: string | number | undefined = data?.user?.id;
+      const accountMode: string = data?.user?.account_mode || 'COMPANY';
 
       if (!token || !userRole) {
         throw new Error('Invalid response from server');
@@ -139,6 +140,7 @@ export default function SignupLogin({ preselectedRole, onAuth, onForgotPassword,
 
       localStorage.setItem('token', token);
       localStorage.setItem('role', userRole);
+      storage.set(STORAGE_KEYS.ACCOUNT_MODE, accountMode);
       if (userId !== undefined && userId !== null) {
         storage.set(STORAGE_KEYS.USER_ID, String(userId));
       }
@@ -199,6 +201,7 @@ export default function SignupLogin({ preselectedRole, onAuth, onForgotPassword,
       const token: string = data?.token;
       const userRole: string = data?.user?.user_type;
       const userId: string | number | undefined = data?.user?.id;
+      const accountMode: string = data?.user?.account_mode || payload.account_mode || 'COMPANY';
 
       if (!token || !userRole) {
         throw new Error('Invalid response from server');
@@ -206,6 +209,7 @@ export default function SignupLogin({ preselectedRole, onAuth, onForgotPassword,
 
       localStorage.setItem('token', token);
       localStorage.setItem('role', userRole);
+      storage.set(STORAGE_KEYS.ACCOUNT_MODE, accountMode);
       if (userId !== undefined && userId !== null) {
         storage.set(STORAGE_KEYS.USER_ID, String(userId));
       }

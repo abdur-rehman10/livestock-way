@@ -19,6 +19,18 @@ const TRUCK_TYPE_VALUES = new Set([
     "mixed_livestock",
     "other",
 ]);
+async function getHaulerMeta(haulerId) {
+    const { rows } = await database_1.pool.query(`
+      SELECT
+        hauler_type,
+        (SELECT COUNT(*) FROM trucks t WHERE t.hauler_id = h.id AND t.status <> 'inactive')::int AS truck_count,
+        (SELECT COUNT(*) FROM drivers d WHERE d.hauler_id = h.id)::int AS driver_count
+      FROM haulers h
+      WHERE h.id = $1
+      LIMIT 1
+    `, [haulerId]);
+    return rows[0] ?? null;
+}
 function normalizeTruckType(value) {
     if (!value)
         return "other";
@@ -74,6 +86,11 @@ router.post("/", (0, rbac_1.requireRoles)(["hauler"], { allowSuperAdminOverride:
             return res.status(401).json({ message: "Unauthorized" });
         }
         const haulerId = await (0, profileHelpers_1.ensureHaulerProfile)(userId);
+        const haulerMeta = await getHaulerMeta(haulerId);
+        const haulerType = (haulerMeta?.hauler_type ?? "company").toString().toLowerCase();
+        if (haulerType === "individual" && Number(haulerMeta?.truck_count ?? 0) >= 1) {
+            return res.status(400).json({ message: "Individual haulers can only register one truck." });
+        }
         const normalizedType = normalizeTruckType(equipment_type || truck_type);
         const capacityInput = capacity_lbs ?? capacity ?? req.body.capacity_weight_kg ?? null;
         const capacityNumber = capacityInput !== null && capacityInput !== undefined
