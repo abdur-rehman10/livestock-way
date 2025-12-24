@@ -2,6 +2,7 @@
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.ensureShipperProfile = ensureShipperProfile;
 exports.ensureHaulerProfile = ensureHaulerProfile;
+exports.ensureStakeholderProfile = ensureStakeholderProfile;
 const database_1 = require("../config/database");
 async function getUserName(userId) {
     const result = await database_1.pool.query("SELECT full_name FROM app_users WHERE id = $1", [userId]);
@@ -37,6 +38,17 @@ async function ensureHaulerProfile(userId) {
     const inserted = await database_1.pool.query(`INSERT INTO haulers (user_id, legal_name, dot_number, hauler_type)
      VALUES ($1, $2, $3, $4)
      RETURNING id`, [userId, fallbackName, dotNumber, haulerType]);
+    return inserted.rows[0].id;
+}
+async function ensureStakeholderProfile(userId) {
+    const existing = await database_1.pool.query("SELECT id FROM stakeholders WHERE user_id = $1 LIMIT 1", [userId]);
+    if (existing.rowCount) {
+        return existing.rows[0].id;
+    }
+    const fallbackName = (await getUserName(userId)) || "LivestockWay Service Provider";
+    const inserted = await database_1.pool.query(`INSERT INTO stakeholders (user_id, service_type, company_name)
+     VALUES ($1, $2, $3)
+     RETURNING id`, [userId, "general", fallbackName]);
     return inserted.rows[0].id;
 }
 //# sourceMappingURL=profileHelpers.js.map

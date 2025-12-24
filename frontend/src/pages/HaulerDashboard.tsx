@@ -1,7 +1,7 @@
-import { useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Button } from '../components/ui/button';
-import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/card';
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../components/ui/card';
 import { Badge } from '../components/ui/badge';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '../components/ui/tabs';
 import { Loadboard } from './Loadboard';
@@ -24,9 +24,14 @@ import {
   Clock,
   AlertCircle,
   Plus,
-  ClipboardList
+  ClipboardList,
+  BadgeCheck
 } from 'lucide-react';
 import logo from '../assets/livestockway-logo.svg';
+import { fetchServices, bookService, fetchMyServiceBookings, payForServiceBooking } from '../api/services';
+import type { ServiceListing, ServiceBooking } from '../api/services';
+import { toast } from 'sonner';
+import { cn } from '../components/ui/utils';
 
 interface HaulerDashboardProps {
   onLogout?: () => void;
@@ -144,6 +149,90 @@ export function HaulerDashboard({ onLogout }: HaulerDashboardProps) {
   const [activeTab, setActiveTab] = useState('dashboard');
   const [isPostTruckOpen, setIsPostTruckOpen] = useState(false);
   const navigate = useNavigate();
+  const [services, setServices] = useState<ServiceListing[]>([]);
+  const [serviceBookings, setServiceBookings] = useState<ServiceBooking[]>([]);
+  const [isLoadingServices, setIsLoadingServices] = useState(false);
+  const [isBooking, setIsBooking] = useState<number | null>(null);
+  const [payingId, setPayingId] = useState<number | null>(null);
+  const activeBookingByServiceId = useMemo(() => {
+    const map = new Map<number, ServiceBooking>();
+    for (const booking of serviceBookings) {
+      const serviceId = booking.service_id ?? booking.service?.id;
+      if (!serviceId) continue;
+      const status = String(booking.status ?? "").toLowerCase();
+      if (status === "rejected" || status === "cancelled") continue;
+      map.set(Number(serviceId), booking);
+    }
+    return map;
+  }, [serviceBookings]);
+
+  const loadServices = async () => {
+    try {
+      setIsLoadingServices(true);
+      const items = await fetchServices();
+      setServices(items);
+    } catch (err: any) {
+      console.error(err);
+      toast.error(err?.message ?? 'Failed to load services');
+    } finally {
+      setIsLoadingServices(false);
+    }
+  };
+
+  const loadBookings = async () => {
+    try {
+      const items = await fetchMyServiceBookings();
+      setServiceBookings(items);
+    } catch (err: any) {
+      console.error(err);
+      toast.error(err?.message ?? 'Failed to load service requests');
+    }
+  };
+
+  useEffect(() => {
+    if (activeTab === 'services') {
+      loadServices();
+      loadBookings();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeTab]);
+
+  // lightweight polling to keep bookings fresh
+  useEffect(() => {
+    if (activeTab !== 'services') return;
+    const interval = setInterval(() => {
+      loadBookings();
+    }, 15000);
+    return () => clearInterval(interval);
+  }, [activeTab]);
+
+  const handleRequestService = async (serviceId: number) => {
+    try {
+      setIsBooking(serviceId);
+      const booking = await bookService(serviceId);
+      toast.success('Request sent to service provider');
+      setServiceBookings((prev) => [booking, ...prev]);
+    } catch (err: any) {
+      console.error(err);
+      toast.error(err?.message ?? 'Failed to request service');
+    } finally {
+      setIsBooking(null);
+    }
+  };
+
+  const handleSendPayment = async (bookingId: number) => {
+    try {
+      setPayingId(bookingId);
+      const updated = await payForServiceBooking(bookingId);
+      setServiceBookings((prev) => prev.map((b) => (b.id === bookingId ? updated : b)));
+      toast.success('Payment marked as sent');
+    } catch (err: any) {
+      console.error(err);
+      toast.error(err?.message ?? 'Failed to mark payment');
+    } finally {
+      setPayingId(null);
+    }
+  };
 
   return (
     <div className="min-h-screen bg-gray-50">
@@ -196,6 +285,12 @@ export function HaulerDashboard({ onLogout }: HaulerDashboardProps) {
                 className="data-[state=active]:border-b-2 data-[state=active]:border-[#29CA8D] rounded-none"
               >
                 Finance
+              </TabsTrigger>
+              <TabsTrigger 
+                value="services" 
+                className="data-[state=active]:border-b-2 data-[state=active]:border-[#29CA8D] rounded-none"
+              >
+                Services
               </TabsTrigger>
               <TabsTrigger 
                 value="compliance" 
@@ -436,6 +531,160 @@ export function HaulerDashboard({ onLogout }: HaulerDashboardProps) {
                   </CardContent>
                 </Card>
               ))}
+            </div>
+          </TabsContent>
+
+          {/* Services Tab */}
+          <TabsContent value="services" className="space-y-6 mt-0">
+            <div>
+              <h1 className="text-2xl text-[#172039] mb-1">Service Marketplace</h1>
+              <p className="text-gray-600">Find providers and send service requests</p>
+            </div>
+
+            <div className="grid grid-cols-1 lg:grid-cols-[2fr_1fr] gap-4">
+              <Card>
+                <CardHeader className="pb-3">
+                  <CardTitle className="text-lg">Available Services</CardTitle>
+                  <CardDescription>Browse and request what you need</CardDescription>
+                </CardHeader>
+                <CardContent className="space-y-3">
+                  {isLoadingServices ? (
+                    <div className="text-sm text-gray-500">Loading services...</div>
+                  ) : services.length === 0 ? (
+                    <div className="text-sm text-gray-500">No services posted yet.</div>
+                  ) : (
+                    services.map((service) => (
+                      <div
+                        key={service.id}
+                        className="flex flex-col gap-2 rounded-lg border p-4 lg:flex-row lg:items-center lg:gap-4"
+                      >
+                        <div className="flex-1 flex gap-3">
+                          {service.images && service.images.length > 0 ? (
+                            <img
+                              src={service.images[0]}
+                              alt={service.title}
+                              className="h-16 w-16 rounded-lg object-cover border hidden sm:block"
+                            />
+                          ) : null}
+                          <div className="flex items-center gap-2">
+                            <h4 className="text-base font-semibold text-gray-800">{service.title}</h4>
+                            {service.insured ? (
+                              <Badge variant="secondary" className="flex items-center gap-1">
+                                <BadgeCheck className="w-4 h-4" />
+                                Insured
+                              </Badge>
+                            ) : null}
+                          </div>
+                          <div>
+                            {service.description ? (
+                              <p className="text-sm text-gray-600 mt-1 line-clamp-2">{service.description}</p>
+                            ) : null}
+                            <div className="mt-2 flex flex-wrap gap-3 text-xs text-gray-500">
+                              {service.service_type ? (
+                                <span className="inline-flex items-center gap-1 rounded-full bg-gray-100 px-2 py-1">
+                                  {service.service_type}
+                                </span>
+                              ) : null}
+                              {service.city ? (
+                                <span className="inline-flex items-center gap-1 rounded-full bg-gray-100 px-2 py-1">
+                                  {service.city}{service.state ? `, ${service.state}` : ''}
+                                </span>
+                              ) : null}
+                              {service.price_type ? (
+                                <span className="inline-flex items-center gap-1 rounded-full bg-gray-100 px-2 py-1">
+                                  {service.price_type === 'fixed'
+                                    ? `Fixed ${service.base_price ? `$${service.base_price}` : ''}`
+                                    : service.price_type === 'hourly'
+                                      ? `Hourly ${service.base_price ? `$${service.base_price}` : ''}`
+                                      : 'Request Quote'}
+                                </span>
+                              ) : null}
+                            </div>
+                          </div>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          {(() => {
+                            const booking = activeBookingByServiceId.get(service.id);
+                            const status = booking ? String(booking.status ?? "").toLowerCase() : null;
+                            const label = booking
+                              ? status === "pending"
+                                ? "Requested"
+                                : status === "accepted"
+                                  ? "Accepted"
+                                  : status === "completed"
+                                    ? "Completed"
+                                    : "Requested"
+                              : "Request Service";
+                            return (
+                              <Button
+                                size="sm"
+                                className={cn(
+                                  "hover:bg-[#24b67d]",
+                                  booking ? "bg-slate-300 text-slate-700 hover:bg-slate-300" : "bg-[#29CA8D]",
+                                )}
+                                onClick={() => handleRequestService(service.id)}
+                                disabled={isBooking === service.id || !!booking}
+                              >
+                                {isBooking === service.id ? 'Sending...' : label}
+                              </Button>
+                            );
+                          })()}
+                        </div>
+                      </div>
+                    ))
+                  )}
+                </CardContent>
+              </Card>
+
+              <Card>
+                <CardHeader className="pb-3">
+                  <CardTitle className="text-lg">My Requests</CardTitle>
+                  <CardDescription>Status and payment progress</CardDescription>
+                </CardHeader>
+                <CardContent className="space-y-3">
+                  {serviceBookings.length === 0 ? (
+                    <div className="text-sm text-gray-500">No requests yet.</div>
+                  ) : (
+                    serviceBookings.map((booking) => (
+                      <div key={booking.id} className="rounded-lg border p-3">
+                        <div className="flex items-center justify-between">
+                          <div>
+                            <p className="text-sm font-semibold text-gray-800">
+                              {booking.service?.title ?? 'Service'}
+                            </p>
+                            <p className="text-xs text-gray-500">
+                              {booking.service?.city
+                                ? `${booking.service.city}${booking.service.state ? `, ${booking.service.state}` : ''}`
+                                : '—'}
+                            </p>
+                          </div>
+                          <Badge variant="secondary" className="capitalize">
+                            {booking.status}
+                          </Badge>
+                        </div>
+                        <div className="mt-2 flex items-center justify-between text-xs text-gray-500">
+                          <span>Payment: {booking.payment_status}</span>
+                          <span>{new Date(booking.created_at).toLocaleDateString()}</span>
+                        </div>
+                        {String(booking.status ?? '').toLowerCase() === 'accepted' &&
+                        String(booking.payment_status ?? '').toLowerCase() !== 'paid' &&
+                        String(booking.payment_status ?? '').toLowerCase() !== 'sent' ? (
+                          <div className="mt-2 flex justify-end">
+                            <Button
+                              size="sm"
+                              variant="secondary"
+                              onClick={() => handleSendPayment(booking.id)}
+                              disabled={payingId === booking.id}
+                            >
+                              {payingId === booking.id ? 'Submitting...' : 'Send Payment'}
+                            </Button>
+                          </div>
+                        ) : null}
+                      </div>
+                    ))
+                  )}
+                </CardContent>
+              </Card>
             </div>
           </TabsContent>
 

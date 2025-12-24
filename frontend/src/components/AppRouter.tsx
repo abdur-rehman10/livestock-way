@@ -10,6 +10,7 @@ import { DriverDashboard } from '../pages/DriverDashboard';
 import { HaulerDashboard } from '../pages/HaulerDashboard';
 import HaulerMyLoads from '../pages/HaulerMyLoads';
 import StakeholderDashboard from '../pages/StakeholderDashboard';
+import StakeholderServices from '../pages/StakeholderServices';
 import { SuperAdminDashboard } from '../pages/SuperAdminDashboard';
 import { AppLayout } from './AppLayout';
 import { Loadboard } from '../pages/Loadboard';
@@ -30,6 +31,7 @@ import SupportTab from '../pages/SupportTab';
 import { ProfileSettings } from '../pages/ProfileSettings';
 import { KeyboardShortcutsDialog } from '../pages/KeyboardShortcutsDialog';
 import { OfflineIndicator } from './OfflineIndicator';
+import PostService from '../pages/PostService';
 import { Toaster } from './ui/sonner';
 import { storage, STORAGE_KEYS, getPreferences, updatePreferences } from '../lib/storage';
 import { toast } from 'sonner';
@@ -328,9 +330,10 @@ export function AppRouter({ showKeyboardShortcuts, onKeyboardShortcutsToggle }: 
               <AppLayout userRole="stakeholder" onLogout={handleLogout}>
                 <Routes>
                   <Route path="dashboard" element={<StakeholderDashboard />} />
-                  <Route path="services" element={<div>Services Management (Coming Soon)</div>} />
+                  <Route path="services" element={<StakeholderServices />} />
                   <Route path="bookings" element={<div>Bookings (Coming Soon)</div>} />
                   <Route path="marketplace" element={<MarketplaceTab userRole="stakeholder" />} />
+                  <Route path="services/new" element={<PostService />} />
                   <Route path="earnings" element={<WalletTab />} />
                   <Route path="documents" element={<DocumentsTab />} />
                   <Route path="settings" element={<div>Service provider settings coming soon</div>} />

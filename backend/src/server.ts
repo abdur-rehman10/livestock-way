@@ -15,6 +15,7 @@ import loadboardRoutes from "./routes/loadboardRoutes";
 import driverRoutes from "./routes/driverRoutes";
 import tripRoutes from "./routes/tripRoutes";
 import marketplaceRoutes from "./routes/marketplaceRoutes";
+import serviceRoutes from "./routes/serviceRoutes";
 import kycRoutes from "./routes/kycRoutes";
 import adminRoutes from "./routes/adminRoutes";
 import { initSocket } from "./socket";
@@ -68,6 +69,7 @@ app.use("/api/loadboard", loadboardRoutes);
 app.use("/api/drivers", driverRoutes);
 app.use("/api/trips", tripRoutes);
 app.use("/api/marketplace", marketplaceRoutes);
+app.use("/api/services", serviceRoutes);
 app.use("/api/kyc", kycRoutes);
 app.use("/api/admin", adminRoutes);
 
