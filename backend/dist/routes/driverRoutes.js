@@ -27,6 +27,18 @@ async function resolveHaulerIdForRequest(req) {
         return null;
     }
 }
+async function getHaulerMeta(haulerId) {
+    const { rows } = await database_1.pool.query(`
+      SELECT
+        hauler_type,
+        (SELECT COUNT(*) FROM drivers d WHERE d.hauler_id = h.id)::int AS driver_count,
+        (SELECT COUNT(*) FROM trucks t WHERE t.hauler_id = h.id)::int AS truck_count
+      FROM haulers h
+      WHERE h.id = $1
+      LIMIT 1
+    `, [haulerId]);
+    return rows[0] ?? null;
+}
 router.post("/", async (req, res) => {
     try {
         const { first_name, last_name, phone, email, license_number, license_expiry, } = req.body;
@@ -51,9 +63,13 @@ router.post("/", async (req, res) => {
                 .status(403)
                 .json({ message: "Only haulers can create drivers" });
         }
-        const haulerCheck = await database_1.pool.query("SELECT id FROM haulers WHERE id = $1 LIMIT 1", [haulerId]);
-        if (haulerCheck.rowCount === 0) {
+        const haulerMeta = await getHaulerMeta(haulerId);
+        if (!haulerMeta) {
             return res.status(400).json({ message: "Invalid hauler profile" });
+        }
+        const haulerType = (haulerMeta.hauler_type ?? "company").toString().toLowerCase();
+        if (haulerType === "individual" && Number(haulerMeta.driver_count ?? 0) >= 3) {
+            return res.status(400).json({ message: "Individual haulers can have up to 3 drivers." });
         }
         const normalizedPhone = String(phone).trim();
         const fullName = `${first_name} ${last_name}`.trim();

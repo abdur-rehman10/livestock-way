@@ -2259,6 +2259,7 @@ async function getHaulerSummary(haulerId) {
       SELECT
         h.id::text,
         COALESCE(h.legal_name, u.full_name) AS name,
+        h.hauler_type,
         (
           SELECT COUNT(*) FROM trucks t WHERE t.hauler_id = h.id
         )::int AS fleet_count,
@@ -2278,6 +2279,7 @@ async function getHaulerSummary(haulerId) {
     return {
         id: row.id,
         name: row.name ?? null,
+        hauler_type: row.hauler_type ?? null,
         fleet_count: Number(row.fleet_count ?? 0),
         driver_count: Number(row.driver_count ?? 0),
         completed_trips: Number(row.completed_trips ?? 0),

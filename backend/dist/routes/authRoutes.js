@@ -33,10 +33,11 @@ router.post("/register", async (req, res) => {
           phone_number,
           user_type,
           account_status,
-          company_name
+          company_name,
+          account_mode
         )
-        VALUES ($1,$2,$3,$4,$5,$6,$7)
-        RETURNING id, full_name, email, user_type, company_name, account_status`, [
+        VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
+        RETURNING id, full_name, email, user_type, company_name, account_status, account_mode`, [
             full_name,
             email,
             hashed,
@@ -44,11 +45,13 @@ router.post("/register", async (req, res) => {
             normalizedType,
             "pending",
             companyValue,
+            account_mode ?? "COMPANY",
         ]);
         const token = signToken({
             id: user.rows[0].id,
             user_type: user.rows[0].user_type,
             account_status: user.rows[0].account_status,
+            account_mode: user.rows[0].account_mode ?? "COMPANY",
         });
         await (0, auditLogService_1.logAuditEvent)({
             action: "user_registered",
@@ -103,6 +106,7 @@ router.post("/login", async (req, res) => {
             id: user.id,
             user_type: user.user_type,
             account_status: user.account_status,
+            account_mode: user.account_mode ?? "COMPANY",
         });
         await (0, auditLogService_1.logAuditEvent)({
             action: "login_success",
@@ -122,6 +126,7 @@ router.post("/login", async (req, res) => {
                 user_type: user.user_type,
                 company_name: user.company_name,
                 account_status: user.account_status,
+                account_mode: user.account_mode ?? "COMPANY",
             },
         });
     }
