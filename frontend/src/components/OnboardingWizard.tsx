@@ -8,6 +8,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from './ui/
 import { Progress } from './ui/progress';
 import { Checkbox } from './ui/checkbox';
 import { Badge } from './ui/badge';
+import { AddressSearch, type MappedAddress } from './AddressSearch';
 import { 
   Truck, 
   Home, 
@@ -43,10 +44,14 @@ export default function OnboardingWizard({ role, onComplete, onSkip }: Onboardin
   const [truckLocation, setTruckLocation] = useState('');
   const [driverName, setDriverName] = useState('');
   const [driverPhone, setDriverPhone] = useState('');
+  const [truckLocationSearch, setTruckLocationSearch] = useState('');
+  const [truckLocationCoords, setTruckLocationCoords] = useState<{ lat: string; lon: string } | null>(null);
 
   // Shipper state
   const [farmName, setFarmName] = useState('');
   const [farmLocation, setFarmLocation] = useState('');
+  const [farmLocationSearch, setFarmLocationSearch] = useState('');
+  const [farmLocationCoords, setFarmLocationCoords] = useState<{ lat: string; lon: string } | null>(null);
   const [animalTypes, setAnimalTypes] = useState<string[]>([]);
   const [welfareRequirements, setWelfareRequirements] = useState('');
 
@@ -54,6 +59,8 @@ export default function OnboardingWizard({ role, onComplete, onSkip }: Onboardin
   const [serviceType, setServiceType] = useState('');
   const [serviceName, setServiceName] = useState('');
   const [serviceLocation, setServiceLocation] = useState('');
+  const [serviceLocationSearch, setServiceLocationSearch] = useState('');
+  const [serviceLocationCoords, setServiceLocationCoords] = useState<{ lat: string; lon: string } | null>(null);
   const [serviceHours, setServiceHours] = useState('');
   const [servicePrice, setServicePrice] = useState('');
 
@@ -65,6 +72,17 @@ export default function OnboardingWizard({ role, onComplete, onSkip }: Onboardin
   const [kycError, setKycError] = useState<string | null>(null);
   const [kycRequest, setKycRequest] = useState<KycRequestRecord | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+
+  const handleLocationSelect = (
+    mapped: MappedAddress,
+    setSearch: (value: string) => void,
+    setLocation: (value: string) => void,
+    setCoords: (value: { lat: string; lon: string } | null) => void,
+  ) => {
+    setSearch(mapped.fullText);
+    setLocation(mapped.fullText);
+    setCoords({ lat: mapped.lat, lon: mapped.lon });
+  };
 
   useEffect(() => {
     let active = true;
@@ -368,6 +386,22 @@ export default function OnboardingWizard({ role, onComplete, onSkip }: Onboardin
 
                 <div className="space-y-2">
                   <Label htmlFor="truck-location">Current Location *</Label>
+                  <AddressSearch
+                    value={truckLocationSearch}
+                    onChange={(text) => {
+                      setTruckLocationSearch(text);
+                      setTruckLocation(text);
+                      setTruckLocationCoords(null);
+                    }}
+                    onSelect={(mapped) =>
+                      handleLocationSelect(
+                        mapped,
+                        setTruckLocationSearch,
+                        setTruckLocation,
+                        setTruckLocationCoords,
+                      )
+                    }
+                  />
                   <Input
                     id="truck-location"
                     placeholder="City, State"
@@ -454,6 +488,22 @@ export default function OnboardingWizard({ role, onComplete, onSkip }: Onboardin
 
               <div className="space-y-2">
                 <Label htmlFor="farm-location">Location *</Label>
+                <AddressSearch
+                  value={farmLocationSearch}
+                  onChange={(text) => {
+                    setFarmLocationSearch(text);
+                    setFarmLocation(text);
+                    setFarmLocationCoords(null);
+                  }}
+                  onSelect={(mapped) =>
+                    handleLocationSelect(
+                      mapped,
+                      setFarmLocationSearch,
+                      setFarmLocation,
+                      setFarmLocationCoords,
+                    )
+                  }
+                />
                 <Input
                   id="farm-location"
                   placeholder="City, State, ZIP"
@@ -573,6 +623,22 @@ export default function OnboardingWizard({ role, onComplete, onSkip }: Onboardin
 
               <div className="space-y-2">
                 <Label htmlFor="service-location">Service Location *</Label>
+                <AddressSearch
+                  value={serviceLocationSearch}
+                  onChange={(text) => {
+                    setServiceLocationSearch(text);
+                    setServiceLocation(text);
+                    setServiceLocationCoords(null);
+                  }}
+                  onSelect={(mapped) =>
+                    handleLocationSelect(
+                      mapped,
+                      setServiceLocationSearch,
+                      setServiceLocation,
+                      setServiceLocationCoords,
+                    )
+                  }
+                />
                 <Input
                   id="service-location"
                   placeholder="Address or Highway exit"

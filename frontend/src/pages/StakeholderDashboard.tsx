@@ -27,6 +27,7 @@ import { Checkbox } from '../components/ui/checkbox';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '../components/ui/dialog';
 import { Label } from '../components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../components/ui/select';
+import { AddressSearch, type MappedAddress } from '../components/AddressSearch';
 
 interface MarketplaceListing {
   id: string;
@@ -63,6 +64,8 @@ export default function StakeholderDashboard() {
     certifications: '',
     insured: false,
   });
+  const [serviceLocationSearch, setServiceLocationSearch] = useState('');
+  const [serviceLocationCoords, setServiceLocationCoords] = useState<{ lat: string; lon: string } | null>(null);
 
   // Mock data
   const stats = [
@@ -811,6 +814,20 @@ export default function StakeholderDashboard() {
               </div>
               <div className="space-y-1">
                 <Label>Location</Label>
+                <AddressSearch
+                  value={serviceLocationSearch}
+                  onChange={setServiceLocationSearch}
+                  onSelect={(mapped: MappedAddress) => {
+                    setServiceLocationSearch(mapped.fullText);
+                    setServiceLocationCoords({ lat: mapped.lat, lon: mapped.lon });
+                    setEditForm((f) => ({
+                      ...f,
+                      city: mapped.city,
+                      state: mapped.state,
+                    }));
+                  }}
+                  disabled={editSubmitting}
+                />
                 <div className="flex gap-2">
                   <Input
                     placeholder="City"

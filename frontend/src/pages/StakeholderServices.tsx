@@ -13,6 +13,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '.
 import { deleteService, fetchMyServices, updateService } from '../api/services';
 import type { ServiceListing } from '../api/services';
 import { MapPin, Plus, Moon, Sun } from 'lucide-react';
+import { AddressSearch, type MappedAddress } from '../components/AddressSearch';
 
 export default function StakeholderServices() {
   const navigate = useNavigate();
@@ -38,6 +39,8 @@ export default function StakeholderServices() {
     certifications: '',
     insured: false,
   });
+  const [addressSearch, setAddressSearch] = useState('');
+  const [addressCoords, setAddressCoords] = useState<{ lat: string; lon: string } | null>(null);
 
   const load = async () => {
     try {
@@ -340,6 +343,22 @@ export default function StakeholderServices() {
 
                 <div className="space-y-1.5">
                   <Label className="text-xs sm:text-sm dark:text-slate-200">Street Address *</Label>
+                  <AddressSearch
+                    value={addressSearch}
+                    onChange={setAddressSearch}
+                    onSelect={(mapped: MappedAddress) => {
+                      setAddressSearch(mapped.fullText);
+                      setAddressCoords({ lat: mapped.lat, lon: mapped.lon });
+                      setEditForm((f) => ({
+                        ...f,
+                        street_address: mapped.addressLine1,
+                        city: mapped.city,
+                        state: mapped.state,
+                        zip: mapped.postalCode,
+                      }));
+                    }}
+                    disabled={saving}
+                  />
                   <Input
                     value={editForm.street_address}
                     onChange={(e) => setEditForm((f) => ({ ...f, street_address: e.target.value }))}

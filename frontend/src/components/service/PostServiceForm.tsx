@@ -5,6 +5,7 @@ import { Textarea } from '../ui/textarea';
 import { Button } from '../ui/button';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../ui/select';
 import { Checkbox } from '../ui/checkbox';
+import { AddressSearch, type MappedAddress } from '../AddressSearch';
 import {
   BadgeDollarSign,
   CalendarClock,
@@ -30,6 +31,8 @@ export interface PostServiceFormValues {
   city: string;
   state: string;
   zip: string;
+  lat?: string;
+  lon?: string;
   priceType: PriceType;
   basePrice: string;
   availability: string;
@@ -107,6 +110,8 @@ export function PostServiceForm({ onCancel, onSubmit, onUploadImage }: PostServi
     city: '',
     state: '',
     zip: '',
+    lat: '',
+    lon: '',
     priceType: 'fixed',
     basePrice: '',
     availability: '',
@@ -115,6 +120,7 @@ export function PostServiceForm({ onCancel, onSubmit, onUploadImage }: PostServi
     insured: false,
     images: [],
   });
+  const [addressSearch, setAddressSearch] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isUploading, setIsUploading] = useState(false);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
@@ -175,6 +181,19 @@ export function PostServiceForm({ onCancel, onSubmit, onUploadImage }: PostServi
     setValues((prev) => ({
       ...prev,
       images: prev.images.filter((_, i) => i !== index),
+    }));
+  };
+
+  const handleAddressSelect = (mapped: MappedAddress) => {
+    setAddressSearch(mapped.fullText);
+    setValues((prev) => ({
+      ...prev,
+      streetAddress: mapped.addressLine1,
+      city: mapped.city,
+      state: mapped.state,
+      zip: mapped.postalCode,
+      lat: mapped.lat,
+      lon: mapped.lon,
     }));
   };
 
@@ -273,12 +292,18 @@ export function PostServiceForm({ onCancel, onSubmit, onUploadImage }: PostServi
                     />
                   </LabeledField>
 
-                  <LabeledField label="Street Address" required>
-                    <Input
-                      placeholder="123 Service Road"
-                      value={values.streetAddress}
-                      onChange={(event) => handleInputChange('streetAddress')(event.target.value)}
-                      className="h-10 sm:h-11 text-sm sm:text-[15px] dark:bg-slate-900 dark:border-slate-600 dark:text-slate-100 dark:placeholder:text-slate-400"
+                  <LabeledField label="Search Address">
+                    <AddressSearch
+                      value={addressSearch}
+                      onChange={(text) => {
+                        setAddressSearch(text);
+                        setValues((prev) => ({
+                          ...prev,
+                          streetAddress: text,
+                        }));
+                      }}
+                      onSelect={handleAddressSelect}
+                      disabled={isSubmitting}
                     />
                   </LabeledField>
 

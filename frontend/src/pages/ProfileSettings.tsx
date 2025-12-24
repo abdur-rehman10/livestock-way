@@ -21,6 +21,7 @@ import {
   ArrowLeft
 } from 'lucide-react';
 import { toast } from 'sonner';
+import { AddressSearch, type MappedAddress } from '../components/AddressSearch';
 
 interface ProfileSettingsProps {
   role?: 'driver' | 'shipper';
@@ -44,6 +45,14 @@ export function ProfileSettings({ role = 'driver', onBack }: ProfileSettingsProp
     defaultPickup: '456 Ranch Road, Austin, TX 78702',
     defaultDropoff: '',
   });
+  const [addressSearch, setAddressSearch] = useState('');
+  const [addressCoords, setAddressCoords] = useState<{ lat: string; lon: string } | null>(null);
+  const [businessAddressSearch, setBusinessAddressSearch] = useState('');
+  const [businessAddressCoords, setBusinessAddressCoords] = useState<{ lat: string; lon: string } | null>(null);
+  const [defaultPickupSearch, setDefaultPickupSearch] = useState('');
+  const [defaultPickupCoords, setDefaultPickupCoords] = useState<{ lat: string; lon: string } | null>(null);
+  const [defaultDropoffSearch, setDefaultDropoffSearch] = useState('');
+  const [defaultDropoffCoords, setDefaultDropoffCoords] = useState<{ lat: string; lon: string } | null>(null);
 
   const [notifications, setNotifications] = useState({
     emailNotifications: true,
@@ -190,6 +199,15 @@ export function ProfileSettings({ role = 'driver', onBack }: ProfileSettingsProp
 
                 <div className="space-y-2">
                   <Label htmlFor="address">Address</Label>
+                  <AddressSearch
+                    value={addressSearch}
+                    onChange={setAddressSearch}
+                    onSelect={(mapped: MappedAddress) => {
+                      setAddressSearch(mapped.fullText);
+                      setProfile({ ...profile, address: mapped.fullText });
+                      setAddressCoords({ lat: mapped.lat, lon: mapped.lon });
+                    }}
+                  />
                   <div className="relative">
                     <MapPin className="absolute left-3 top-3 w-4 h-4 text-gray-400" />
                     <Textarea
@@ -249,6 +267,15 @@ export function ProfileSettings({ role = 'driver', onBack }: ProfileSettingsProp
 
                   <div className="space-y-2">
                     <Label htmlFor="businessAddress">Business Address</Label>
+                    <AddressSearch
+                      value={businessAddressSearch}
+                      onChange={setBusinessAddressSearch}
+                      onSelect={(mapped: MappedAddress) => {
+                        setBusinessAddressSearch(mapped.fullText);
+                        setBusinessInfo({ ...businessInfo, businessAddress: mapped.fullText });
+                        setBusinessAddressCoords({ lat: mapped.lat, lon: mapped.lon });
+                      }}
+                    />
                     <Textarea
                       id="businessAddress"
                       value={businessInfo.businessAddress}
@@ -259,6 +286,15 @@ export function ProfileSettings({ role = 'driver', onBack }: ProfileSettingsProp
 
                   <div className="space-y-2">
                     <Label htmlFor="defaultPickup">Default Pickup Location</Label>
+                    <AddressSearch
+                      value={defaultPickupSearch}
+                      onChange={setDefaultPickupSearch}
+                      onSelect={(mapped: MappedAddress) => {
+                        setDefaultPickupSearch(mapped.fullText);
+                        setBusinessInfo({ ...businessInfo, defaultPickup: mapped.fullText });
+                        setDefaultPickupCoords({ lat: mapped.lat, lon: mapped.lon });
+                      }}
+                    />
                     <Input
                       id="defaultPickup"
                       value={businessInfo.defaultPickup}
@@ -269,6 +305,15 @@ export function ProfileSettings({ role = 'driver', onBack }: ProfileSettingsProp
 
                   <div className="space-y-2">
                     <Label htmlFor="defaultDropoff">Default Dropoff Location</Label>
+                    <AddressSearch
+                      value={defaultDropoffSearch}
+                      onChange={setDefaultDropoffSearch}
+                      onSelect={(mapped: MappedAddress) => {
+                        setDefaultDropoffSearch(mapped.fullText);
+                        setBusinessInfo({ ...businessInfo, defaultDropoff: mapped.fullText });
+                        setDefaultDropoffCoords({ lat: mapped.lat, lon: mapped.lon });
+                      }}
+                    />
                     <Input
                       id="defaultDropoff"
                       value={businessInfo.defaultDropoff}

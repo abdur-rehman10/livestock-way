@@ -21,6 +21,7 @@ import {
   Send
 } from 'lucide-react';
 import { toast } from 'sonner';
+import { AddressSearch, type MappedAddress } from '../components/AddressSearch';
 
 interface IncidentReportDialogProps {
   open: boolean;
@@ -54,6 +55,8 @@ export function IncidentReportDialog({
   const [requiresEmergency, setRequiresEmergency] = useState(false);
   const [contactNumber, setContactNumber] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [locationSearch, setLocationSearch] = useState('');
+  const [locationCoords, setLocationCoords] = useState<{ lat: string; lon: string } | null>(null);
   
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -228,6 +231,15 @@ export function IncidentReportDialog({
           {/* Location */}
           <div className="space-y-2">
             <Label htmlFor="location">Current Location *</Label>
+            <AddressSearch
+              value={locationSearch}
+              onChange={setLocationSearch}
+              onSelect={(mapped: MappedAddress) => {
+                setLocationSearch(mapped.fullText);
+                setLocation(mapped.fullText);
+                setLocationCoords({ lat: mapped.lat, lon: mapped.lon });
+              }}
+            />
             <div className="relative">
               <MapPin className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
               <Input

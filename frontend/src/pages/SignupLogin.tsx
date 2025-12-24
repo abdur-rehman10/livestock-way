@@ -10,6 +10,7 @@ import { Switch } from '../components/ui/switch';
 import { Truck, Home, Wrench, Eye, EyeOff, Check, X, User, Shield, ArrowLeft } from 'lucide-react';
 import { Progress } from '../components/ui/progress';
 import { storage, STORAGE_KEYS } from '../lib/storage';
+import { AddressSearch, type MappedAddress } from '../components/AddressSearch';
 
 interface SignupLoginProps {
   preselectedRole?: 'hauler' | 'shipper' | 'stakeholder' | 'driver' | 'super-admin';
@@ -51,6 +52,8 @@ export default function SignupLogin({ preselectedRole, onAuth, onForgotPassword,
   const [companyName, setCompanyName] = useState('');
   const [businessId, setBusinessId] = useState('');
   const [companyAddress, setCompanyAddress] = useState('');
+  const [companyAddressSearch, setCompanyAddressSearch] = useState('');
+  const [companyAddressCoords, setCompanyAddressCoords] = useState<{ lat: string; lon: string } | null>(null);
   const [signupError, setSignupError] = useState<string | null>(null);
   const [signupLoading, setSignupLoading] = useState(false);
 
@@ -451,6 +454,15 @@ export default function SignupLogin({ preselectedRole, onAuth, onForgotPassword,
 
                     <div className="space-y-2">
                       <Label htmlFor="company-address">Business Address *</Label>
+                      <AddressSearch
+                        value={companyAddressSearch}
+                        onChange={setCompanyAddressSearch}
+                        onSelect={(mapped: MappedAddress) => {
+                          setCompanyAddressSearch(mapped.fullText);
+                          setCompanyAddress(mapped.fullText);
+                          setCompanyAddressCoords({ lat: mapped.lat, lon: mapped.lon });
+                        }}
+                      />
                       <Input
                         id="company-address"
                         placeholder="123 Main St, City, State ZIP"

@@ -14,6 +14,7 @@ import { CalendarIcon, MapPin, Lock, Globe, Users, X } from "lucide-react";
 import { toast } from "sonner";
 import { createLoad } from "../lib/api";
 import type { CreateLoadPayload } from "../lib/api";
+import { AddressSearch, type MappedAddress } from "../components/AddressSearch";
 
 interface PostLoadDialogProps {
   open?: boolean;
@@ -52,6 +53,10 @@ export function PostLoadDialog({ open = false, onOpenChange, initialData }: Post
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
+  const [pickupSearch, setPickupSearch] = useState('');
+  const [dropoffSearch, setDropoffSearch] = useState('');
+  const [pickupCoords, setPickupCoords] = useState<{ lat: string; lon: string } | null>(null);
+  const [dropoffCoords, setDropoffCoords] = useState<{ lat: string; lon: string } | null>(null);
 
   const estimatedPrice =
     formData.offerPrice && !Number.isNaN(Number(formData.offerPrice))
@@ -152,6 +157,18 @@ export function PostLoadDialog({ open = false, onOpenChange, initialData }: Post
     c.name.toLowerCase().includes(carrierSearch.toLowerCase())
   );
 
+  const handlePickupSelect = (mapped: MappedAddress) => {
+    setPickupSearch(mapped.fullText);
+    setPickupCoords({ lat: mapped.lat, lon: mapped.lon });
+    setFormData((prev) => ({ ...prev, pickup: mapped.fullText }));
+  };
+
+  const handleDropoffSelect = (mapped: MappedAddress) => {
+    setDropoffSearch(mapped.fullText);
+    setDropoffCoords({ lat: mapped.lat, lon: mapped.lon });
+    setFormData((prev) => ({ ...prev, dropoff: mapped.fullText }));
+  };
+
   return (
     <Dialog open={open} onOpenChange={(value) => onOpenChange?.(value)}>
       <DialogContent className="max-w-md max-h-[90vh] overflow-y-auto">
@@ -212,6 +229,12 @@ export function PostLoadDialog({ open = false, onOpenChange, initialData }: Post
           {/* Pickup Location */}
           <div className="space-y-2">
             <Label htmlFor="pickup">Pickup Location</Label>
+            <AddressSearch
+              value={pickupSearch}
+              onChange={setPickupSearch}
+              onSelect={handlePickupSelect}
+              disabled={isSubmitting}
+            />
             <div className="relative">
               <MapPin className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
               <Input
@@ -228,6 +251,12 @@ export function PostLoadDialog({ open = false, onOpenChange, initialData }: Post
           {/* Dropoff Location */}
           <div className="space-y-2">
             <Label htmlFor="dropoff">Dropoff Location</Label>
+            <AddressSearch
+              value={dropoffSearch}
+              onChange={setDropoffSearch}
+              onSelect={handleDropoffSelect}
+              disabled={isSubmitting}
+            />
             <div className="relative">
               <MapPin className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
               <Input

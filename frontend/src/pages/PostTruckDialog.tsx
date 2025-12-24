@@ -13,6 +13,7 @@ import { Textarea } from "../components/ui/textarea";
 import { Switch } from "../components/ui/switch";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../components/ui/select";
 import { toast } from "sonner";
+import { AddressSearch, type MappedAddress } from "../components/AddressSearch";
 import {
   createTruckAvailabilityEntry,
   fetchHaulerVehicles,
@@ -62,6 +63,8 @@ export function PostTruckDialog({ open, onOpenChange, onPosted }: PostTruckDialo
     allow_shared: true,
     notes: "",
   });
+  const [originSearch, setOriginSearch] = useState("");
+  const [destinationSearch, setDestinationSearch] = useState("");
 
   const primaryTruckLabel = useMemo(() => {
     if (!form.truck_id) return "";
@@ -201,6 +204,26 @@ export function PostTruckDialog({ open, onOpenChange, onPosted }: PostTruckDialo
 
   const disabled = saving || (trucksLoading && !form.truck_id);
 
+  const handleOriginSelect = (mapped: MappedAddress) => {
+    setOriginSearch(mapped.fullText);
+    setForm((prev) => ({
+      ...prev,
+      origin: mapped.fullText,
+      origin_lat: mapped.lat,
+      origin_lng: mapped.lon,
+    }));
+  };
+
+  const handleDestinationSelect = (mapped: MappedAddress) => {
+    setDestinationSearch(mapped.fullText);
+    setForm((prev) => ({
+      ...prev,
+      destination: mapped.fullText,
+      destination_lat: mapped.lat,
+      destination_lng: mapped.lon,
+    }));
+  };
+
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-3xl">
@@ -261,6 +284,12 @@ export function PostTruckDialog({ open, onOpenChange, onPosted }: PostTruckDialo
           <div className="grid gap-3 md:grid-cols-2">
             <div className="space-y-2">
               <Label>Origin *</Label>
+              <AddressSearch
+                value={originSearch}
+                onChange={setOriginSearch}
+                onSelect={handleOriginSelect}
+                disabled={disabled}
+              />
               <Input
                 placeholder="City, State"
                 value={form.origin}
@@ -269,6 +298,12 @@ export function PostTruckDialog({ open, onOpenChange, onPosted }: PostTruckDialo
             </div>
             <div className="space-y-2">
               <Label>Destination</Label>
+              <AddressSearch
+                value={destinationSearch}
+                onChange={setDestinationSearch}
+                onSelect={handleDestinationSelect}
+                disabled={disabled}
+              />
               <Input
                 placeholder="City, State"
                 value={form.destination}
@@ -363,4 +398,3 @@ export function PostTruckDialog({ open, onOpenChange, onPosted }: PostTruckDialo
     </Dialog>
   );
 }
-
