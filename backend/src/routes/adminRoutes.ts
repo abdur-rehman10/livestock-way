@@ -553,12 +553,14 @@ router.get("/disputes", async (req, res) => {
           p.amount,
           p.currency,
           t.status AS trip_status,
+          t.payment_mode,
           l.title AS load_title
         FROM payment_disputes d
         LEFT JOIN payments p ON p.id = d.payment_id
         LEFT JOIN trips t ON t.id = d.trip_id
         LEFT JOIN loads l ON l.id = t.load_id
         WHERE ($1::text IS NULL OR d.status = $1)
+          AND (t.payment_mode IS NULL OR t.payment_mode <> 'DIRECT')
         ORDER BY d.created_at DESC
         LIMIT 200
       `,

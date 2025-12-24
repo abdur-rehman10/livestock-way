@@ -8,6 +8,8 @@ const auth_1 = __importDefault(require("../middlewares/auth"));
 const profileHelpers_1 = require("../utils/profileHelpers");
 const marketplaceService_1 = require("../services/marketplaceService");
 const socket_1 = require("../socket");
+const paymentMode_1 = require("../utils/paymentMode");
+const escrowGuard_1 = require("../utils/escrowGuard");
 function getAuthUser(req) {
     return req.user ?? {};
 }
@@ -860,6 +862,8 @@ router.post("/trips/:tripId/confirm-delivery", auth_1.default, async (req, res) 
         }
         const payment = await (0, marketplaceService_1.getPaymentForTrip)(context.trip.id);
         if (!payment || payment.status !== marketplaceService_1.PaymentStatus.ESCROW_FUNDED) {
+            if (context.trip.payment_mode === "DIRECT")
+                return (0, escrowGuard_1.escrowDisabledResponse)(res);
             return res.status(400).json({ error: "Escrow must be funded" });
         }
         const now = new Date().toISOString();
@@ -891,6 +895,14 @@ router.post("/trips/:tripId/escrow/payment-intent", auth_1.default, async (req, 
         const context = await (0, marketplaceService_1.getTripAndLoad)(tripId);
         if (!context) {
             return res.status(404).json({ error: "Trip not found" });
+        }
+        try {
+            (0, escrowGuard_1.assertEscrowEnabled)({ trip: context.trip });
+        }
+        catch (err) {
+            if (err?.code === "ESCROW_DISABLED")
+                return (0, escrowGuard_1.escrowDisabledResponse)(res);
+            throw err;
         }
         const user = getAuthUser(req);
         if (!isShipperForLoad(user, context.load) && !isSuperAdminUser(user)) {
@@ -927,6 +939,14 @@ router.get("/trips/:tripId/payment", auth_1.default, async (req, res) => {
         if (!context) {
             return res.status(404).json({ error: "Trip not found" });
         }
+        try {
+            (0, escrowGuard_1.assertEscrowEnabled)({ trip: context.trip });
+        }
+        catch (err) {
+            if (err?.code === "ESCROW_DISABLED")
+                return (0, escrowGuard_1.escrowDisabledResponse)(res);
+            throw err;
+        }
         const user = getAuthUser(req);
         const isShipper = isShipperForLoad(user, context.load);
         const isHauler = await isAuthorizedHaulerForTrip(user, context.trip);
@@ -936,6 +956,14 @@ router.get("/trips/:tripId/payment", auth_1.default, async (req, res) => {
         const payment = await (0, marketplaceService_1.getPaymentForTrip)(context.trip.id);
         if (!payment) {
             return res.status(404).json({ error: "Payment not found" });
+        }
+        try {
+            (0, escrowGuard_1.assertEscrowEnabled)({ trip: context.trip, payment });
+        }
+        catch (err) {
+            if (err?.code === "ESCROW_DISABLED")
+                return (0, escrowGuard_1.escrowDisabledResponse)(res);
+            throw err;
         }
         return res.json({ payment });
     }
@@ -957,6 +985,16 @@ router.post("/webhooks/payment-provider", async (req, res) => {
         let updatedPayment = null;
         let relatedTrip = null;
         if (event === "payment_succeeded" && payment.trip_id) {
+            try {
+                const tripContext = await (0, marketplaceService_1.getTripById)(payment.trip_id);
+                (0, escrowGuard_1.assertEscrowEnabled)({ trip: tripContext ?? null, payment });
+            }
+            catch (err) {
+                if (err?.code === "ESCROW_DISABLED") {
+                    return res.status(409).json({ error: "Escrow is disabled for direct payment trips" });
+                }
+                throw err;
+            }
             updatedPayment = await (0, marketplaceService_1.markPaymentFunded)(payment.trip_id);
             relatedTrip = await (0, marketplaceService_1.getTripById)(payment.trip_id);
         }
@@ -986,6 +1024,14 @@ router.post("/trips/:tripId/disputes", auth_1.default, async (req, res) => {
         const context = await (0, marketplaceService_1.getTripAndLoad)(tripId);
         if (!context) {
             return res.status(404).json({ error: "Trip not found" });
+        }
+        try {
+            (0, escrowGuard_1.assertEscrowEnabled)({ trip: context.trip });
+        }
+        catch (err) {
+            if (err?.code === "ESCROW_DISABLED")
+                return (0, escrowGuard_1.escrowDisabledResponse)(res);
+            throw err;
         }
         const user = getAuthUser(req);
         const isShipper = isShipperForLoad(user, context.load);
@@ -1607,11 +1653,23 @@ router.post("/bookings/:bookingId/accept", auth_1.default, async (req, res) => {
         if (!bookingId) {
             return res.status(400).json({ error: "Missing booking id" });
         }
+        if (actor === "HAULER" &&
+            (req.body?.payment_mode !== undefined ||
+                req.body?.direct_payment_disclaimer_version !== undefined ||
+                req.body?.direct_payment_disclaimer_accepted !== undefined)) {
+            return res.status(403).json({ error: "Only shippers can choose payment mode" });
+        }
+        const paymentSelection = (0, paymentMode_1.resolvePaymentModeSelection)({
+            payment_mode: req.body?.payment_mode,
+            direct_payment_disclaimer_version: req.body?.direct_payment_disclaimer_version,
+            direct_payment_disclaimer_accepted: req.body?.direct_payment_disclaimer_accepted,
+        }, actor ?? (isSuperAdminUser(authUser) ? "SUPER_ADMIN" : null));
         const result = await (0, marketplaceService_1.respondToBooking)({
             bookingId,
             actor: actor ?? "SHIPPER",
             action: "ACCEPT",
             actingUserId: String(authUser.id ?? ""),
+            paymentModeSelection: paymentSelection,
         });
         await emitBookingSideEffects(result);
         res.json(result);

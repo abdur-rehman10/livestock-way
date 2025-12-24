@@ -219,6 +219,11 @@ const getTripContext = useCallback(async (loadId: number) => {
 const openDisputeDialog = async (loadId: number) => {
   const context = await getTripContext(loadId);
   const tripId = context?.trip?.id;
+  const paymentMode = context?.trip?.payment_mode || context?.payment?.payment_mode;
+  if (paymentMode === "DIRECT") {
+    toast.error("Disputes disabled for Direct Payment trips.");
+    return;
+  }
   if (!tripId) {
     toast.error("Trip has not been created yet.");
     return;

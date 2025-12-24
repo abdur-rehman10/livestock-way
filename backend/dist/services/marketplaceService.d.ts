@@ -46,6 +46,7 @@ export declare enum BookingStatus {
     REJECTED = "REJECTED",
     CANCELLED = "CANCELLED"
 }
+export type PaymentMode = "ESCROW" | "DIRECT";
 export interface LoadRecord {
     id: string;
     shipper_id: string;
@@ -146,6 +147,9 @@ export interface TripRecord {
     assigned_driver_id: string | null;
     assigned_vehicle_id: string | null;
     status: TripStatus;
+    payment_mode: PaymentMode;
+    direct_payment_disclaimer_accepted_at: string | null;
+    direct_payment_disclaimer_version: string | null;
     started_at: string | null;
     delivered_at: string | null;
     delivered_confirmed_at: string | null;
@@ -303,6 +307,11 @@ export declare function respondToBooking(params: {
     actor: "SHIPPER" | "HAULER";
     action: "ACCEPT" | "REJECT";
     actingUserId: string;
+    paymentModeSelection?: {
+        paymentMode: PaymentMode;
+        directDisclaimerAt: string | null;
+        directDisclaimerVersion: string | null;
+    } | null;
 }): Promise<{
     booking: LoadBookingRecord;
     trip?: TripRecord;
@@ -325,6 +334,11 @@ export declare function acceptOfferAndCreateTrip(params: {
     haulerUserId: string;
     amount: number;
     currency: string;
+    paymentModeSelection?: {
+        paymentMode: PaymentMode;
+        directDisclaimerAt: string | null;
+        directDisclaimerVersion: string | null;
+    };
 }): Promise<{
     trip: TripRecord;
     payment: PaymentRecord;

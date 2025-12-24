@@ -72,6 +72,12 @@ export default function HaulerBookingsTab() {
                       ? `${booking.requested_headcount} head`
                       : "capacity"}
                   </div>
+                  <div className="mt-1 text-[11px] text-gray-600">
+                    Payment:{" "}
+                    <span className="font-semibold">
+                      {(booking.payment_mode ?? "ESCROW") === "DIRECT" ? "Direct" : "Escrow"}
+                    </span>
+                  </div>
                   {booking.notes && (
                     <p className="mt-1 text-xs text-gray-600">{booking.notes}</p>
                   )}

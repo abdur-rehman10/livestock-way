@@ -86,6 +86,9 @@ export interface TripRecord {
   assigned_driver_id: string | null;
   assigned_vehicle_id: string | null;
   status: string;
+  payment_mode?: "ESCROW" | "DIRECT";
+  direct_payment_disclaimer_accepted_at?: string | null;
+  direct_payment_disclaimer_version?: string | null;
   started_at: string | null;
   delivered_at: string | null;
   delivered_confirmed_at: string | null;
@@ -103,6 +106,7 @@ export interface PaymentRecord {
   currency: string;
   status: string;
   auto_release_at: string | null;
+  payment_mode?: "ESCROW" | "DIRECT";
   is_escrow: boolean;
   created_at: string;
   updated_at: string;
@@ -174,6 +178,7 @@ export interface LoadBooking {
   offered_currency: string | null;
   status: string;
   notes: string | null;
+  payment_mode?: "ESCROW" | "DIRECT";
   created_at: string;
   updated_at: string;
 }
