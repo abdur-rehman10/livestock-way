@@ -452,7 +452,7 @@ useEffect(() => {
                       >
                         Track
                       </Button>
-                      {payment?.status === "AWAITING_FUNDING" && (
+                      {payment?.payment_mode !== "DIRECT" && payment?.status === "AWAITING_FUNDING" && (
                         <Button
                           size="sm"
                           variant="secondary"
@@ -463,7 +463,7 @@ useEffect(() => {
                           {fundingLoadId === load.id ? "Funding…" : "Fund Escrow"}
                         </Button>
                       )}
-                      {payment?.trip_id && (
+                      {payment?.trip_id && payment?.payment_mode !== "DIRECT" && (
                         <Button
                           size="sm"
                           variant="outline"
@@ -472,6 +472,9 @@ useEffect(() => {
                         >
                           Dispute
                         </Button>
+                      )}
+                      {payment?.payment_mode === "DIRECT" && (
+                        <span className="text-[11px] text-gray-600">Disputes disabled for Direct Payment</span>
                       )}
                       {resolveEpodUrl(load.epod_url) && (
                         <Button size="sm" variant="outline" className="text-xs" asChild>

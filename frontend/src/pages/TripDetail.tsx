@@ -1069,6 +1069,7 @@ export function TripDetail() {
           onFund={handleFundEscrow}
           funding={funding}
           fundError={fundError}
+          paymentMode={(payment as any).payment_mode}
         />
       )}
 

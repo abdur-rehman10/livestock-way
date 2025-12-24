@@ -47,6 +47,7 @@ interface PaymentCardProps {
   onFund: (paymentId: number) => Promise<void>;
   funding?: boolean;
   fundError?: string | null;
+  paymentMode?: "ESCROW" | "DIRECT";
 }
 
 export const PaymentCard: React.FC<PaymentCardProps> = ({
@@ -55,7 +56,9 @@ export const PaymentCard: React.FC<PaymentCardProps> = ({
   onFund,
   funding = false,
   fundError = null,
+  paymentMode,
 }) => {
+  const mode = paymentMode ?? (payment as any).payment_mode ?? "ESCROW";
   const normalizedStatus = (payment.status || "").toUpperCase();
   const meta = STATUS_META[normalizedStatus] ?? {
     label: payment.status,
@@ -66,6 +69,7 @@ export const PaymentCard: React.FC<PaymentCardProps> = ({
   const [confirmVisible, setConfirmVisible] = React.useState(false);
 
   const canFund =
+    mode !== "DIRECT" &&
     isShipper &&
     ["PENDING_FUNDING", "PENDING"].includes(normalizedStatus) &&
     !funding;
@@ -94,14 +98,21 @@ export const PaymentCard: React.FC<PaymentCardProps> = ({
             Tracks the escrow status for this trip
           </p>
         </div>
-        <span
-          className={[
-            "inline-flex rounded-full px-2 py-[2px] text-[11px] font-medium",
-            meta.badgeClass,
-          ].join(" ")}
-        >
-          {meta.label}
-        </span>
+        <div className="flex items-center gap-2">
+          <span className="inline-flex rounded-full px-2 py-[2px] text-[11px] font-medium border border-gray-200 text-gray-700">
+            {mode === "DIRECT" ? "Payment: Direct (No escrow)" : "Payment: Escrow"}
+          </span>
+          {mode !== "DIRECT" && (
+            <span
+              className={[
+                "inline-flex rounded-full px-2 py-[2px] text-[11px] font-medium",
+                meta.badgeClass,
+              ].join(" ")}
+            >
+              {meta.label}
+            </span>
+          )}
+        </div>
       </div>
 
       <div className="flex flex-wrap items-baseline gap-2">
@@ -140,7 +151,7 @@ export const PaymentCard: React.FC<PaymentCardProps> = ({
           </div>
         )}
 
-      {fundError && (
+      {fundError && mode !== "DIRECT" && (
         <div className="text-[11px] text-red-600">{fundError}</div>
       )}
 
