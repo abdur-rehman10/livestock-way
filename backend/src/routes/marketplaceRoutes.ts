@@ -73,6 +73,13 @@ import {
   listVehiclesForHauler,
 } from "../services/marketplaceService";
 import { emitEvent, SOCKET_EVENTS } from "../socket";
+import { resolvePaymentModeSelection } from "../utils/paymentMode";
+import {
+  assertDisputesEnabled,
+  assertEscrowEnabled,
+  disputesDisabledResponse,
+  escrowDisabledResponse,
+} from "../utils/escrowGuard";
 
 type AuthUser = {
   id?: string;
@@ -628,6 +635,16 @@ async function getDisputeContext(disputeId: string) {
   return { dispute, trip, load, payment };
 }
 
+async function ensureTripPaymentModeImmutable(tripId: string, incomingMode?: string | null) {
+  if (!incomingMode) return;
+  const trip = await getTripById(tripId);
+  if (!trip) return;
+  const normalized = incomingMode.toUpperCase();
+  if (trip.payment_mode && trip.payment_mode !== normalized) {
+    throw new Error("PAYMENT_MODE_IMMUTABLE");
+  }
+}
+
 const ADMIN_MESSAGE_TARGETS = new Set(["SHIPPER", "HAULER", "ALL"]);
 
 function resolveDisputeRecipientRole(
@@ -810,6 +827,18 @@ router.get("/trips/:tripId", authRequired, async (req, res) => {
     const context = await getTripAndLoad(tripId);
     if (!context) {
       return res.status(404).json({ error: "Trip not found" });
+    }
+    try {
+      assertDisputesEnabled(context.trip);
+    } catch (err: any) {
+      if (err?.code === "DISPUTES_DISABLED") return disputesDisabledResponse(res);
+      throw err;
+    }
+    try {
+      assertDisputesEnabled(context.trip);
+    } catch (err: any) {
+      if (err?.code === "DISPUTES_DISABLED") return disputesDisabledResponse(res);
+      throw err;
     }
     const user = getAuthUser(req);
     const isShipper = isShipperForLoad(user, context.load);
@@ -1050,8 +1079,10 @@ router.post("/trips/:tripId/confirm-delivery", authRequired, async (req, res) =>
       return res.status(400).json({ error: "Trip not awaiting confirmation" });
     }
     const payment = await getPaymentForTrip(context.trip.id);
-    if (!payment || payment.status !== PaymentStatus.ESCROW_FUNDED) {
-      return res.status(400).json({ error: "Escrow must be funded" });
+    if (context.trip.payment_mode !== "DIRECT") {
+      if (!payment || payment.status !== PaymentStatus.ESCROW_FUNDED) {
+        return res.status(400).json({ error: "Escrow must be funded" });
+      }
     }
     const now = new Date().toISOString();
     const updatedTrip = await updateTripStatus(
@@ -1060,7 +1091,10 @@ router.post("/trips/:tripId/confirm-delivery", authRequired, async (req, res) =>
       { delivered_confirmed_at: now }
     );
     const releaseAt = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString();
-    const updatedPayment = await scheduleAutoRelease({ tripId: context.trip.id, releaseAt });
+    const updatedPayment =
+      context.trip.payment_mode === "DIRECT"
+        ? payment
+        : await scheduleAutoRelease({ tripId: context.trip.id, releaseAt });
     const updatedLoad = await updateLoadStatus(context.load.id, LoadStatus.DELIVERED);
     emitTripEvent(updatedTrip);
     emitPaymentEvent(updatedPayment);
@@ -1088,11 +1122,17 @@ router.post("/trips/:tripId/escrow/payment-intent", authRequired, async (req, re
     if (!context) {
       return res.status(404).json({ error: "Trip not found" });
     }
+    try {
+      assertEscrowEnabled({ trip: context.trip });
+    } catch (err: any) {
+      if (err?.code === "ESCROW_DISABLED") return escrowDisabledResponse(res);
+      throw err;
+    }
     const user = getAuthUser(req);
     if (!isShipperForLoad(user, context.load) && !isSuperAdminUser(user)) {
       return res.status(403).json({ error: "Forbidden" });
     }
-    if (context.trip.status !== TripStatus.PENDING_ESCROW) {
+    if (context.trip.payment_mode !== "DIRECT" && context.trip.status !== TripStatus.PENDING_ESCROW) {
       return res.status(400).json({ error: "Trip must be PENDING_ESCROW" });
     }
     const provider = req.body?.provider || "dummy";
@@ -1124,6 +1164,12 @@ router.get("/trips/:tripId/payment", authRequired, async (req, res) => {
     if (!context) {
       return res.status(404).json({ error: "Trip not found" });
     }
+    try {
+      assertEscrowEnabled({ trip: context.trip });
+    } catch (err: any) {
+      if (err?.code === "ESCROW_DISABLED") return escrowDisabledResponse(res);
+      throw err;
+    }
     const user = getAuthUser(req);
     const isShipper = isShipperForLoad(user, context.load);
     const isHauler = await isAuthorizedHaulerForTrip(user, context.trip);
@@ -1133,6 +1179,12 @@ router.get("/trips/:tripId/payment", authRequired, async (req, res) => {
     const payment = await getPaymentForTrip(context.trip.id);
     if (!payment) {
       return res.status(404).json({ error: "Payment not found" });
+    }
+    try {
+      assertEscrowEnabled({ trip: context.trip, payment });
+    } catch (err: any) {
+      if (err?.code === "ESCROW_DISABLED") return escrowDisabledResponse(res);
+      throw err;
     }
     return res.json({ payment });
   } catch (err) {
@@ -1154,6 +1206,15 @@ router.post("/webhooks/payment-provider", async (req, res) => {
     let updatedPayment: PaymentRecord | null = null;
     let relatedTrip: TripRecord | null = null;
     if (event === "payment_succeeded" && payment.trip_id) {
+      try {
+        const tripContext = await getTripById(payment.trip_id);
+        assertEscrowEnabled({ trip: tripContext ?? null, payment });
+      } catch (err: any) {
+        if (err?.code === "ESCROW_DISABLED") {
+          return res.status(409).json({ error: "Escrow is disabled for direct payment trips" });
+        }
+        throw err;
+      }
       updatedPayment = await markPaymentFunded(payment.trip_id);
       relatedTrip = await getTripById(payment.trip_id);
     } else if (event === "payment_failed") {
@@ -1184,6 +1245,12 @@ router.post("/trips/:tripId/disputes", authRequired, async (req, res) => {
     if (!context) {
       return res.status(404).json({ error: "Trip not found" });
     }
+    try {
+      assertEscrowEnabled({ trip: context.trip });
+    } catch (err: any) {
+      if (err?.code === "ESCROW_DISABLED") return escrowDisabledResponse(res);
+      throw err;
+    }
     const user = getAuthUser(req);
     const isShipper = isShipperForLoad(user, context.load);
     const isHauler = await isAuthorizedHaulerForTrip(user, context.trip);
@@ -1191,6 +1258,9 @@ router.post("/trips/:tripId/disputes", authRequired, async (req, res) => {
       return res.status(403).json({ error: "Forbidden" });
     }
     const payment = await getPaymentForTrip(context.trip.id);
+    if (context.trip.payment_mode === "DIRECT") {
+      return disputesDisabledResponse(res);
+    }
     if (!payment || payment.status !== PaymentStatus.ESCROW_FUNDED) {
       return res.status(400).json({ error: "Disputes require funded escrow" });
     }
@@ -1247,6 +1317,12 @@ router.get("/trips/:tripId/disputes", authRequired, async (req, res) => {
     if (!context) {
       return res.status(404).json({ error: "Trip not found" });
     }
+    try {
+      assertDisputesEnabled(context.trip);
+    } catch (err: any) {
+      if (err?.code === "DISPUTES_DISABLED") return disputesDisabledResponse(res);
+      throw err;
+    }
     const user = getAuthUser(req);
     const isShipper = isShipperForLoad(user, context.load);
     const isHauler = await isAuthorizedHaulerForTrip(user, context.trip);
@@ -1271,6 +1347,24 @@ router.get("/disputes/:disputeId", authRequired, async (req, res) => {
     if (!context || !context.trip || !context.load) {
       return res.status(404).json({ error: "Dispute not found" });
     }
+    try {
+      assertDisputesEnabled(context.trip);
+    } catch (err: any) {
+      if (err?.code === "DISPUTES_DISABLED") return disputesDisabledResponse(res);
+      throw err;
+    }
+    try {
+      assertDisputesEnabled(context.trip);
+    } catch (err: any) {
+      if (err?.code === "DISPUTES_DISABLED") return disputesDisabledResponse(res);
+      throw err;
+    }
+    try {
+      assertDisputesEnabled(context.trip);
+    } catch (err: any) {
+      if (err?.code === "DISPUTES_DISABLED") return disputesDisabledResponse(res);
+      throw err;
+    }
     const user = getAuthUser(req);
     const isShipper = isShipperForLoad(user, context.load);
     const isHauler = await isAuthorizedHaulerForTrip(user, context.trip);
@@ -1293,6 +1387,12 @@ router.post("/disputes/:disputeId/messages", authRequired, async (req, res) => {
     const context = await getDisputeContext(disputeId);
     if (!context || !context.trip || !context.load) {
       return res.status(404).json({ error: "Dispute not found" });
+    }
+    try {
+      assertDisputesEnabled(context.trip);
+    } catch (err: any) {
+      if (err?.code === "DISPUTES_DISABLED") return disputesDisabledResponse(res);
+      throw err;
     }
     const user = getAuthUser(req);
     const isShipper = isShipperForLoad(user, context.load);
@@ -1331,6 +1431,12 @@ router.get("/disputes/:disputeId/messages", authRequired, async (req, res) => {
     if (!context || !context.trip || !context.load) {
       return res.status(404).json({ error: "Dispute not found" });
     }
+    try {
+      assertDisputesEnabled(context.trip);
+    } catch (err: any) {
+      if (err?.code === "DISPUTES_DISABLED") return disputesDisabledResponse(res);
+      throw err;
+    }
     const user = getAuthUser(req);
     const isShipper = isShipperForLoad(user, context.load);
     const isHauler = await isAuthorizedHaulerForTrip(user, context.trip);
@@ -1354,6 +1460,12 @@ router.post("/disputes/:disputeId/cancel", authRequired, async (req, res) => {
     const context = await getDisputeContext(disputeId);
     if (!context || !context.trip || !context.load || !context.payment) {
       return res.status(404).json({ error: "Dispute not found" });
+    }
+    try {
+      assertDisputesEnabled(context.trip);
+    } catch (err: any) {
+      if (err?.code === "DISPUTES_DISABLED") return disputesDisabledResponse(res);
+      throw err;
     }
     if (context.dispute.status !== DisputeStatus.OPEN) {
       return res.status(400).json({ error: "Only OPEN disputes can be cancelled" });
@@ -1417,6 +1529,15 @@ router.post("/admin/disputes/:disputeId/start-review", authRequired, async (req,
     if (!disputeId) {
       return res.status(400).json({ error: "Missing disputeId" });
     }
+    const context = await getDisputeContext(disputeId);
+    if (context?.trip) {
+      try {
+        assertDisputesEnabled(context.trip);
+      } catch (err: any) {
+        if (err?.code === "DISPUTES_DISABLED") return disputesDisabledResponse(res);
+        throw err;
+      }
+    }
     const dispute = await updateDisputeStatus(disputeId, DisputeStatus.UNDER_REVIEW);
     if (!dispute) {
       return res.status(404).json({ error: "Dispute not found" });
@@ -1438,6 +1559,15 @@ router.post("/admin/disputes/:disputeId/resolve-release", authRequired, async (r
     const disputeId = req.params.disputeId;
     if (!disputeId) {
       return res.status(400).json({ error: "Missing disputeId" });
+    }
+    const context = await getDisputeContext(disputeId);
+    if (context?.trip) {
+      try {
+        assertDisputesEnabled(context.trip);
+      } catch (err: any) {
+        if (err?.code === "DISPUTES_DISABLED") return disputesDisabledResponse(res);
+        throw err;
+      }
     }
     const result = await resolveDisputeLifecycle({
       disputeId,
@@ -1465,6 +1595,18 @@ router.post("/admin/disputes/:disputeId/resolve-refund", authRequired, async (re
     const disputeId = req.params.disputeId;
     if (!disputeId) {
       return res.status(400).json({ error: "Missing disputeId" });
+    }
+    const context = await getDisputeContext(disputeId);
+    if (context?.trip) {
+      try {
+        assertDisputesEnabled(context.trip);
+      } catch (err: any) {
+        if (err?.code === "DISPUTES_DISABLED") return disputesDisabledResponse(res);
+        throw err;
+      }
+    }
+    if (context?.trip?.payment_mode === "DIRECT") {
+      return escrowDisabledResponse(res);
     }
     const result = await resolveDisputeLifecycle({
       disputeId,
@@ -1496,6 +1638,14 @@ router.post("/admin/disputes/:disputeId/resolve-split", authRequired, async (req
     const context = await getDisputeContext(disputeId);
     if (!context || !context.payment) {
       return res.status(404).json({ error: "Dispute not found" });
+    }
+    if (context.trip) {
+      try {
+        assertDisputesEnabled(context.trip);
+      } catch (err: any) {
+        if (err?.code === "DISPUTES_DISABLED") return disputesDisabledResponse(res);
+        throw err;
+      }
     }
     const amountToHauler = Number(req.body?.amount_to_hauler ?? 0);
     const amountToShipper = Number(req.body?.amount_to_shipper ?? 0);
@@ -1841,11 +1991,28 @@ router.post(
       if (!bookingId) {
         return res.status(400).json({ error: "Missing booking id" });
       }
+      if (
+        actor === "HAULER" &&
+        (req.body?.payment_mode !== undefined ||
+          req.body?.direct_payment_disclaimer_version !== undefined ||
+          req.body?.direct_payment_disclaimer_accepted !== undefined)
+      ) {
+        return res.status(403).json({ error: "Only shippers can choose payment mode" });
+      }
+      const paymentSelection = resolvePaymentModeSelection(
+        {
+          payment_mode: req.body?.payment_mode,
+          direct_payment_disclaimer_version: req.body?.direct_payment_disclaimer_version,
+          direct_payment_disclaimer_accepted: req.body?.direct_payment_disclaimer_accepted,
+        },
+        actor ?? (isSuperAdminUser(authUser) ? "SUPER_ADMIN" : null)
+      );
       const result = await respondToBooking({
         bookingId,
         actor: actor ?? "SHIPPER",
         action: "ACCEPT",
         actingUserId: String(authUser.id ?? ""),
+        paymentModeSelection: paymentSelection,
       });
       await emitBookingSideEffects(result);
       res.json(result);

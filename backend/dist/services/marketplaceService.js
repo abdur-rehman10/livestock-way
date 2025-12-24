@@ -62,6 +62,7 @@ exports.addDisputeMessage = addDisputeMessage;
 exports.listDisputeMessages = listDisputeMessages;
 exports.updateDisputeStatus = updateDisputeStatus;
 const database_1 = require("../config/database");
+const escrowGuard_1 = require("../utils/escrowGuard");
 var LoadStatus;
 (function (LoadStatus) {
     LoadStatus["DRAFT"] = "DRAFT";
@@ -249,6 +250,9 @@ function mapTripRow(row) {
         assigned_driver_id: row.driver_id,
         assigned_vehicle_id: row.truck_id,
         status: mapTripStatusFromDb(row.status),
+        payment_mode: row.payment_mode === "DIRECT" ? "DIRECT" : "ESCROW",
+        direct_payment_disclaimer_accepted_at: row.direct_payment_disclaimer_accepted_at ?? null,
+        direct_payment_disclaimer_version: row.direct_payment_disclaimer_version ?? null,
         started_at: row.actual_start_time,
         delivered_at: row.actual_end_time,
         delivered_confirmed_at: row.delivered_confirmed_at,
@@ -1467,7 +1471,7 @@ async function updateBookingStatus(bookingId, status, userId) {
     `, [bookingId, status, userId ?? null]);
     return result.rows[0] ? mapBookingRow(result.rows[0]) : null;
 }
-async function createTripFromTruckBooking(booking) {
+async function createTripFromTruckBooking(booking, paymentModeSelection) {
     const availability = await getTruckAvailabilityById(booking.truck_availability_id);
     if (!availability) {
         throw new Error("Truck availability not found");
@@ -1491,15 +1495,20 @@ async function createTripFromTruckBooking(booking) {
     if (!amount || amount <= 0) {
         throw new Error("Booking amount required");
     }
+    const paymentMode = paymentModeSelection?.paymentMode ?? "ESCROW";
+    const isEscrow = paymentMode !== "DIRECT";
     const tripResult = await database_1.pool.query(`
       INSERT INTO trips (
         load_id,
         hauler_id,
         truck_id,
-        status
+        status,
+        payment_mode,
+        direct_payment_disclaimer_accepted_at,
+        direct_payment_disclaimer_version
       )
       VALUES (
-        $1,$2,$3,$4
+        $1,$2,$3,$4,$5,$6,$7
       )
       RETURNING *
     `, [
@@ -1507,6 +1516,9 @@ async function createTripFromTruckBooking(booking) {
         booking.hauler_id,
         availability.truck_id,
         mapTripStatusToDb(TripStatus.PENDING_ESCROW),
+        paymentMode,
+        paymentMode === "DIRECT" ? paymentModeSelection?.directDisclaimerAt ?? null : null,
+        paymentMode === "DIRECT" ? paymentModeSelection?.directDisclaimerVersion ?? null : null,
     ]);
     const tripRow = tripResult.rows[0];
     if (!tripRow) {
@@ -1525,7 +1537,7 @@ async function createTripFromTruckBooking(booking) {
         is_escrow
       )
       VALUES (
-        $1,$2,$3,$4,$5,$6,$7,true
+        $1,$2,$3,$4,$5,$6,$7,$8
       )
       RETURNING *
     `, [
@@ -1536,6 +1548,7 @@ async function createTripFromTruckBooking(booking) {
         amount,
         booking.offered_currency ?? "USD",
         mapPaymentStatusToDb(PaymentStatus.AWAITING_FUNDING),
+        isEscrow,
     ]);
     const paymentRow = paymentResult.rows[0];
     if (!paymentRow) {
@@ -1589,12 +1602,13 @@ async function respondToBooking(params) {
             haulerUserId: offer.created_by_user_id,
             amount: Number(offer.offered_amount),
             currency: offer.currency,
+            paymentModeSelection: params.paymentModeSelection ?? undefined,
         });
         trip = result.trip;
         payment = result.payment;
     }
     else if (booking.truck_availability_id) {
-        const result = await createTripFromTruckBooking(booking);
+        const result = await createTripFromTruckBooking(booking, params.paymentModeSelection ?? undefined);
         trip = result.trip;
         payment = result.payment;
     }
@@ -1654,6 +1668,8 @@ async function expireOtherOffers(loadId, acceptedOfferId, client) {
 }
 async function acceptOfferAndCreateTrip(params) {
     const client = await database_1.pool.connect();
+    const paymentMode = params.paymentModeSelection?.paymentMode ?? "ESCROW";
+    const isEscrow = paymentMode !== "DIRECT";
     async function ensureTruckId() {
         let truckRows = (await client.query(`
           SELECT id::text
@@ -1761,10 +1777,13 @@ async function acceptOfferAndCreateTrip(params) {
           hauler_id,
           truck_id,
           driver_id,
-          status
+          status,
+          payment_mode,
+          direct_payment_disclaimer_accepted_at,
+          direct_payment_disclaimer_version
         )
         VALUES (
-          $1,$2,$3,$4,$5
+          $1,$2,$3,$4,$5,$6,$7,$8
         )
         RETURNING *
       `, [
@@ -1773,6 +1792,9 @@ async function acceptOfferAndCreateTrip(params) {
             truckId,
             driverId,
             mapTripStatusToDb(TripStatus.PENDING_ESCROW),
+            paymentMode,
+            paymentMode === "DIRECT" ? params.paymentModeSelection?.directDisclaimerAt ?? null : null,
+            paymentMode === "DIRECT" ? params.paymentModeSelection?.directDisclaimerVersion ?? null : null,
         ]);
         const tripRow = tripResult.rows[0];
         if (!tripRow) {
@@ -1786,15 +1808,15 @@ async function acceptOfferAndCreateTrip(params) {
           payer_user_id,
           payee_user_id,
           amount,
-          currency,
-          status,
-          is_escrow
-        )
-        VALUES (
-          $1,$2,$3,$4,$5,$6,$7,true
-        )
-        RETURNING *
-      `, [
+        currency,
+        status,
+        is_escrow
+      )
+      VALUES (
+        $1,$2,$3,$4,$5,$6,$7,$8
+      )
+      RETURNING *
+    `, [
             trip.id,
             params.loadId,
             params.shipperUserId,
@@ -1802,6 +1824,7 @@ async function acceptOfferAndCreateTrip(params) {
             params.amount,
             params.currency,
             mapPaymentStatusToDb(PaymentStatus.AWAITING_FUNDING),
+            isEscrow,
         ]);
         const paymentRow = paymentResult.rows[0];
         if (!paymentRow) {
@@ -2057,6 +2080,8 @@ async function updateLoadStatus(loadId, status, client) {
     return row ? mapLoadRow(row) : null;
 }
 async function attachEscrowPaymentIntent(input) {
+    const trip = await getTripById(input.tripId);
+    (0, escrowGuard_1.assertEscrowEnabled)({ trip });
     const result = await database_1.pool.query(`
       UPDATE payments
       SET status = $1,
@@ -2078,6 +2103,8 @@ async function markPaymentFunded(tripId) {
     const client = await database_1.pool.connect();
     try {
         await client.query("BEGIN");
+        const trip = await getTripById(tripId);
+        (0, escrowGuard_1.assertEscrowEnabled)({ trip });
         const paymentResult = await client.query(`
         UPDATE payments
         SET status = $1,
@@ -2112,6 +2139,8 @@ async function markPaymentFunded(tripId) {
     }
 }
 async function scheduleAutoRelease(input) {
+    const trip = await getTripById(input.tripId);
+    (0, escrowGuard_1.assertEscrowEnabled)({ trip });
     const result = await database_1.pool.query(`
       UPDATE payments
       SET auto_release_at = $1,
@@ -2155,6 +2184,11 @@ async function getPaymentByIntentId(intentId) {
     return row ? mapPaymentRow(row) : null;
 }
 async function updatePaymentStatus(paymentId, status, patch = {}) {
+    const existing = await getPaymentById(paymentId);
+    if (existing) {
+        const trip = existing.trip_id ? await getTripById(existing.trip_id) : null;
+        (0, escrowGuard_1.assertEscrowEnabled)({ trip, payment: existing });
+    }
     const sets = ["status = $2", "updated_at = NOW()"];
     const values = [paymentId, mapPaymentStatusToDb(status)];
     if (patch.external_charge_id !== undefined) {
@@ -2175,6 +2209,11 @@ async function updatePaymentStatus(paymentId, status, patch = {}) {
     return row ? mapPaymentRow(row) : null;
 }
 async function clearAutoReleaseForPayment(paymentId) {
+    const existing = await getPaymentById(paymentId);
+    if (existing) {
+        const trip = existing.trip_id ? await getTripById(existing.trip_id) : null;
+        (0, escrowGuard_1.assertEscrowEnabled)({ trip, payment: existing });
+    }
     const result = await database_1.pool.query(`
       UPDATE payments
       SET auto_release_at = NULL,
@@ -2232,6 +2271,9 @@ async function updatePaymentTripLoadWithinClient(client, paymentId, paymentStatu
     return { payment, trip, load };
 }
 async function finalizePaymentLifecycle(params) {
+    const paymentExisting = await getPaymentById(params.paymentId);
+    const tripExisting = paymentExisting?.trip_id ? await getTripById(paymentExisting.trip_id) : null;
+    (0, escrowGuard_1.assertEscrowEnabled)({ trip: tripExisting ?? undefined, payment: paymentExisting ?? undefined });
     const client = await database_1.pool.connect();
     try {
         await client.query("BEGIN");
@@ -2310,6 +2352,8 @@ async function autoReleaseReadyPayments() {
         ]);
         const updates = [];
         for (const row of candidates.rows) {
+            const trip = row.trip_id ? await getTripById(row.trip_id) : null;
+            (0, escrowGuard_1.assertEscrowEnabled)({ trip, payment: mapPaymentRow(row) });
             const result = await updatePaymentTripLoadWithinClient(client, row.id, PaymentStatus.RELEASED_TO_HAULER, {
                 tripStatus: TripStatus.CLOSED,
                 loadStatus: LoadStatus.COMPLETED,
@@ -2355,6 +2399,9 @@ async function resolveDisputeLifecycle(params) {
             throw new Error("DISPUTE_NOT_FOUND");
         }
         const dispute = mapDisputeRow(disputeRow);
+        const existingPayment = await getPaymentById(dispute.payment_id);
+        const trip = dispute.trip_id ? await getTripById(dispute.trip_id) : null;
+        (0, escrowGuard_1.assertEscrowEnabled)({ trip, payment: existingPayment ?? undefined });
         const lifecycle = await updatePaymentTripLoadWithinClient(client, dispute.payment_id, params.paymentStatus, { tripStatus: TripStatus.CLOSED, loadStatus: LoadStatus.COMPLETED });
         await client.query("COMMIT");
         return { dispute, ...lifecycle };

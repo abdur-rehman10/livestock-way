@@ -102,6 +102,9 @@ export interface AdminDisputeRecord {
   currency?: string | null;
   trip_status?: string | null;
   load_title?: string | null;
+  payment_mode?: "ESCROW" | "DIRECT";
+  direct_payment_disclaimer_accepted_at?: string | null;
+  direct_payment_disclaimer_version?: string | null;
 }
 
 export interface AdminEarningRecord {

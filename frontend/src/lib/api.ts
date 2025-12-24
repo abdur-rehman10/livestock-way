@@ -41,6 +41,9 @@ export interface CreateLoadPayload {
   price_offer_amount?: number | null;
   price_currency?: string | null;
   created_by?: string | null;
+  payment_mode?: "ESCROW" | "DIRECT";
+  direct_payment_disclaimer_accepted?: boolean;
+  direct_payment_disclaimer_version?: string | null;
 }
 
 export async function fetchLoads(): Promise<Load[]> {

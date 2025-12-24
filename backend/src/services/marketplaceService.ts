@@ -1,5 +1,6 @@
 import { PoolClient } from "pg";
 import { pool } from "../config/database";
+import { assertEscrowEnabled } from "../utils/escrowGuard";
 
 export enum LoadStatus {
   DRAFT = "DRAFT",
@@ -36,6 +37,7 @@ export enum PaymentStatus {
   REFUNDED_TO_SHIPPER = "REFUNDED_TO_SHIPPER",
   SPLIT_BETWEEN_PARTIES = "SPLIT_BETWEEN_PARTIES",
   CANCELLED = "CANCELLED",
+  NOT_APPLICABLE = "NOT_APPLICABLE",
 }
 
 export enum DisputeStatus {
@@ -53,6 +55,8 @@ export enum BookingStatus {
   REJECTED = "REJECTED",
   CANCELLED = "CANCELLED",
 }
+
+export type PaymentMode = "ESCROW" | "DIRECT";
 
 type DbStatusMap<T extends string> = Record<string, T>;
 
@@ -128,6 +132,7 @@ const PAYMENT_STATUS_DB_TO_APP: DbStatusMap<PaymentStatus> = {
   SPLIT_BETWEEN_PARTIES: PaymentStatus.SPLIT_BETWEEN_PARTIES,
   failed: PaymentStatus.CANCELLED,
   CANCELLED: PaymentStatus.CANCELLED,
+  NOT_APPLICABLE: PaymentStatus.NOT_APPLICABLE,
 };
 
 const PAYMENT_STATUS_APP_TO_DB: Record<PaymentStatus, string> = {
@@ -137,6 +142,7 @@ const PAYMENT_STATUS_APP_TO_DB: Record<PaymentStatus, string> = {
   [PaymentStatus.REFUNDED_TO_SHIPPER]: "REFUNDED_TO_SHIPPER",
   [PaymentStatus.SPLIT_BETWEEN_PARTIES]: "SPLIT_BETWEEN_PARTIES",
   [PaymentStatus.CANCELLED]: "CANCELLED",
+  [PaymentStatus.NOT_APPLICABLE]: "NOT_APPLICABLE",
 };
 
 function mapLoadStatusFromDb(value: string | null): LoadStatus {
@@ -225,6 +231,9 @@ export interface LoadBookingRecord {
   requested_weight_kg: string | null;
   offered_amount: string | null;
   offered_currency: string | null;
+  payment_mode?: PaymentMode;
+  direct_payment_disclaimer_accepted_at?: string | null;
+  direct_payment_disclaimer_version?: string | null;
   status: BookingStatus;
   notes: string | null;
   created_by_user_id: string;
@@ -303,6 +312,9 @@ export interface TripRecord {
   assigned_driver_id: string | null;
   assigned_vehicle_id: string | null;
   status: TripStatus;
+  payment_mode: PaymentMode;
+  direct_payment_disclaimer_accepted_at: string | null;
+  direct_payment_disclaimer_version: string | null;
   started_at: string | null;
   delivered_at: string | null;
   delivered_confirmed_at: string | null;
@@ -398,6 +410,9 @@ type TripRow = {
   driver_id: string | null;
   truck_id: string | null;
   status: string | null;
+  payment_mode?: string | null;
+  direct_payment_disclaimer_accepted_at?: string | null;
+  direct_payment_disclaimer_version?: string | null;
   actual_start_time: string | null;
   actual_end_time: string | null;
   delivered_confirmed_at: string | null;
@@ -413,6 +428,10 @@ function mapTripRow(row: TripRow): TripRecord {
     assigned_driver_id: row.driver_id,
     assigned_vehicle_id: row.truck_id,
     status: mapTripStatusFromDb(row.status),
+    payment_mode:
+      (row.payment_mode as PaymentMode | null | undefined) === "DIRECT" ? "DIRECT" : "ESCROW",
+    direct_payment_disclaimer_accepted_at: row.direct_payment_disclaimer_accepted_at ?? null,
+    direct_payment_disclaimer_version: row.direct_payment_disclaimer_version ?? null,
     started_at: row.actual_start_time,
     delivered_at: row.actual_end_time,
     delivered_confirmed_at: row.delivered_confirmed_at,
@@ -1934,7 +1953,12 @@ async function updateBookingStatus(
 }
 
 async function createTripFromTruckBooking(
-  booking: LoadBookingRecord
+  booking: LoadBookingRecord,
+  paymentModeSelection?: {
+    paymentMode: PaymentMode;
+    directDisclaimerAt: string | null;
+    directDisclaimerVersion: string | null;
+  }
 ): Promise<{ trip: TripRecord; payment: PaymentRecord }> {
   const availability = await getTruckAvailabilityById(booking.truck_availability_id!);
   if (!availability) {
@@ -1962,16 +1986,26 @@ async function createTripFromTruckBooking(
     throw new Error("Booking amount required");
   }
 
+  const paymentMode = paymentModeSelection?.paymentMode ?? "ESCROW";
+  const isEscrow = paymentMode !== "DIRECT";
+  const tripStatus = isEscrow ? TripStatus.PENDING_ESCROW : TripStatus.READY_TO_START;
+  const paymentStatus = isEscrow
+    ? PaymentStatus.AWAITING_FUNDING
+    : PaymentStatus.NOT_APPLICABLE;
+
   const tripResult = await pool.query<TripRow>(
     `
       INSERT INTO trips (
         load_id,
         hauler_id,
         truck_id,
-        status
+        status,
+        payment_mode,
+        direct_payment_disclaimer_accepted_at,
+        direct_payment_disclaimer_version
       )
       VALUES (
-        $1,$2,$3,$4
+        $1,$2,$3,$4,$5,$6,$7
       )
       RETURNING *
     `,
@@ -1979,7 +2013,10 @@ async function createTripFromTruckBooking(
       booking.load_id,
       booking.hauler_id,
       availability.truck_id,
-      mapTripStatusToDb(TripStatus.PENDING_ESCROW),
+      mapTripStatusToDb(tripStatus),
+      paymentMode,
+      paymentMode === "DIRECT" ? paymentModeSelection?.directDisclaimerAt ?? null : null,
+      paymentMode === "DIRECT" ? paymentModeSelection?.directDisclaimerVersion ?? null : null,
     ]
   );
   const tripRow = tripResult.rows[0];
@@ -2000,7 +2037,7 @@ async function createTripFromTruckBooking(
         is_escrow
       )
       VALUES (
-        $1,$2,$3,$4,$5,$6,$7,true
+        $1,$2,$3,$4,$5,$6,$7,$8
       )
       RETURNING *
     `,
@@ -2011,7 +2048,8 @@ async function createTripFromTruckBooking(
       haulerUserId,
       amount,
       booking.offered_currency ?? "USD",
-      mapPaymentStatusToDb(PaymentStatus.AWAITING_FUNDING),
+      mapPaymentStatusToDb(paymentStatus),
+      isEscrow,
     ]
   );
   const paymentRow = paymentResult.rows[0];
@@ -2040,6 +2078,11 @@ export async function respondToBooking(params: {
   actor: "SHIPPER" | "HAULER";
   action: "ACCEPT" | "REJECT";
   actingUserId: string;
+  paymentModeSelection?: {
+    paymentMode: PaymentMode;
+    directDisclaimerAt: string | null;
+    directDisclaimerVersion: string | null;
+  } | null;
 }): Promise<{
   booking: LoadBookingRecord;
   trip?: TripRecord;
@@ -2078,11 +2121,17 @@ export async function respondToBooking(params: {
       haulerUserId: offer.created_by_user_id,
       amount: Number(offer.offered_amount),
       currency: offer.currency,
+      ...(params.paymentModeSelection
+        ? { paymentModeSelection: params.paymentModeSelection }
+        : {}),
     });
     trip = result.trip;
     payment = result.payment;
   } else if (booking.truck_availability_id) {
-    const result = await createTripFromTruckBooking(booking);
+    const result = await createTripFromTruckBooking(
+      booking,
+      params.paymentModeSelection ? params.paymentModeSelection : undefined
+    );
     trip = result.trip;
     payment = result.payment;
   } else {
@@ -2172,8 +2221,19 @@ export async function acceptOfferAndCreateTrip(params: {
   haulerUserId: string;
   amount: number;
   currency: string;
+  paymentModeSelection?: {
+    paymentMode: PaymentMode;
+    directDisclaimerAt: string | null;
+    directDisclaimerVersion: string | null;
+  };
 }): Promise<{ trip: TripRecord; payment: PaymentRecord }> {
   const client = await pool.connect();
+  const paymentMode = params.paymentModeSelection?.paymentMode ?? "ESCROW";
+  const isEscrow = paymentMode !== "DIRECT";
+  const tripStatus = isEscrow ? TripStatus.PENDING_ESCROW : TripStatus.READY_TO_START;
+  const paymentStatus = isEscrow
+    ? PaymentStatus.AWAITING_FUNDING
+    : PaymentStatus.NOT_APPLICABLE;
 
   async function ensureTruckId(): Promise<string> {
     let truckRows = (
@@ -2310,23 +2370,29 @@ export async function acceptOfferAndCreateTrip(params: {
         INSERT INTO trips (
           load_id,
           hauler_id,
-          truck_id,
-          driver_id,
-          status
-        )
-        VALUES (
-          $1,$2,$3,$4,$5
-        )
-        RETURNING *
-      `,
-      [
-        params.loadId,
-        params.haulerId,
-        truckId,
-        driverId,
-        mapTripStatusToDb(TripStatus.PENDING_ESCROW),
-      ]
-    );
+        truck_id,
+        driver_id,
+        status,
+        payment_mode,
+        direct_payment_disclaimer_accepted_at,
+        direct_payment_disclaimer_version
+      )
+      VALUES (
+        $1,$2,$3,$4,$5,$6,$7,$8
+      )
+      RETURNING *
+    `,
+    [
+      params.loadId,
+      params.haulerId,
+      truckId,
+      driverId,
+      mapTripStatusToDb(tripStatus),
+      paymentMode,
+      paymentMode === "DIRECT" ? params.paymentModeSelection?.directDisclaimerAt ?? null : null,
+      paymentMode === "DIRECT" ? params.paymentModeSelection?.directDisclaimerVersion ?? null : null,
+    ]
+  );
     const tripRow = tripResult.rows[0];
     if (!tripRow) {
       throw new Error("Failed to create trip");
@@ -2341,25 +2407,26 @@ export async function acceptOfferAndCreateTrip(params: {
           payer_user_id,
           payee_user_id,
           amount,
-          currency,
-          status,
-          is_escrow
-        )
-        VALUES (
-          $1,$2,$3,$4,$5,$6,$7,true
-        )
-        RETURNING *
-      `,
-      [
-        trip.id,
-        params.loadId,
-        params.shipperUserId,
-        params.haulerUserId,
-        params.amount,
-        params.currency,
-        mapPaymentStatusToDb(PaymentStatus.AWAITING_FUNDING),
-      ]
-    );
+        currency,
+        status,
+        is_escrow
+      )
+      VALUES (
+        $1,$2,$3,$4,$5,$6,$7,$8
+      )
+      RETURNING *
+    `,
+    [
+      trip.id,
+      params.loadId,
+      params.shipperUserId,
+      params.haulerUserId,
+      params.amount,
+      params.currency,
+      mapPaymentStatusToDb(paymentStatus),
+      isEscrow,
+    ]
+  );
     const paymentRow = paymentResult.rows[0];
     if (!paymentRow) {
       throw new Error("Failed to create payment");
@@ -2702,6 +2769,11 @@ export interface EscrowIntentInput {
 }
 
 export async function attachEscrowPaymentIntent(input: EscrowIntentInput): Promise<PaymentRecord | null> {
+  const trip = await getTripById(input.tripId);
+  assertEscrowEnabled({ trip });
+  if (trip?.payment_mode && trip.payment_mode !== "ESCROW") {
+    throw new Error("PAYMENT_MODE_IMMUTABLE");
+  }
   const result = await pool.query<PaymentRow>(
     `
       UPDATE payments
@@ -2727,6 +2799,12 @@ export async function markPaymentFunded(tripId: string): Promise<PaymentRecord |
   const client = await pool.connect();
   try {
     await client.query("BEGIN");
+
+    const trip = await getTripById(tripId);
+    assertEscrowEnabled({ trip });
+    if (trip?.payment_mode && trip.payment_mode !== "ESCROW") {
+      throw new Error("PAYMENT_MODE_IMMUTABLE");
+    }
 
     const paymentResult = await client.query<PaymentRow>(
       `
@@ -2775,6 +2853,11 @@ export interface ScheduleAutoReleaseInput {
 }
 
 export async function scheduleAutoRelease(input: ScheduleAutoReleaseInput): Promise<PaymentRecord | null> {
+  const trip = await getTripById(input.tripId);
+  assertEscrowEnabled({ trip });
+  if (trip?.payment_mode && trip.payment_mode !== "ESCROW") {
+    throw new Error("PAYMENT_MODE_IMMUTABLE");
+  }
   const result = await pool.query<PaymentRow>(
     `
       UPDATE payments
@@ -2838,6 +2921,14 @@ export async function updatePaymentStatus(
   status: PaymentStatus,
   patch: Partial<PaymentRecord> = {}
 ): Promise<PaymentRecord | null> {
+  const existing = await getPaymentById(paymentId);
+  if (existing) {
+    const trip = existing.trip_id ? await getTripById(existing.trip_id) : null;
+    assertEscrowEnabled({ trip, payment: existing });
+    if (trip?.payment_mode && trip.payment_mode !== "ESCROW") {
+      throw new Error("PAYMENT_MODE_IMMUTABLE");
+    }
+  }
   const sets = ["status = $2", "updated_at = NOW()"];
   const values: any[] = [paymentId, mapPaymentStatusToDb(status)];
 
@@ -2865,6 +2956,14 @@ export async function updatePaymentStatus(
 }
 
 export async function clearAutoReleaseForPayment(paymentId: string): Promise<PaymentRecord | null> {
+  const existing = await getPaymentById(paymentId);
+  if (existing) {
+    const trip = existing.trip_id ? await getTripById(existing.trip_id) : null;
+    assertEscrowEnabled({ trip, payment: existing });
+    if (trip?.payment_mode && trip.payment_mode !== "ESCROW") {
+      throw new Error("PAYMENT_MODE_IMMUTABLE");
+    }
+  }
   const result = await pool.query<PaymentRow>(
     `
       UPDATE payments
@@ -2949,6 +3048,13 @@ export async function finalizePaymentLifecycle(params: {
   tripStatus?: TripStatus;
   loadStatus?: LoadStatus;
 }): Promise<{ payment: PaymentRecord; trip: TripRecord | null; load: LoadRecord | null }> {
+  const paymentExisting = await getPaymentById(params.paymentId);
+  const tripExisting = paymentExisting?.trip_id ? await getTripById(paymentExisting.trip_id) : null;
+  assertEscrowEnabled({ trip: tripExisting ?? null, payment: paymentExisting ?? null });
+  if (tripExisting?.payment_mode && tripExisting.payment_mode !== "ESCROW") {
+    throw new Error("PAYMENT_MODE_IMMUTABLE");
+  }
+
   const client = await pool.connect();
   try {
     await client.query("BEGIN");
@@ -3040,6 +3146,8 @@ export async function autoReleaseReadyPayments(): Promise<
 
     const updates: Array<{ payment: PaymentRecord; trip: TripRecord | null; load: LoadRecord | null }> = [];
     for (const row of candidates.rows) {
+      const trip = row.trip_id ? await getTripById(row.trip_id) : null;
+      assertEscrowEnabled({ trip, payment: mapPaymentRow(row) });
       const result = await updatePaymentTripLoadWithinClient(client, row.id, PaymentStatus.RELEASED_TO_HAULER, {
         tripStatus: TripStatus.CLOSED,
         loadStatus: LoadStatus.COMPLETED,
@@ -3098,6 +3206,9 @@ export async function resolveDisputeLifecycle(params: {
       throw new Error("DISPUTE_NOT_FOUND");
     }
     const dispute = mapDisputeRow(disputeRow);
+    const existingPayment = await getPaymentById(dispute.payment_id);
+    const trip = dispute.trip_id ? await getTripById(dispute.trip_id) : null;
+    assertEscrowEnabled({ trip, payment: existingPayment ?? null });
 
     const lifecycle = await updatePaymentTripLoadWithinClient(
       client,
