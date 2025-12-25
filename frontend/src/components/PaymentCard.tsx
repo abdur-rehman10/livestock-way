@@ -58,7 +58,12 @@ export const PaymentCard: React.FC<PaymentCardProps> = ({
   fundError = null,
   paymentMode,
 }) => {
-  const mode = paymentMode ?? (payment as any).payment_mode ?? "ESCROW";
+  const mode =
+    paymentMode ??
+    payment.payment_mode ??
+    (payment.is_escrow === false || (payment.status || "").toUpperCase() === "NOT_APPLICABLE"
+      ? "DIRECT"
+      : "ESCROW");
   const normalizedStatus = (payment.status || "").toUpperCase();
   const meta = STATUS_META[normalizedStatus] ?? {
     label: payment.status,

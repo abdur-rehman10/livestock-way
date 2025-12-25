@@ -9,6 +9,9 @@ import { PoolClient } from "pg";
 import authRequired from "../middlewares/auth";
 import { requireRoles } from "../middlewares/rbac";
 import { auditRequest } from "../middlewares/auditLogger";
+import { upsertDirectPaymentReceipt, DirectPaymentMethod } from "../services/marketplaceService";
+import { logAuditEvent } from "../services/auditLogService";
+import { resolveDirectPaymentReceipt } from "../utils/directPaymentReceipt";
 
 const router = Router();
 router.use(authRequired);
@@ -737,11 +740,41 @@ router.post(
 
     await client.query("BEGIN");
 
-    const tripCheck = await client.query("SELECT id FROM trips WHERE id = $1", [tripId]);
+    const tripCheck = await client.query(
+      `
+        SELECT id, payment_mode
+        FROM trips
+        WHERE id = $1
+      `,
+      [tripId]
+    );
     if (tripCheck.rowCount === 0) {
       await client.query("ROLLBACK");
       client.release();
       return res.status(404).json({ message: "Trip not found" });
+    }
+    const tripRow = tripCheck.rows[0];
+    const paymentMode = (tripRow.payment_mode || "").toUpperCase();
+
+    let directReceipt: any = null;
+    try {
+      const receiptInput = resolveDirectPaymentReceipt(paymentMode, req.body);
+      if (receiptInput) {
+        directReceipt = await upsertDirectPaymentReceipt(
+          {
+            tripId: String(tripId),
+            receivedAmount: receiptInput.receivedAmount,
+            paymentMethod: receiptInput.paymentMethod as DirectPaymentMethod,
+            reference: receiptInput.reference,
+            receivedAt: receiptInput.receivedAt,
+          },
+          client
+        );
+      }
+    } catch (err: any) {
+      await client.query("ROLLBACK");
+      client.release();
+      return res.status(400).json({ message: err?.message ?? "Invalid direct payment receipt" });
     }
 
     const existing = await client.query(
@@ -811,12 +844,30 @@ router.post(
       releasedByUserId: authUserIdRaw ? Number(authUserIdRaw) : null,
     });
 
+    if (directReceipt) {
+      const actorId = (req as any)?.user?.id ?? null;
+      const actorRole = (req as any)?.user?.user_type ?? null;
+      await logAuditEvent({
+        action: "DIRECT_PAYMENT_RECORDED",
+        eventType: "DIRECT_PAYMENT_RECORDED",
+        resource: `trip:${tripId}`,
+        userId: actorId,
+        userRole: actorRole,
+        metadata: {
+          received_amount: directReceipt.received_amount,
+          received_payment_method: directReceipt.received_payment_method,
+        },
+        ipAddress: req.ip || null,
+      });
+    }
+
     await client.query("COMMIT");
 
     return res.json({
       epod: epodResult.rows[0],
       trip: tripUpdate.rows[0],
       payment: releasedPayment,
+      direct_payment: directReceipt,
     });
   } catch (err) {
     await client.query("ROLLBACK");

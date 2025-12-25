@@ -10,6 +10,7 @@ export interface Payment {
   currency: string;
   status: string;
   payment_mode?: "ESCROW" | "DIRECT";
+  is_escrow?: boolean | null;
   created_at: string;
   funded_at?: string | null;
   released_by_user_id?: string | null;

@@ -9,8 +9,27 @@ const paymentsService_1 = require("../services/paymentsService");
 const auth_1 = __importDefault(require("../middlewares/auth"));
 const rbac_1 = require("../middlewares/rbac");
 const auditLogger_1 = require("../middlewares/auditLogger");
+const marketplaceService_1 = require("../services/marketplaceService");
+const auditLogService_1 = require("../services/auditLogService");
+const directPaymentReceipt_1 = require("../utils/directPaymentReceipt");
 const router = (0, express_1.Router)();
 router.use(auth_1.default);
+const DEFAULT_ROUTE_ENGINE_URL = "https://router.project-osrm.org";
+const DEFAULT_GEOCODE_URL = "https://nominatim.openstreetmap.org/search";
+const DEFAULT_OVERPASS_URL = "https://overpass-api.de/api/interpreter";
+function mapRoutePlanRow(row) {
+    return {
+        id: row.id,
+        trip_id: row.trip_id,
+        plan_json: row.plan_json ?? {},
+        tolls_amount: row.tolls_amount ?? null,
+        tolls_currency: row.tolls_currency ?? null,
+        compliance_status: row.compliance_status ?? null,
+        compliance_notes: row.compliance_notes ?? null,
+        created_at: row.created_at,
+        updated_at: row.updated_at,
+    };
+}
 function getQueryValue(value) {
     if (typeof value === "string")
         return value;
@@ -67,6 +86,90 @@ function buildRestStopPlan(plannedDistanceKm) {
         total_distance_km: distance,
         stops,
     };
+}
+async function geocodeAddress(address) {
+    const baseUrl = process.env.GEOCODE_URL || DEFAULT_GEOCODE_URL;
+    const url = `${baseUrl}?format=jsonv2&limit=1&q=${encodeURIComponent(address)}`;
+    const response = await fetch(url, {
+        headers: {
+            Accept: "application/json",
+            "User-Agent": "livestockway-route-plan/1.0",
+        },
+    });
+    if (!response.ok)
+        return null;
+    const data = await response.json();
+    const list = Array.isArray(data) ? data : data?.results;
+    if (!Array.isArray(list) || list.length === 0)
+        return null;
+    const match = list[0];
+    if (!match?.lat || !match?.lon)
+        return null;
+    return { lat: Number(match.lat), lon: Number(match.lon) };
+}
+async function fetchRoute(origin, destination) {
+    const baseUrl = process.env.ROUTE_ENGINE_URL || DEFAULT_ROUTE_ENGINE_URL;
+    const url = `${baseUrl}/route/v1/driving/${origin.lon},${origin.lat};${destination.lon},${destination.lat}?overview=full&geometries=polyline6&steps=true`;
+    const response = await fetch(url, { headers: { Accept: "application/json" } });
+    if (!response.ok)
+        return null;
+    const data = await response.json();
+    const route = data?.routes?.[0];
+    if (!route)
+        return null;
+    return {
+        distance_km: route.distance ? Number(route.distance) / 1000 : null,
+        duration_min: route.duration ? Number(route.duration) / 60 : null,
+        geometry: route.geometry ?? null,
+    };
+}
+function buildMapUrls(origin, destination) {
+    const directionsUrl = `https://www.openstreetmap.org/directions?engine=fossgis_osrm_car&route=${origin.lat},${origin.lon};${destination.lat},${destination.lon}`;
+    return { directionsUrl, mapUrl: directionsUrl };
+}
+async function fetchOverpassPois(bbox) {
+    const baseUrl = process.env.OVERPASS_URL || DEFAULT_OVERPASS_URL;
+    const bboxString = `${bbox.minLat},${bbox.minLon},${bbox.maxLat},${bbox.maxLon}`;
+    const query = `
+    [out:json][timeout:25];
+    (
+      node["amenity"="car_wash"](${bboxString});
+      node["shop"="animal_feed"](${bboxString});
+      node["shop"="agrarian"](${bboxString});
+    );
+    out center 50;
+  `;
+    const response = await fetch(baseUrl, {
+        method: "POST",
+        headers: { "Content-Type": "application/x-www-form-urlencoded" },
+        body: `data=${encodeURIComponent(query)}`,
+    });
+    if (!response.ok)
+        return { washouts: [], feedStops: [] };
+    const data = await response.json();
+    const elements = Array.isArray(data?.elements) ? data.elements : [];
+    const washouts = [];
+    const feedStops = [];
+    for (const element of elements) {
+        if (element?.type !== "node")
+            continue;
+        const tags = element.tags ?? {};
+        const name = tags.name || tags.operator || "Unnamed stop";
+        const record = {
+            name,
+            lat: Number(element.lat),
+            lon: Number(element.lon),
+            category: tags.amenity || tags.shop || "poi",
+            distance_km: null,
+        };
+        if (tags.amenity === "car_wash") {
+            washouts.push(record);
+        }
+        else if (tags.shop === "animal_feed" || tags.shop === "agrarian") {
+            feedStops.push(record);
+        }
+    }
+    return { washouts, feedStops };
 }
 function parseId(value) {
     const numeric = Number(value);
@@ -495,11 +598,35 @@ router.post("/:id/epod", (0, rbac_1.requireRoles)(["driver", "hauler"]), (0, aud
             return res.status(400).json({ message: "Invalid trip id" });
         }
         await client.query("BEGIN");
-        const tripCheck = await client.query("SELECT id FROM trips WHERE id = $1", [tripId]);
+        const tripCheck = await client.query(`
+        SELECT id, payment_mode
+        FROM trips
+        WHERE id = $1
+      `, [tripId]);
         if (tripCheck.rowCount === 0) {
             await client.query("ROLLBACK");
             client.release();
             return res.status(404).json({ message: "Trip not found" });
+        }
+        const tripRow = tripCheck.rows[0];
+        const paymentMode = (tripRow.payment_mode || "").toUpperCase();
+        let directReceipt = null;
+        try {
+            const receiptInput = (0, directPaymentReceipt_1.resolveDirectPaymentReceipt)(paymentMode, req.body);
+            if (receiptInput) {
+                directReceipt = await (0, marketplaceService_1.upsertDirectPaymentReceipt)({
+                    tripId: String(tripId),
+                    receivedAmount: receiptInput.receivedAmount,
+                    paymentMethod: receiptInput.paymentMethod,
+                    reference: receiptInput.reference,
+                    receivedAt: receiptInput.receivedAt,
+                }, client);
+            }
+        }
+        catch (err) {
+            await client.query("ROLLBACK");
+            client.release();
+            return res.status(400).json({ message: err?.message ?? "Invalid direct payment receipt" });
         }
         const existing = await client.query("SELECT id FROM trip_epods WHERE trip_id = $1", [tripId]);
         const photosJson = Array.isArray(req.body.delivery_photos) && req.body.delivery_photos.length > 0
@@ -556,11 +683,28 @@ router.post("/:id/epod", (0, rbac_1.requireRoles)(["driver", "hauler"]), (0, aud
             client,
             releasedByUserId: authUserIdRaw ? Number(authUserIdRaw) : null,
         });
+        if (directReceipt) {
+            const actorId = req?.user?.id ?? null;
+            const actorRole = req?.user?.user_type ?? null;
+            await (0, auditLogService_1.logAuditEvent)({
+                action: "DIRECT_PAYMENT_RECORDED",
+                eventType: "DIRECT_PAYMENT_RECORDED",
+                resource: `trip:${tripId}`,
+                userId: actorId,
+                userRole: actorRole,
+                metadata: {
+                    received_amount: directReceipt.received_amount,
+                    received_payment_method: directReceipt.received_payment_method,
+                },
+                ipAddress: req.ip || null,
+            });
+        }
         await client.query("COMMIT");
         return res.json({
             epod: epodResult.rows[0],
             trip: tripUpdate.rows[0],
             payment: releasedPayment,
+            direct_payment: directReceipt,
         });
     }
     catch (err) {
@@ -712,6 +856,201 @@ router.get("/:id/expenses", (0, rbac_1.requireRoles)(["driver", "hauler", "shipp
     catch (err) {
         console.error("Error in GET /api/trips/:id/expenses:", err);
         return res.status(500).json({ message: "Internal server error" });
+    }
+});
+router.get("/:id/route-plan", (0, rbac_1.requireRoles)(["driver", "hauler", "shipper"]), async (req, res) => {
+    try {
+        const tripId = getTripIdParam(req);
+        if (tripId === null) {
+            return res.status(400).json({ message: "Invalid trip id" });
+        }
+        const tripCheck = await database_1.pool.query("SELECT id FROM trips WHERE id = $1", [tripId]);
+        if (tripCheck.rowCount === 0) {
+            return res.status(404).json({ message: "Trip not found" });
+        }
+        const result = await database_1.pool.query(`SELECT
+        id,
+        trip_id,
+        plan_json,
+        tolls_amount,
+        tolls_currency,
+        compliance_status,
+        compliance_notes,
+        created_at,
+        updated_at
+      FROM trip_route_plans
+      WHERE trip_id = $1`, [tripId]);
+        if (result.rowCount === 0) {
+            return res.status(404).json({ message: "Route plan not found" });
+        }
+        return res.json({ plan: mapRoutePlanRow(result.rows[0]) });
+    }
+    catch (err) {
+        console.error("Error in GET /api/trips/:id/route-plan:", err);
+        return res.status(500).json({ message: "Failed to fetch route plan" });
+    }
+});
+router.post("/:id/route-plan", (0, rbac_1.requireRoles)(["driver", "hauler"]), (0, auditLogger_1.auditRequest)("trip:route-plan", (req) => `trip:${req.params.id}`), async (req, res) => {
+    try {
+        const tripId = getTripIdParam(req);
+        if (tripId === null) {
+            return res.status(400).json({ message: "Invalid trip id" });
+        }
+        const { plan_json, tolls_amount, tolls_currency, compliance_status, compliance_notes, } = req.body ?? {};
+        if (!plan_json || typeof plan_json !== "object") {
+            return res.status(400).json({ message: "plan_json is required" });
+        }
+        const tollsValue = tolls_amount !== undefined && tolls_amount !== null ? Number(tolls_amount) : null;
+        if (tollsValue !== null && Number.isNaN(tollsValue)) {
+            return res.status(400).json({ message: "tolls_amount must be numeric" });
+        }
+        const tripCheck = await database_1.pool.query("SELECT id FROM trips WHERE id = $1", [tripId]);
+        if (tripCheck.rowCount === 0) {
+            return res.status(404).json({ message: "Trip not found" });
+        }
+        const result = await database_1.pool.query(`INSERT INTO trip_route_plans (
+        trip_id,
+        plan_json,
+        tolls_amount,
+        tolls_currency,
+        compliance_status,
+        compliance_notes
+      )
+      VALUES ($1, $2::jsonb, $3, $4, $5, $6)
+      ON CONFLICT (trip_id)
+      DO UPDATE SET
+        plan_json = EXCLUDED.plan_json,
+        tolls_amount = EXCLUDED.tolls_amount,
+        tolls_currency = EXCLUDED.tolls_currency,
+        compliance_status = EXCLUDED.compliance_status,
+        compliance_notes = EXCLUDED.compliance_notes,
+        updated_at = NOW()
+      RETURNING
+        id,
+        trip_id,
+        plan_json,
+        tolls_amount,
+        tolls_currency,
+        compliance_status,
+        compliance_notes,
+        created_at,
+        updated_at`, [
+            tripId,
+            JSON.stringify(plan_json),
+            tollsValue,
+            tolls_currency ?? "USD",
+            compliance_status ?? null,
+            compliance_notes ?? null,
+        ]);
+        return res.status(201).json({ plan: mapRoutePlanRow(result.rows[0]) });
+    }
+    catch (err) {
+        console.error("Error in POST /api/trips/:id/route-plan:", err);
+        return res.status(500).json({ message: "Failed to save route plan" });
+    }
+});
+router.post("/:id/route-plan/generate", (0, rbac_1.requireRoles)(["driver", "hauler"]), (0, auditLogger_1.auditRequest)("trip:route-plan-generate", (req) => `trip:${req.params.id}`), async (req, res) => {
+    try {
+        const tripId = getTripIdParam(req);
+        if (tripId === null) {
+            return res.status(400).json({ message: "Invalid trip id" });
+        }
+        const tripResult = await database_1.pool.query(`SELECT
+        t.id,
+        t.route_distance_km,
+        l.pickup_location_text,
+        l.dropoff_location_text,
+        l.pickup_lat,
+        l.pickup_lng,
+        l.dropoff_lat,
+        l.dropoff_lng
+      FROM trips t
+      JOIN loads l ON l.id = t.load_id
+      WHERE t.id = $1`, [tripId]);
+        if (tripResult.rowCount === 0) {
+            return res.status(404).json({ message: "Trip not found" });
+        }
+        const tripRow = tripResult.rows[0];
+        let origin = tripRow.pickup_lat && tripRow.pickup_lng
+            ? { lat: Number(tripRow.pickup_lat), lon: Number(tripRow.pickup_lng) }
+            : null;
+        let destination = tripRow.dropoff_lat && tripRow.dropoff_lng
+            ? { lat: Number(tripRow.dropoff_lat), lon: Number(tripRow.dropoff_lng) }
+            : null;
+        if (!origin && tripRow.pickup_location_text) {
+            origin = await geocodeAddress(tripRow.pickup_location_text);
+        }
+        if (!destination && tripRow.dropoff_location_text) {
+            destination = await geocodeAddress(tripRow.dropoff_location_text);
+        }
+        if (!origin || !destination) {
+            return res.status(400).json({ message: "Missing origin/destination coordinates" });
+        }
+        const route = await fetchRoute(origin, destination);
+        if (!route) {
+            return res.status(502).json({ message: "Failed to fetch route" });
+        }
+        const restStopPlan = buildRestStopPlan(route.distance_km ?? tripRow.route_distance_km ?? null);
+        const { directionsUrl, mapUrl } = buildMapUrls(origin, destination);
+        const padding = 0.25;
+        const bbox = {
+            minLat: Math.min(origin.lat, destination.lat) - padding,
+            minLon: Math.min(origin.lon, destination.lon) - padding,
+            maxLat: Math.max(origin.lat, destination.lat) + padding,
+            maxLon: Math.max(origin.lon, destination.lon) + padding,
+        };
+        const { washouts, feedStops } = await fetchOverpassPois(bbox);
+        const planPayload = {
+            distance_km: route.distance_km,
+            duration_min: route.duration_min,
+            route_geometry: route.geometry,
+            stops: restStopPlan.stops,
+            washouts,
+            feed_stops: feedStops,
+            map_url: mapUrl,
+            directions_url: directionsUrl,
+            compliance_status: "pending",
+            compliance_notes: "Generated from default rest-stop policy.",
+        };
+        const result = await database_1.pool.query(`INSERT INTO trip_route_plans (
+        trip_id,
+        plan_json,
+        tolls_amount,
+        tolls_currency,
+        compliance_status,
+        compliance_notes
+      )
+      VALUES ($1, $2::jsonb, $3, $4, $5, $6)
+      ON CONFLICT (trip_id)
+      DO UPDATE SET
+        plan_json = EXCLUDED.plan_json,
+        tolls_amount = EXCLUDED.tolls_amount,
+        tolls_currency = EXCLUDED.tolls_currency,
+        compliance_status = EXCLUDED.compliance_status,
+        compliance_notes = EXCLUDED.compliance_notes,
+        updated_at = NOW()
+      RETURNING
+        id,
+        trip_id,
+        plan_json,
+        tolls_amount,
+        tolls_currency,
+        compliance_status,
+        compliance_notes,
+        created_at,
+        updated_at`, [
+            tripId,
+            JSON.stringify(planPayload),
+            null,
+            "USD",
+            "pending",
+            "Generated from default rest-stop policy.",
+        ]);
+        return res.status(201).json({ plan: mapRoutePlanRow(result.rows[0]) });
+    }
+    catch (err) {
+        console.error("Error in POST /api/trips/:id/route-plan/generate:", err);
+        return res.status(500).json({ message: "Failed to generate route plan" });
     }
 });
 exports.default = router;

@@ -28,6 +28,9 @@ export interface Load {
   epod_url?: string | null;
   awarded_offer_id?: string | null;
   assigned_to?: string | null;
+  payment_mode?: "ESCROW" | "DIRECT";
+  direct_payment_disclaimer_accepted_at?: string | null;
+  direct_payment_disclaimer_version?: string | null;
 }
 
 export interface CreateLoadPayload {

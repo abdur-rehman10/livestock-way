@@ -61,6 +61,16 @@ export default function ShipperOffersTab() {
     !!currentOffer &&
     !["REJECTED", "WITHDRAWN", "EXPIRED"].includes(currentOffer.status);
 
+  const currentPaymentMode = useMemo(() => {
+    const modeFromOffer = currentOffer?.payment_mode;
+    if (modeFromOffer === "DIRECT" || modeFromOffer === "ESCROW") {
+      return modeFromOffer;
+    }
+    const activeLoad = loads.find((l) => Number(l.id) === Number(selectedLoadId));
+    const modeFromLoad = (activeLoad as any)?.payment_mode;
+    return modeFromLoad === "DIRECT" ? "DIRECT" : "ESCROW";
+  }, [currentOffer, loads, selectedLoadId]);
+
   useEffect(() => {
     if (!shipperUserId) return;
     setLoadingLoads(true);
@@ -393,6 +403,20 @@ export default function ShipperOffersTab() {
                 ? `Conversation for offer #${activeOfferId}`
                 : "Select an offer to view messages"}
             </CardDescription>
+            {activeOfferId && (
+              <div className="mt-2">
+                <Badge
+                  variant="secondary"
+                  className={
+                    currentPaymentMode === "DIRECT"
+                      ? "bg-amber-50 text-amber-800 border border-amber-200"
+                      : "bg-emerald-50 text-emerald-800 border border-emerald-200"
+                  }
+                >
+                  Payment: {currentPaymentMode === "DIRECT" ? "Direct" : "Escrow"}
+                </Badge>
+              </div>
+            )}
           </CardHeader>
           <CardContent className="flex h-full flex-col gap-3">
             {summaryLoading ? (

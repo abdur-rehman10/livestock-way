@@ -38,6 +38,7 @@ import { storage, STORAGE_KEYS, getPreferences, updatePreferences } from '../lib
 import { toast } from 'sonner';
 import { NotFound } from '../pages/ErrorPages';
 import MarketplaceDevLab from '../pages/MarketplaceDevLab';
+import AdminPricing from '../pages/AdminPricing';
 
 type UserRole = 'shipper' | 'driver' | 'hauler' | 'stakeholder' | 'super-admin' | null;
 type LandingRole = 'hauler' | 'shipper' | 'stakeholder';
@@ -283,7 +284,7 @@ export function AppRouter({ showKeyboardShortcuts, onKeyboardShortcutsToggle }: 
                 <Routes>
                   <Route path="dashboard" element={<ShipperDashboard onLogout={handleLogout} onRoleSwitch={handleRoleSwitch} />} />
                   <Route path="my-loads" element={<MyLoadsTab />} />
-                  <Route path="loadboard" element={<Loadboard />} />
+                  <Route path="loadboard" element={<Navigate to="/shipper/dashboard" replace />} />
                   <Route path="truck-board" element={<TruckBoard />} />
                   <Route path="trips" element={<TripsTab onViewTrip={() => toast.info('Trip view coming soon')} />} />
                   <Route path="trips/:id" element={<TripDetail />} />
@@ -358,6 +359,7 @@ export function AppRouter({ showKeyboardShortcuts, onKeyboardShortcutsToggle }: 
                   <Route path="dashboard" element={<SuperAdminDashboard onLogout={handleLogout} />} />
                   <Route path="users" element={<div>User Management (Coming Soon)</div>} />
                   <Route path="approvals" element={<div>Approval Queue (Coming Soon)</div>} />
+                  <Route path="pricing" element={<AdminPricing />} />
                   <Route path="analytics" element={<div>Analytics (Coming Soon)</div>} />
                   <Route path="marketplace" element={<MarketplaceTab userRole="super-admin" />} />
                   <Route path="support" element={<SupportTab />} />

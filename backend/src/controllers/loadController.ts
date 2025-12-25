@@ -98,7 +98,10 @@ export async function getLoads(req: Request, res: Response) {
         started_at,
         completed_at,
         epod_url,
-        awarded_offer_id
+        awarded_offer_id,
+        payment_mode,
+        direct_payment_disclaimer_accepted_at,
+        direct_payment_disclaimer_version
       FROM loads
       WHERE is_deleted = FALSE
     `;
@@ -161,6 +164,9 @@ export async function createLoad(req: Request, res: Response) {
       additional_comments,
       price_offer_amount,
       price_currency,
+      payment_mode,
+      direct_payment_disclaimer_accepted_at,
+      direct_payment_disclaimer_version,
     } = req.body;
 
     const normalizedSpecies = species?.trim();
@@ -254,6 +260,23 @@ export async function createLoad(req: Request, res: Response) {
       req.body.notes ??
       null;
 
+    const paymentModeNormalized =
+      typeof payment_mode === "string" && payment_mode.toUpperCase() === "DIRECT"
+        ? "DIRECT"
+        : "ESCROW";
+    const disclaimerAcceptedAt =
+      paymentModeNormalized === "DIRECT" && direct_payment_disclaimer_accepted_at
+        ? new Date(direct_payment_disclaimer_accepted_at).toISOString()
+        : paymentModeNormalized === "DIRECT" && req.body?.direct_payment_disclaimer_accepted
+        ? new Date().toISOString()
+        : null;
+    const disclaimerVersion =
+      paymentModeNormalized === "DIRECT" && direct_payment_disclaimer_version
+        ? direct_payment_disclaimer_version
+        : paymentModeNormalized === "DIRECT" && req.body?.direct_payment_disclaimer_accepted
+        ? "v1"
+        : null;
+
     const insertQuery = `
       INSERT INTO loads (
         shipper_id,
@@ -269,10 +292,13 @@ export async function createLoad(req: Request, res: Response) {
         price_currency,
         status,
         visibility,
-        notes
+        notes,
+        payment_mode,
+        direct_payment_disclaimer_accepted_at,
+        direct_payment_disclaimer_version
       )
       VALUES (
-        $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,'posted','public',$12
+        $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,'posted','public',$12,$13,$14,$15
       )
       RETURNING
         id,
@@ -302,6 +328,9 @@ export async function createLoad(req: Request, res: Response) {
       priceOffer,
       priceCurrency,
       notes,
+      paymentModeNormalized,
+      disclaimerAcceptedAt,
+      disclaimerVersion,
     ];
 
     const result = await pool.query(insertQuery, values);

@@ -29,6 +29,7 @@ import {
   Calendar as CalendarIcon,
   AlertCircle,
   User,
+  Edit,
 } from "lucide-react";
 import { toast } from "sonner";
 import {
@@ -39,9 +40,23 @@ import {
   fetchTrucks as fetchTrucksApi,
   createTruck as createTruckApi,
   deleteTruck as deleteTruckApi,
+  updateTruck,
   type DriverRecord,
   type TruckRecord,
 } from "../api/fleet";
+function resolveUserType(): string {
+  if (typeof window === "undefined") return "";
+  try {
+    const raw = window.localStorage.getItem("user");
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      return ((parsed?.user_type ?? "") as string).toLowerCase();
+    }
+  } catch (err) {
+    console.error("Failed to read user from storage", err);
+  }
+  return "";
+}
 
 interface MaintenanceTask {
   id: string;
@@ -121,10 +136,12 @@ const initialDriverForm = {
 };
 
 export function FleetManagement() {
+  const userType = resolveUserType();
   const [activeTab, setActiveTab] = useState<"vehicles" | "drivers" | "maintenance">(
     "vehicles"
   );
   const [isAddVehicleOpen, setIsAddVehicleOpen] = useState(false);
+  const [isUpgradePromptOpen, setIsUpgradePromptOpen] = useState(false);
   const [isAddDriverOpen, setIsAddDriverOpen] = useState(false);
   const [isAddMaintenanceOpen, setIsAddMaintenanceOpen] = useState(false);
   const [maintenanceDate, setMaintenanceDate] = useState<Date>();
@@ -135,6 +152,7 @@ export function FleetManagement() {
   const [vehiclesError, setVehiclesError] = useState<string | null>(null);
   const [driversError, setDriversError] = useState<string | null>(null);
   const [vehicleForm, setVehicleForm] = useState(initialVehicleForm);
+  const [editingVehicleId, setEditingVehicleId] = useState<number | null>(null);
   const [driverForm, setDriverForm] = useState(initialDriverForm);
   const [vehicleSubmitting, setVehicleSubmitting] = useState(false);
   const [driverSubmitting, setDriverSubmitting] = useState(false);
@@ -174,9 +192,14 @@ export function FleetManagement() {
 
   const handleAddVehicle = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!editingVehicleId && vehicles.length >= 1 && userType.includes("hauler")) {
+      setIsAddVehicleOpen(false);
+      setIsUpgradePromptOpen(true);
+      return;
+    }
     try {
       setVehicleSubmitting(true);
-      await createTruckApi({
+      const payload = {
         truck_name: vehicleForm.truck_name.trim(),
         plate_number: vehicleForm.plate_number.trim(),
         truck_type: vehicleForm.truck_type,
@@ -194,9 +217,16 @@ export function FleetManagement() {
         hazmat_permitted: vehicleForm.hazmat_permitted,
         species_supported: vehicleForm.species_supported.trim() || null,
         notes: vehicleForm.notes.trim() || null,
-      });
-      toast.success("Vehicle saved");
+      };
+      if (editingVehicleId) {
+        await updateTruck(editingVehicleId, payload);
+        toast.success("Vehicle updated");
+      } else {
+        await createTruckApi(payload);
+        toast.success("Vehicle saved");
+      }
       setIsAddVehicleOpen(false);
+      setEditingVehicleId(null);
       setVehicleForm(initialVehicleForm);
       loadVehicles();
     } catch (err: any) {
@@ -319,7 +349,13 @@ export function FleetManagement() {
               {vehicles.length} vehicles total • {availableVehicles} active
             </div>
             <Button
-              onClick={() => setIsAddVehicleOpen(true)}
+              onClick={() => {
+                if (vehicles.length >= 1 && userType.includes("hauler")) {
+                  setIsUpgradePromptOpen(true);
+                  return;
+                }
+                setIsAddVehicleOpen(true);
+              }}
               className="bg-[#29CA8D] hover:bg-[#24b67d]"
             >
               <Plus className="w-4 h-4 mr-2" />
@@ -428,13 +464,45 @@ export function FleetManagement() {
                           )}
                         </div>
                       </div>
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        onClick={() => handleDeleteVehicle(Number(vehicle.id))}
-                      >
-                        <Trash2 className="w-4 h-4 text-red-600" />
-                      </Button>
+                      <div className="flex flex-col gap-2 items-end">
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          className="flex items-center gap-1"
+                          onClick={() => {
+                            setVehicleForm({
+                              truck_name: vehicle.truck_name ?? "",
+                              plate_number: vehicle.plate_number ?? "",
+                              truck_type: vehicle.truck_type ?? "cattle_trailer",
+                              capacity: vehicle.capacity ? String(vehicle.capacity) : "",
+                              height_m: vehicle.height_m ? String(vehicle.height_m) : "",
+                              width_m: vehicle.width_m ? String(vehicle.width_m) : "",
+                              length_m: vehicle.length_m ? String(vehicle.length_m) : "",
+                              axle_count: vehicle.axle_count ? String(vehicle.axle_count) : "",
+                              max_gross_weight_kg: vehicle.max_gross_weight_kg
+                                ? String(vehicle.max_gross_weight_kg)
+                                : "",
+                              max_axle_weight_kg: vehicle.max_axle_weight_kg
+                                ? String(vehicle.max_axle_weight_kg)
+                                : "",
+                              hazmat_permitted: !!vehicle.hazmat_permitted,
+                              species_supported: vehicle.species_supported ?? "",
+                              notes: vehicle.notes ?? "",
+                            });
+                            setEditingVehicleId(Number(vehicle.id));
+                            setIsAddVehicleOpen(true);
+                          }}
+                        >
+                          <Edit className="w-4 h-4" />
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          onClick={() => handleDeleteVehicle(Number(vehicle.id))}
+                        >
+                          <Trash2 className="w-4 h-4 text-red-600" />
+                        </Button>
+                      </div>
                     </div>
                   </CardContent>
                 </Card>

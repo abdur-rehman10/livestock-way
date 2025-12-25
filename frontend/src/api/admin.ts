@@ -135,6 +135,34 @@ export interface AdminEarningsResponse {
   items: AdminEarningRecord[];
 }
 
+export interface PricingConfig {
+  id: number;
+  target_user_type: "HAULER_INDIVIDUAL" | "HAULER_COMPANY";
+  monthly_price: number | null;
+  is_active: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface PricingCompanyTier {
+  id: number;
+  pricing_config_id: number;
+  name: string;
+  min_vehicles: number | null;
+  max_vehicles: number | null;
+  monthly_price: number | null;
+  sales_form_link: string | null;
+  sort_order: number;
+  is_enterprise: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface CompanyPricingResponse {
+  config: PricingConfig | null;
+  tiers: PricingCompanyTier[];
+}
+
 export async function fetchAdminStats(): Promise<AdminStats> {
   return adminRequest<AdminStats>("/stats");
 }
@@ -195,4 +223,41 @@ export async function fetchAdminDisputes(params: { status?: string }) {
 
 export async function fetchAdminEarnings(): Promise<AdminEarningsResponse> {
   return adminRequest<AdminEarningsResponse>("/earnings");
+}
+
+export async function fetchIndividualPricing(): Promise<PricingConfig | null> {
+  return adminRequest<PricingConfig | null>("/pricing/hauler-individual");
+}
+
+export async function updateIndividualPricing(monthly_price: number): Promise<PricingConfig> {
+  return adminRequest<PricingConfig>("/pricing/hauler-individual", {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ monthly_price }),
+  });
+}
+
+export async function fetchCompanyPricing(): Promise<CompanyPricingResponse> {
+  return adminRequest<CompanyPricingResponse>("/pricing/hauler-company");
+}
+
+export async function updateCompanyPricing(
+  tiers: Array<
+    Pick<
+      PricingCompanyTier,
+      | "name"
+      | "min_vehicles"
+      | "max_vehicles"
+      | "monthly_price"
+      | "sales_form_link"
+      | "is_enterprise"
+      | "sort_order"
+    >
+  >
+): Promise<CompanyPricingResponse> {
+  return adminRequest<CompanyPricingResponse>("/pricing/hauler-company", {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ tiers }),
+  });
 }

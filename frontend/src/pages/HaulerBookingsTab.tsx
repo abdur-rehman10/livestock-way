@@ -62,7 +62,7 @@ export default function HaulerBookingsTab() {
                 key={booking.id}
                 className="rounded-xl border p-4 flex flex-col gap-2 md:flex-row md:items-center md:justify-between"
               >
-                <div>
+                <div className="flex flex-col gap-1">
                   <div className="text-sm font-semibold text-gray-900">
                     Load #{booking.load_id}
                   </div>
@@ -72,12 +72,29 @@ export default function HaulerBookingsTab() {
                       ? `${booking.requested_headcount} head`
                       : "capacity"}
                   </div>
-                  <div className="mt-1 text-[11px] text-gray-600">
-                    Payment:{" "}
-                    <span className="font-semibold">
-                      {(booking.payment_mode ?? "ESCROW") === "DIRECT" ? "Direct" : "Escrow"}
-                    </span>
-                  </div>
+                  {(() => {
+                    const mode = (booking.payment_mode ?? "ESCROW").toString().toUpperCase();
+                    const isDirect = mode === "DIRECT";
+                    return (
+                      <div className="flex items-center gap-2 mt-1">
+                        <Badge
+                          variant="secondary"
+                          className={
+                            isDirect
+                              ? "bg-amber-50 text-amber-800 border border-amber-200"
+                              : "bg-emerald-50 text-emerald-800 border border-emerald-200"
+                          }
+                        >
+                          Payment: {isDirect ? "Direct" : "Escrow"}
+                        </Badge>
+                        {isDirect && (
+                          <span className="text-[11px] text-amber-700">
+                            Direct payment. Escrow & disputes disabled.
+                          </span>
+                        )}
+                      </div>
+                    );
+                  })()}
                   {booking.notes && (
                     <p className="mt-1 text-xs text-gray-600">{booking.notes}</p>
                   )}

@@ -2,7 +2,7 @@ import { API_BASE_URL } from "../lib/api";
 
 const MARKETPLACE_BASE = `${API_BASE_URL}/api/marketplace`;
 
-type HttpMethod = "GET" | "POST" | "PATCH";
+type HttpMethod = "GET" | "POST" | "PATCH" | "DELETE";
 
 function getAuthToken() {
   if (typeof window === "undefined") return null;
@@ -67,6 +67,9 @@ export interface LoadOffer {
   rejected_at: string | null;
   created_at: string;
   updated_at: string;
+   payment_mode?: "ESCROW" | "DIRECT";
+   direct_payment_disclaimer_accepted_at?: string | null;
+   direct_payment_disclaimer_version?: string | null;
 }
 
 export interface OfferMessage {
@@ -127,6 +130,14 @@ export interface TripEnvelope {
   trip: TripRecord | null;
   load: TripEnvelopeLoad;
   payment: PaymentRecord | null;
+  direct_payment?: {
+    id: string;
+    trip_id: string;
+    received_amount: string;
+    received_payment_method: "CASH" | "BANK_TRANSFER" | "OTHER";
+    received_reference: string | null;
+    received_at: string;
+  } | null;
 }
 
 export interface HaulerDriverOption {
@@ -343,10 +354,18 @@ export async function startMarketplaceTrip(tripId: string | number) {
   });
 }
 
-export async function markMarketplaceTripDelivered(tripId: string | number) {
+export async function markMarketplaceTripDelivered(
+  tripId: string | number,
+  payload?: {
+    received_amount?: number;
+    received_payment_method?: "CASH" | "BANK_TRANSFER" | "OTHER";
+    received_reference?: string | null;
+    received_at?: string | null;
+  }
+) {
   return marketplaceRequest<{ trip: TripRecord; load: { id: string } }>(
     `/trips/${tripId}/mark-delivered`,
-    { method: "POST" }
+    { method: "POST", body: payload ? JSON.stringify(payload) : undefined }
   );
 }
 
@@ -418,6 +437,12 @@ export async function updateTruckAvailabilityEntry(
   return marketplaceRequest<{ availability: TruckAvailability | null }>(`/truck-board/${id}`, {
     method: "PATCH",
     body: JSON.stringify(payload),
+  });
+}
+
+export async function deleteTruckAvailabilityEntry(id: string) {
+  return marketplaceRequest<{ availability: TruckAvailability | null }>(`/truck-board/${id}`, {
+    method: "DELETE",
   });
 }
 

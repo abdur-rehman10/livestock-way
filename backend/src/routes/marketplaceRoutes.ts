@@ -33,6 +33,7 @@ import {
   getLoadOfferById,
   getLatestOfferForHauler,
   getPaymentForTrip,
+  getDirectPaymentForTrip,
   getPaymentById,
   getPaymentByIntentId,
   updatePaymentStatus,
@@ -80,6 +81,7 @@ import {
   disputesDisabledResponse,
   escrowDisabledResponse,
 } from "../utils/escrowGuard";
+import { pool } from "../config/database";
 
 type AuthUser = {
   id?: string;
@@ -233,6 +235,55 @@ router.patch(
     } catch (err) {
       console.error("updateTruckAvailability error", err);
       res.status(500).json({ error: "Failed to update listing" });
+    }
+  }
+);
+
+router.delete(
+  "/truck-board/:id",
+  authRequired,
+  async (req, res) => {
+    try {
+      const authUser = getAuthUser(req);
+      if (!isHaulerUser(authUser) && !isSuperAdminUser(authUser)) {
+        return res.status(403).json({ error: "Forbidden" });
+      }
+      const availabilityId = req.params.id;
+      if (!availabilityId) {
+        return res.status(400).json({ error: "Missing availability id" });
+      }
+      const availability = await getTruckAvailabilityById(availabilityId);
+      if (!availability) {
+        return res.status(404).json({ error: "Listing not found" });
+      }
+      const haulerId = await resolveHaulerId(authUser);
+      if (
+        !isSuperAdminUser(authUser) &&
+        (!haulerId || availability.hauler_id !== haulerId)
+      ) {
+        return res.status(403).json({ error: "Forbidden" });
+      }
+
+      // Block delete if any accepted booking exists.
+      const bookingCheck = await pool.query(
+        `
+          SELECT 1
+          FROM load_bookings
+          WHERE truck_availability_id = $1
+            AND status = 'ACCEPTED'
+          LIMIT 1
+        `,
+        [availabilityId]
+      );
+      if (bookingCheck.rowCount && bookingCheck.rowCount > 0) {
+        return res.status(400).json({ error: "Listing has an accepted booking and cannot be deleted" });
+      }
+
+      const updated = await updateTruckAvailability(availabilityId, { isActive: false });
+      return res.json({ availability: updated });
+    } catch (err) {
+      console.error("deleteTruckAvailability error", err);
+      res.status(500).json({ error: "Failed to delete listing" });
     }
   }
 );
@@ -848,7 +899,11 @@ router.get("/trips/:tripId", authRequired, async (req, res) => {
       return res.status(403).json({ error: "Forbidden" });
     }
     const payment = await getPaymentForTrip(context.trip.id);
-    return res.json({ trip: context.trip, load: context.load, payment });
+    const direct_payment =
+      context.trip.payment_mode === "DIRECT"
+        ? await getDirectPaymentForTrip(context.trip.id)
+        : null;
+    return res.json({ trip: context.trip, load: context.load, payment, direct_payment });
   } catch (err) {
     console.error("getTrip error", err);
     res.status(500).json({ error: "Failed to load trip" });
@@ -1005,12 +1060,29 @@ router.post("/trips/:tripId/start", authRequired, async (req, res) => {
     if (!isHauler && !isDriver && !isShipper && !isSuperAdminUser(user)) {
       return res.status(403).json({ error: "Forbidden" });
     }
-    if (context.trip.status !== TripStatus.READY_TO_START) {
-      return res.status(400).json({ error: "Trip must be READY_TO_START" });
-    }
     const payment = await getPaymentForTrip(context.trip.id);
-    if (!payment || payment.status !== PaymentStatus.ESCROW_FUNDED) {
-      return res.status(400).json({ error: "Escrow not funded" });
+    const directMode =
+      context.trip.payment_mode === "DIRECT" ||
+      context.load.payment_mode === "DIRECT" ||
+      (payment as any)?.payment_mode === "DIRECT" ||
+      payment?.is_escrow === false ||
+      payment?.status === PaymentStatus.NOT_APPLICABLE ||
+      (!payment && context.trip.status === TripStatus.PENDING_ESCROW);
+
+    if (!directMode) {
+      if (context.trip.status !== TripStatus.READY_TO_START) {
+        return res.status(400).json({ error: "Trip must be READY_TO_START" });
+      }
+      if (!payment || payment.status !== PaymentStatus.ESCROW_FUNDED) {
+        return res.status(400).json({ error: "Escrow not funded" });
+      }
+    } else {
+      // Direct payment: allow start from READY_TO_START or PENDING_ESCROW, and do not require escrow.
+      if (
+        ![TripStatus.READY_TO_START, TripStatus.PENDING_ESCROW].includes(context.trip.status)
+      ) {
+        return res.status(400).json({ error: "Trip must be READY_TO_START" });
+      }
     }
     const now = new Date().toISOString();
     const updatedTrip = await updateTripStatus(context.trip.id, TripStatus.IN_PROGRESS, {

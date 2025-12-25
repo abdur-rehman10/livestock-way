@@ -30,7 +30,8 @@ export declare enum PaymentStatus {
     RELEASED_TO_HAULER = "RELEASED_TO_HAULER",
     REFUNDED_TO_SHIPPER = "REFUNDED_TO_SHIPPER",
     SPLIT_BETWEEN_PARTIES = "SPLIT_BETWEEN_PARTIES",
-    CANCELLED = "CANCELLED"
+    CANCELLED = "CANCELLED",
+    NOT_APPLICABLE = "NOT_APPLICABLE"
 }
 export declare enum DisputeStatus {
     OPEN = "OPEN",
@@ -56,6 +57,9 @@ export interface LoadRecord {
     asking_amount: string | null;
     awarded_offer_id: string | null;
     assigned_to_user_id?: string | null;
+    payment_mode?: PaymentMode;
+    direct_payment_disclaimer_accepted_at?: string | null;
+    direct_payment_disclaimer_version?: string | null;
 }
 export interface LoadOfferRecord {
     id: string;
@@ -71,6 +75,9 @@ export interface LoadOfferRecord {
     rejected_at: string | null;
     created_at: string;
     updated_at: string;
+    payment_mode?: PaymentMode;
+    direct_payment_disclaimer_accepted_at?: string | null;
+    direct_payment_disclaimer_version?: string | null;
 }
 export interface TruckAvailabilityRecord {
     id: string;
@@ -103,6 +110,9 @@ export interface LoadBookingRecord {
     requested_weight_kg: string | null;
     offered_amount: string | null;
     offered_currency: string | null;
+    payment_mode?: PaymentMode;
+    direct_payment_disclaimer_accepted_at?: string | null;
+    direct_payment_disclaimer_version?: string | null;
     status: BookingStatus;
     notes: string | null;
     created_by_user_id: string;
@@ -192,6 +202,36 @@ export interface DisputeRecord {
     created_at: string;
     updated_at: string;
 }
+export type DirectPaymentMethod = "CASH" | "BANK_TRANSFER" | "OTHER";
+export interface TripDirectPaymentRecord {
+    id: string;
+    trip_id: string;
+    received_amount: string;
+    received_payment_method: DirectPaymentMethod;
+    received_reference: string | null;
+    received_at: string;
+    created_at: string;
+    updated_at: string;
+}
+export declare function upsertDirectPaymentReceipt(input: {
+    tripId: string;
+    receivedAmount: number;
+    paymentMethod: DirectPaymentMethod;
+    reference?: string | null;
+    receivedAt?: string | null;
+}, client?: PoolClient | null): Promise<TripDirectPaymentRecord>;
+type LoadRow = {
+    id: string;
+    shipper_id: string;
+    shipper_user_id: string;
+    status: string | null;
+    currency: string | null;
+    asking_amount: string | null;
+    awarded_offer_id: string | null;
+    payment_mode?: string | null;
+    direct_payment_disclaimer_accepted_at?: string | null;
+    direct_payment_disclaimer_version?: string | null;
+};
 export interface HaulerSummary {
     id: string;
     name: string | null;
@@ -215,6 +255,29 @@ export interface HaulerVehicleRecord {
     truck_type: string | null;
     status: string | null;
 }
+export declare function mapLoadRow(row: LoadRow): LoadRecord;
+type TripRow = {
+    id: string;
+    load_id: string;
+    hauler_id: string | null;
+    driver_id: string | null;
+    truck_id: string | null;
+    status: string | null;
+    payment_mode?: string | null;
+    load_payment_mode?: string | null;
+    direct_payment_disclaimer_accepted_at?: string | null;
+    load_direct_payment_disclaimer_accepted_at?: string | null;
+    direct_payment_disclaimer_version?: string | null;
+    load_direct_payment_disclaimer_version?: string | null;
+    actual_start_time: string | null;
+    actual_end_time: string | null;
+    delivered_confirmed_at: string | null;
+    created_at: string;
+    updated_at: string;
+};
+export declare function mapTripRow(row: TripRow): TripRecord;
+export declare function mapOfferRow(row: any): LoadOfferRecord;
+export declare function mapTripDirectPaymentRow(row: any): TripDirectPaymentRecord;
 export interface CreateLoadOfferInput {
     loadId: string;
     haulerId: string;
@@ -355,14 +418,17 @@ export declare function listOfferMessages(offerId: string): Promise<any[]>;
 export declare function offerHasShipperMessage(offerId: string): Promise<boolean>;
 export declare function getTripById(tripId: string): Promise<TripRecord | null>;
 export declare function getLatestTripForLoad(loadId: string): Promise<TripRecord | null>;
+export declare function getDirectPaymentForTrip(tripId: string, client?: PoolClient | null): Promise<TripDirectPaymentRecord | null>;
 export declare function getTripAndLoad(tripId: string): Promise<{
     trip: TripRecord;
     load: LoadRecord;
+    direct_payment: TripDirectPaymentRecord | null;
 } | null>;
 export declare function getTripContextByLoadId(loadId: string): Promise<{
     trip: TripRecord | null;
     load: LoadRecord;
     payment: PaymentRecord | null;
+    direct_payment: TripDirectPaymentRecord | null;
 }>;
 export declare function listDriversForHauler(haulerId: string): Promise<HaulerDriverRecord[]>;
 export declare function listVehiclesForHauler(haulerId: string): Promise<HaulerVehicleRecord[]>;
@@ -448,4 +514,5 @@ export declare function addDisputeMessage(input: {
 }): Promise<any>;
 export declare function listDisputeMessages(disputeId: string): Promise<any[]>;
 export declare function updateDisputeStatus(disputeId: string, status: DisputeStatus, patch?: Partial<DisputeRecord>): Promise<DisputeRecord | null>;
+export {};
 //# sourceMappingURL=marketplaceService.d.ts.map

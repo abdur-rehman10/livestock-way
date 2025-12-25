@@ -108,6 +108,53 @@ async function bootstrapSuperAdmin() {
 
 bootstrapSuperAdmin();
 
+async function bootstrapPricingConfigs() {
+  try {
+    const exists = await pool
+      .query<{ exists: boolean }>(
+        `SELECT EXISTS (
+          SELECT 1 FROM information_schema.tables
+          WHERE table_schema = 'public' AND table_name = 'pricing_configs'
+        ) AS exists`
+      )
+      .then((r) => r.rows[0]?.exists);
+    if (!exists) {
+      console.warn("pricing_configs table missing; run migrations before bootstrapping pricing.");
+      return;
+    }
+
+    const individual = await pool.query(
+      `SELECT id FROM pricing_configs WHERE target_user_type = 'HAULER_INDIVIDUAL' AND is_active = TRUE LIMIT 1`
+    );
+    if (!individual.rowCount) {
+      await pool.query(
+        `
+          INSERT INTO pricing_configs (target_user_type, monthly_price, is_active)
+          VALUES ('HAULER_INDIVIDUAL', 70, TRUE)
+          ON CONFLICT DO NOTHING
+        `
+      );
+    }
+
+    const company = await pool.query(
+      `SELECT id FROM pricing_configs WHERE target_user_type = 'HAULER_COMPANY' AND is_active = TRUE LIMIT 1`
+    );
+    if (!company.rowCount) {
+      await pool.query(
+        `
+          INSERT INTO pricing_configs (target_user_type, is_active)
+          VALUES ('HAULER_COMPANY', TRUE)
+          ON CONFLICT DO NOTHING
+        `
+      );
+    }
+  } catch (err) {
+    console.error("Failed to bootstrap pricing configs:", err);
+  }
+}
+
+bootstrapPricingConfigs();
+
 const PORT = Number(process.env.PORT) || 4000;
 const server = http.createServer(app);
 

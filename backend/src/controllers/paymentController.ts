@@ -23,6 +23,7 @@ export const getPaymentsForUser = async (req: Request, res: Response) => {
         p.*,
         l.pickup_location_text,
         l.dropoff_location_text,
+        l.payment_mode AS load_payment_mode,
         d.status AS dispute_status,
         d.resolution_amount_to_hauler,
         d.resolution_amount_to_shipper,
@@ -49,6 +50,12 @@ export const getPaymentsForUser = async (req: Request, res: Response) => {
     const mapped = rows
       .map((row) => {
         const payment = mapPaymentRow(row);
+        if (!payment.payment_mode && row.load_payment_mode) {
+          payment.payment_mode = row.load_payment_mode;
+        }
+        if (row.load_payment_mode === "DIRECT") {
+          payment.is_escrow = false;
+        }
         if (row.dispute_status === "RESOLVED_SPLIT") {
           payment.split_amount_to_hauler =
             row.resolution_amount_to_hauler !== null

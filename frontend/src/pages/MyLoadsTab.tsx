@@ -226,11 +226,11 @@ const tripContextCache = useRef<Record<number, TripEnvelope | null>>({});
       toast.error("Trip not ready for disputes yet.");
       return;
     }
-    const payment = context?.payment ?? payments[loadId];
-    setDisputeDialog({
-      open: true,
-      loadId,
-      tripId: Number(tripId),
+      const payment = context?.payment ?? payments[loadId];
+      setDisputeDialog({
+        open: true,
+        loadId,
+        tripId: Number(tripId),
       disputes: [],
       loading: true,
     });
@@ -404,6 +404,7 @@ useEffect(() => {
           <tbody>
             {loads.map((load) => {
               const payment = payments[load.id];
+              const loadIsDirect = (load as any)?.payment_mode === "DIRECT";
 
               return (
                 <tr key={load.id} className="border-t border-gray-100">
@@ -452,30 +453,61 @@ useEffect(() => {
                       >
                         Track
                       </Button>
-                      {payment?.payment_mode !== "DIRECT" && payment?.status === "AWAITING_FUNDING" && (
-                        <Button
-                          size="sm"
-                          variant="secondary"
-                          className="text-xs"
-                          onClick={() => handleFundEscrow(load.id)}
-                          disabled={fundingLoadId === load.id}
-                        >
-                          {fundingLoadId === load.id ? "Funding…" : "Fund Escrow"}
-                        </Button>
-                      )}
-                      {payment?.trip_id && payment?.payment_mode !== "DIRECT" && (
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          className="text-xs"
-                          onClick={() => openDisputeDialog(load.id)}
-                        >
-                          Dispute
-                        </Button>
-                      )}
-                      {payment?.payment_mode === "DIRECT" && (
-                        <span className="text-[11px] text-gray-600">Disputes disabled for Direct Payment</span>
-                      )}
+                      {(() => {
+                        const isDirect =
+                          loadIsDirect ||
+                          payment?.payment_mode === "DIRECT" ||
+                          payment?.is_escrow === false ||
+                          (payment?.status || "").toUpperCase() === "NOT_APPLICABLE";
+                        return (
+                          !isDirect &&
+                          payment?.status === "AWAITING_FUNDING" && (
+                            <Button
+                              size="sm"
+                              variant="secondary"
+                              className="text-xs"
+                              onClick={() => handleFundEscrow(load.id)}
+                              disabled={fundingLoadId === load.id}
+                            >
+                              {fundingLoadId === load.id ? "Funding…" : "Fund Escrow"}
+                            </Button>
+                          )
+                        );
+                      })()}
+                      {(() => {
+                        const isDirect =
+                          loadIsDirect ||
+                          payment?.payment_mode === "DIRECT" ||
+                          payment?.is_escrow === false ||
+                          (payment?.status || "").toUpperCase() === "NOT_APPLICABLE";
+                        return (
+                          payment?.trip_id &&
+                          !isDirect && (
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              className="text-xs"
+                              onClick={() => openDisputeDialog(load.id)}
+                            >
+                              Dispute
+                            </Button>
+                          )
+                        );
+                      })()}
+                      {(() => {
+                        const isDirect =
+                          loadIsDirect ||
+                          payment?.payment_mode === "DIRECT" ||
+                          payment?.is_escrow === false ||
+                          (payment?.status || "").toUpperCase() === "NOT_APPLICABLE";
+                        return (
+                          isDirect && (
+                            <span className="text-[11px] text-gray-600">
+                              Disputes disabled for Direct Payment
+                            </span>
+                          )
+                        );
+                      })()}
                       {resolveEpodUrl(load.epod_url) && (
                         <Button size="sm" variant="outline" className="text-xs" asChild>
                           <a

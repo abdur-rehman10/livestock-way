@@ -20,6 +20,8 @@ export interface PaymentRecord {
     amount: number;
     currency: string;
     status: PaymentStatus;
+    payment_mode?: string | null;
+    is_escrow?: boolean | null;
     created_at: string;
     updated_at: string | null;
     funded_at: string | null;

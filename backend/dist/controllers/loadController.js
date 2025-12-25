@@ -84,7 +84,10 @@ async function getLoads(req, res) {
         started_at,
         completed_at,
         epod_url,
-        awarded_offer_id
+        awarded_offer_id,
+        payment_mode,
+        direct_payment_disclaimer_accepted_at,
+        direct_payment_disclaimer_version
       FROM loads
       WHERE is_deleted = FALSE
     `;
@@ -123,7 +126,7 @@ async function getLoads(req, res) {
 // POST /api/loads
 async function createLoad(req, res) {
     try {
-        const { title, species, quantity, pickup_location, dropoff_location, delivery_location, pickup_date, pickup_date_from, pickup_date_to, estimated_weight_lbs, weight, rate_per_mile, offer_price, description, additional_comments, price_offer_amount, price_currency, } = req.body;
+        const { title, species, quantity, pickup_location, dropoff_location, delivery_location, pickup_date, pickup_date_from, pickup_date_to, estimated_weight_lbs, weight, rate_per_mile, offer_price, description, additional_comments, price_offer_amount, price_currency, payment_mode, direct_payment_disclaimer_accepted_at, direct_payment_disclaimer_version, } = req.body;
         const normalizedSpecies = species?.trim();
         const pickupLocation = pickup_location?.trim() ?? req.body.pickup_location_text?.trim();
         const deliveryLocation = dropoff_location?.trim() ??
@@ -198,6 +201,19 @@ async function createLoad(req, res) {
             additional_comments ??
             req.body.notes ??
             null;
+        const paymentModeNormalized = typeof payment_mode === "string" && payment_mode.toUpperCase() === "DIRECT"
+            ? "DIRECT"
+            : "ESCROW";
+        const disclaimerAcceptedAt = paymentModeNormalized === "DIRECT" && direct_payment_disclaimer_accepted_at
+            ? new Date(direct_payment_disclaimer_accepted_at).toISOString()
+            : paymentModeNormalized === "DIRECT" && req.body?.direct_payment_disclaimer_accepted
+                ? new Date().toISOString()
+                : null;
+        const disclaimerVersion = paymentModeNormalized === "DIRECT" && direct_payment_disclaimer_version
+            ? direct_payment_disclaimer_version
+            : paymentModeNormalized === "DIRECT" && req.body?.direct_payment_disclaimer_accepted
+                ? "v1"
+                : null;
         const insertQuery = `
       INSERT INTO loads (
         shipper_id,
@@ -213,10 +229,13 @@ async function createLoad(req, res) {
         price_currency,
         status,
         visibility,
-        notes
+        notes,
+        payment_mode,
+        direct_payment_disclaimer_accepted_at,
+        direct_payment_disclaimer_version
       )
       VALUES (
-        $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,'posted','public',$12
+        $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,'posted','public',$12,$13,$14,$15
       )
       RETURNING
         id,
@@ -245,6 +264,9 @@ async function createLoad(req, res) {
             priceOffer,
             priceCurrency,
             notes,
+            paymentModeNormalized,
+            disclaimerAcceptedAt,
+            disclaimerVersion,
         ];
         const result = await database_1.pool.query(insertQuery, values);
         const loadRow = result.rows[0];

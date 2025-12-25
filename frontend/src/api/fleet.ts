@@ -136,3 +136,24 @@ export async function createTruck(payload: {
 export async function deleteTruck(id: number) {
   return fleetRequest<TruckRecord>(`/api/trucks/${id}`, { method: "DELETE" });
 }
+
+export async function updateTruck(id: number, payload: Partial<{
+  truck_name: string | null;
+  plate_number: string;
+  truck_type: string;
+  capacity_weight_kg?: number | null;
+  height_m?: number | null;
+  width_m?: number | null;
+  length_m?: number | null;
+  axle_count?: number | null;
+  max_gross_weight_kg?: number | null;
+  max_axle_weight_kg?: number | null;
+  hazmat_permitted?: boolean | null;
+  species_supported?: string | null;
+  notes?: string | null;
+}>) {
+  return fleetRequest<TruckRecord>(`/api/trucks/${id}`, {
+    method: "PATCH",
+    body: JSON.stringify(payload),
+  });
+}

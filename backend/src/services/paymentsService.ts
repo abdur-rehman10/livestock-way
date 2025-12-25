@@ -58,6 +58,8 @@ export interface PaymentRecord {
   amount: number;
   currency: string;
   status: PaymentStatus;
+  payment_mode?: string | null;
+  is_escrow?: boolean | null;
   created_at: string;
   updated_at: string | null;
   funded_at: string | null;
@@ -94,6 +96,8 @@ export function mapPaymentRow(row: any): PaymentRecord {
     amount,
     currency: row.currency || "USD",
     status,
+    payment_mode: row.payment_mode ?? null,
+    is_escrow: row.is_escrow !== undefined ? Boolean(row.is_escrow) : null,
     created_at: row.created_at,
     updated_at: row.updated_at || null,
     funded_at: row.funded_at || null,

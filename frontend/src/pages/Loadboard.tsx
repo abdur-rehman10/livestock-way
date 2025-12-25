@@ -86,6 +86,7 @@ interface Load {
   price: string;
   status: 'open' | 'assigned' | 'in-transit' | 'delivered';
   bids?: number;
+  paymentMode?: "ESCROW" | "DIRECT";
 }
 
 // const mockLoads: Load[] = [ ... ];
@@ -539,6 +540,7 @@ const loadUserOffer = async (load: Load, options: { silent?: boolean } = {}) => 
         : "$0",
       status: normalizedStatus,
       bids: undefined,
+      paymentMode: (load as any)?.payment_mode === "DIRECT" ? "DIRECT" : "ESCROW",
     };
   });
 
@@ -747,23 +749,35 @@ const loadUserOffer = async (load: Load, options: { silent?: boolean } = {}) => 
               {loadsToDisplay.map((load) => (
                 <Card key={load.id} className="hover:shadow-md transition-shadow">
                   <CardContent className="p-4 space-y-3">
-                    <div className="flex items-center justify-between">
-                      <div>
-                        <h3 className="text-lg text-gray-900">Load #{load.id}</h3>
-                        <p className="text-sm text-gray-500">
-                          {load.species} • {load.quantity}
-                        </p>
-                        <p className="text-sm text-gray-600">
-                          {load.origin} → {load.destination}
-                        </p>
-                        <p className="text-xs text-gray-400">
-                          Pickup: {load.pickupDate}
-                        </p>
-                      </div>
-                      <div className="text-right">
-                        {load.price && (
-                          <div className="text-xl text-[#29CA8D] mb-2">
-                            {load.price}
+                <div className="flex items-center justify-between">
+                  <div>
+                    <h3 className="text-lg text-gray-900">Load #{load.id}</h3>
+                    <p className="text-sm text-gray-500">
+                      {load.species} • {load.quantity}
+                    </p>
+                    <p className="text-sm text-gray-600">
+                      {load.origin} → {load.destination}
+                    </p>
+                    <p className="text-xs text-gray-400">
+                      Pickup: {load.pickupDate}
+                    </p>
+                    <div className="mt-2">
+                      <Badge
+                        variant="secondary"
+                        className={
+                          load.paymentMode === "DIRECT"
+                            ? "bg-amber-50 text-amber-800 border border-amber-200"
+                            : "bg-emerald-50 text-emerald-800 border border-emerald-200"
+                        }
+                      >
+                        Payment: {load.paymentMode === "DIRECT" ? "Direct" : "Escrow"}
+                      </Badge>
+                    </div>
+                  </div>
+                  <div className="text-right">
+                    {load.price && (
+                      <div className="text-xl text-[#29CA8D] mb-2">
+                        {load.price}
                           </div>
                         )}
                         <div className="flex flex-col gap-2">
@@ -1006,6 +1020,20 @@ const loadUserOffer = async (load: Load, options: { silent?: boolean } = {}) => 
                 : `Negotiate directly with the shipper for load #${offerDialogLoad?.id}`}
             </DialogDescription>
           </DialogHeader>
+          {offerDialogLoad && (
+            <div className="flex items-center gap-2 text-sm">
+              <Badge
+                variant="secondary"
+                className={
+                  offerDialogLoad.paymentMode === "DIRECT"
+                    ? "bg-amber-50 text-amber-800 border border-amber-200"
+                    : "bg-emerald-50 text-emerald-800 border border-emerald-200"
+                }
+              >
+                Payment: {offerDialogLoad.paymentMode === "DIRECT" ? "Direct" : "Escrow"}
+              </Badge>
+            </div>
+          )}
           {offerDialogCheckingExisting && (
             <p className="text-xs text-gray-500">Checking your existing offer…</p>
           )}
@@ -1127,6 +1155,20 @@ const loadUserOffer = async (load: Load, options: { silent?: boolean } = {}) => 
               Load #{selectedLoad?.id} - {selectedLoad?.species}
             </DialogDescription>
           </DialogHeader>
+          {selectedLoad && (
+            <div className="mb-2">
+              <Badge
+                variant="secondary"
+                className={
+                  selectedLoad.paymentMode === "DIRECT"
+                    ? "bg-amber-50 text-amber-800 border border-amber-200"
+                    : "bg-emerald-50 text-emerald-800 border border-emerald-200"
+                }
+              >
+                Payment: {selectedLoad.paymentMode === "DIRECT" ? "Direct" : "Escrow"}
+              </Badge>
+            </div>
+          )}
 
           <div className="space-y-4">
             <div className="p-4 bg-gray-50 rounded-lg">

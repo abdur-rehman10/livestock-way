@@ -68,8 +68,6 @@ export function AppLayout({ children, userRole, onLogout }: AppLayoutProps) {
       routes: [
         { path: '/shipper/dashboard', icon: LayoutDashboard, label: 'Dashboard' },
         { path: '/shipper/my-loads', icon: Package, label: 'My Loads' },
-        { path: '/shipper/loadboard', icon: Search, label: 'Find Carriers' },
-        { path: '/shipper/truck-board', icon: Truck, label: 'Truck Board' },
         { path: '/shipper/truck-board', icon: Truck, label: 'Truck Board' },
         { path: '/shipper/trips', icon: MapPin, label: 'Track Shipments' },
         { path: '/shipper/payments', icon: DollarSign, label: 'Payments' },
@@ -106,6 +104,7 @@ export function AppLayout({ children, userRole, onLogout }: AppLayoutProps) {
         { path: '/admin/dashboard', icon: LayoutDashboard, label: 'Dashboard' },
         { path: '/admin/users', icon: Users, label: 'Users' },
         { path: '/admin/approvals', icon: Shield, label: 'Approvals' },
+        { path: '/admin/pricing', icon: DollarSign, label: 'Pricing' },
         { path: '/admin/analytics', icon: BarChart3, label: 'Analytics' },
         { path: '/admin/marketplace', icon: ShoppingCart, label: 'Marketplace' },
         { path: '/admin/support', icon: HelpCircle, label: 'Support' },

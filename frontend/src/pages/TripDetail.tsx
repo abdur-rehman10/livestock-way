@@ -36,6 +36,15 @@ import {
 } from "../api/marketplace";
 import { PaymentCard } from "../components/PaymentCard";
 import { toast } from "sonner";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from "../components/ui/dialog";
+import { Badge } from "../components/ui/badge";
+import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "../components/ui/card";
 
 
 const formatDateTime = (value?: string | null) => {
@@ -79,7 +88,7 @@ const normalizeExpenseType = (
     : "other";
 };
 
-export function TripDetail() {
+export function HaulerTripView() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const location = useLocation();
@@ -141,6 +150,12 @@ export function TripDetail() {
   const [routePlanLoading, setRoutePlanLoading] = useState(false);
   const [routePlanError, setRoutePlanError] = useState<string | null>(null);
   const [routePlanSaving, setRoutePlanSaving] = useState(false);
+  const [directCompleteOpen, setDirectCompleteOpen] = useState(false);
+  const [directAmount, setDirectAmount] = useState("");
+  const [directMethod, setDirectMethod] = useState<"CASH" | "BANK_TRANSFER" | "OTHER" | "">("");
+  const [directReference, setDirectReference] = useState("");
+  const [directReceivedAt, setDirectReceivedAt] = useState("");
+  const [directError, setDirectError] = useState<string | null>(null);
   const marketplaceTripId = marketplaceContext?.trip ? Number(marketplaceContext.trip.id) : null;
   const tripId = trip?.id ?? marketplaceTripId;
   const restStopPlan = useMemo(() => {
@@ -159,6 +174,23 @@ export function TripDetail() {
     if (!routePlan?.plan_json) return null;
     return routePlan.plan_json;
   }, [routePlan]);
+
+  const resolvedPaymentMode = useMemo(() => {
+    const mode =
+      (payment as any)?.payment_mode ||
+      (trip as any)?.payment_mode ||
+      (load as any)?.payment_mode;
+    return mode === "DIRECT" ? "DIRECT" : "ESCROW";
+  }, [payment, trip, load]);
+
+  const agreedAmount = useMemo(() => {
+    const amount =
+      (payment as any)?.amount ??
+      (load as any)?.offer_price ??
+      (load as any)?.price_offer_amount ??
+      null;
+    return typeof amount === "number" ? amount : amount ? Number(amount) : null;
+  }, [payment, load]);
 
   const handleGenerateRoutePlan = async () => {
     if (!tripId) return;
@@ -617,9 +649,27 @@ export function TripDetail() {
 
   const handleMarkDelivered = async () => {
     if (!marketplaceContext?.trip) return;
+    const mode =
+      (marketplaceContext.trip.payment_mode as any) ||
+      (marketplaceContext.load as any)?.payment_mode ||
+      (marketplaceContext.payment as any)?.payment_mode;
+    if (mode === "DIRECT") {
+      setDirectCompleteOpen(true);
+      return;
+    }
+    await submitMarkDelivered();
+  };
+
+  const submitMarkDelivered = async (receipt?: {
+    received_amount?: number;
+    received_payment_method?: "CASH" | "BANK_TRANSFER" | "OTHER";
+    received_reference?: string | null;
+    received_at?: string | null;
+  }) => {
+    if (!marketplaceContext?.trip) return;
     try {
       setTripActionLoading(true);
-      await markMarketplaceTripDelivered(marketplaceContext.trip.id);
+      await markMarketplaceTripDelivered(marketplaceContext.trip.id, receipt);
       toast.success("Trip marked delivered.");
       await loadMarketplaceContext();
     } catch (err: any) {
@@ -1226,27 +1276,105 @@ export function TripDetail() {
 
       </div>
 
-      {paymentLoading ? (
-        <div className="rounded-lg border border-gray-200 bg-white p-4 text-xs text-gray-500">
-          Loading escrow…
+      <div className="rounded-lg border border-gray-200 bg-white p-4 space-y-2">
+        <div className="flex items-center justify-between">
+          <h2 className="text-sm font-semibold text-gray-900">Payment Details</h2>
+          <Badge
+            variant="secondary"
+            className={
+              resolvedPaymentMode === "DIRECT"
+                ? "bg-amber-50 text-amber-800 border border-amber-200"
+                : "bg-emerald-50 text-emerald-800 border border-emerald-200"
+            }
+          >
+            Payment: {resolvedPaymentMode === "DIRECT" ? "Direct" : "Escrow"}
+          </Badge>
         </div>
-      ) : paymentError ? (
-        <div className="rounded-lg border border-gray-200 bg-white p-4 text-xs text-red-600">
-          {paymentError}
+        <div className="text-sm text-gray-700 space-y-1">
+          <div>
+            <span className="text-gray-500">Agreed Amount:</span>{" "}
+            <span className="font-semibold">
+              {agreedAmount != null ? `$${Number(agreedAmount).toLocaleString()}` : "—"}
+            </span>
+          </div>
+          {resolvedPaymentMode !== "DIRECT" ? (
+            <div>
+              <span className="text-gray-500">Escrow Status:</span>{" "}
+              <span className="font-semibold">
+                {paymentLoading
+                  ? "Loading…"
+                  : paymentError
+                  ? "Unavailable"
+                  : payment?.status ?? "Pending"}
+              </span>
+            </div>
+          ) : (
+            <div className="space-y-1 text-xs text-gray-700">
+              <p className="text-amber-700">
+                Direct payment selected. Escrow and disputes are disabled for this trip.
+              </p>
+              {marketplaceContext?.direct_payment ? (
+                <>
+                  <div>
+                    <span className="text-gray-500">Received Amount:</span>{" "}
+                    <span className="font-semibold">
+                      ${Number(marketplaceContext.direct_payment.received_amount).toLocaleString()}
+                    </span>
+                  </div>
+                  <div>
+                    <span className="text-gray-500">Method:</span>{" "}
+                    <span className="font-semibold">
+                      {marketplaceContext.direct_payment.received_payment_method.replace("_", " ")}
+                    </span>
+                  </div>
+                  {marketplaceContext.direct_payment.received_reference && (
+                    <div>
+                      <span className="text-gray-500">Reference:</span>{" "}
+                      <span className="font-semibold">
+                        {marketplaceContext.direct_payment.received_reference}
+                      </span>
+                    </div>
+                  )}
+                  <div>
+                    <span className="text-gray-500">Received At:</span>{" "}
+                    <span className="font-semibold">
+                      {new Date(marketplaceContext.direct_payment.received_at).toLocaleString()}
+                    </span>
+                  </div>
+                </>
+              ) : (
+                <p className="text-gray-500">No receipt recorded yet.</p>
+              )}
+            </div>
+          )}
         </div>
-      ) : !payment ? (
-        <div className="rounded-lg border border-gray-200 bg-white p-4 text-xs text-gray-500">
-          No payment record yet. Accept this load to initiate escrow.
-        </div>
-      ) : (
-        <PaymentCard
-          payment={payment}
-          isShipper={currentUserRole?.toUpperCase() === "SHIPPER"}
-          onFund={handleFundEscrow}
-          funding={funding}
-          fundError={fundError}
-          paymentMode={(payment as any).payment_mode}
-        />
+      </div>
+
+      {resolvedPaymentMode !== "DIRECT" && (
+        <>
+          {paymentLoading ? (
+            <div className="rounded-lg border border-gray-200 bg-white p-4 text-xs text-gray-500">
+              Loading escrow…
+            </div>
+          ) : paymentError ? (
+            <div className="rounded-lg border border-gray-200 bg-white p-4 text-xs text-red-600">
+              {paymentError}
+            </div>
+          ) : !payment ? (
+            <div className="rounded-lg border border-gray-200 bg-white p-4 text-xs text-gray-500">
+              No payment record yet. Accept this load to initiate escrow.
+            </div>
+          ) : (
+            <PaymentCard
+              payment={payment}
+              isShipper={currentUserRole?.toUpperCase() === "SHIPPER"}
+              onFund={handleFundEscrow}
+              funding={funding}
+              fundError={fundError}
+              paymentMode={(payment as any).payment_mode}
+            />
+          )}
+        </>
       )}
 
       <div className="rounded-lg border border-gray-200 bg-white p-4 space-y-3">
@@ -1325,7 +1453,7 @@ export function TripDetail() {
           <div className="flex justify-end">
             <Button
               type="submit"
-            disabled={expenseSubmitting || !tripId}
+              disabled={expenseSubmitting || !tripId}
               className="bg-[#29CA8D] hover:bg-[#24b67d] px-4 py-1.5 text-xs font-medium text-white disabled:opacity-60"
             >
               {expenseSubmitting ? "Saving…" : "Add expense"}
@@ -1502,8 +1630,321 @@ export function TripDetail() {
           )}
         </div>
       </div>
+
+      <Dialog open={directCompleteOpen} onOpenChange={setDirectCompleteOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Record Direct Payment</DialogTitle>
+            <DialogDescription>
+              Provide payment receipt details to complete this direct-payment trip.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-3">
+            <div className="space-y-1">
+              <Label className="text-xs">Received Amount</Label>
+              <input
+                type="number"
+                min="0"
+                step="0.01"
+                value={directAmount}
+                onChange={(e) => setDirectAmount(e.target.value)}
+                className="w-full rounded-md border px-2 py-1.5 text-sm"
+                placeholder="0.00"
+              />
+            </div>
+            <div className="space-y-1">
+              <Label className="text-xs">Payment Method</Label>
+              <select
+                value={directMethod}
+                onChange={(e) =>
+                  setDirectMethod(
+                    e.target.value as "CASH" | "BANK_TRANSFER" | "OTHER" | ""
+                  )
+                }
+                className="w-full rounded-md border px-2 py-1.5 text-sm"
+              >
+                <option value="">Select method</option>
+                <option value="CASH">Cash</option>
+                <option value="BANK_TRANSFER">Bank transfer</option>
+                <option value="OTHER">Other</option>
+              </select>
+            </div>
+            <div className="space-y-1">
+              <Label className="text-xs">Reference (optional)</Label>
+              <input
+                type="text"
+                value={directReference}
+                onChange={(e) => setDirectReference(e.target.value)}
+                className="w-full rounded-md border px-2 py-1.5 text-sm"
+                placeholder="Receipt/transfer reference"
+              />
+            </div>
+            <div className="space-y-1">
+              <Label className="text-xs">Received At (optional)</Label>
+              <input
+                type="datetime-local"
+                value={directReceivedAt}
+                onChange={(e) => setDirectReceivedAt(e.target.value)}
+                className="w-full rounded-md border px-2 py-1.5 text-sm"
+              />
+            </div>
+            {directError && (
+              <p className="text-xs text-rose-600">{directError}</p>
+            )}
+            <div className="flex justify-end gap-2">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setDirectCompleteOpen(false)}
+              >
+                Cancel
+              </Button>
+              <Button
+                size="sm"
+                onClick={async () => {
+                  setDirectError(null);
+                  const amountNum = Number(directAmount);
+                  if (!Number.isFinite(amountNum) || amountNum <= 0) {
+                    setDirectError("Enter a valid received amount.");
+                    return;
+                  }
+                  if (!directMethod) {
+                    setDirectError("Select a payment method.");
+                    return;
+                  }
+                  await submitMarkDelivered({
+                    received_amount: amountNum,
+                    received_payment_method: directMethod as "CASH" | "BANK_TRANSFER" | "OTHER",
+                    received_reference: directReference.trim() || null,
+                    received_at: directReceivedAt ? new Date(directReceivedAt).toISOString() : null,
+                  });
+                  setDirectCompleteOpen(false);
+                  setDirectAmount("");
+                  setDirectMethod("");
+                  setDirectReference("");
+                  setDirectReceivedAt("");
+                }}
+                disabled={tripActionLoading}
+              >
+                {tripActionLoading ? "Submitting…" : "Submit & Complete"}
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+
     </div>
   );
+}
+
+export function ShipperTripView() {
+  const { id } = useParams();
+  const [trip, setTrip] = useState<TripRecord | null>(null);
+  const [load, setLoad] = useState<LoadDetail | null>(null);
+  const [payment, setPayment] = useState<Payment | null>(null);
+  const [directPayment, setDirectPayment] = useState<{
+    received_amount: string;
+    received_payment_method: "CASH" | "BANK_TRANSFER" | "OTHER";
+    received_reference: string | null;
+    received_at: string;
+  } | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let active = true;
+    async function loadData() {
+      if (!id) return;
+      try {
+        setError(null);
+        setLoading(true);
+        const numericId = Number(id);
+        const [loadResp, tripResp] = await Promise.all([
+          fetchLoadById(numericId),
+          fetchTripByLoadId(numericId),
+        ]);
+        if (!active) return;
+        setLoad(loadResp);
+        setTrip(tripResp);
+        if (tripResp?.id) {
+          try {
+            const paymentResp = await getPaymentByTrip(String(tripResp.id));
+            if (active) setPayment(paymentResp ?? null);
+            // Fallback fetch of direct payment via marketplace context
+            fetchTripByLoadId(numericId)
+              .then(() => null)
+              .catch(() => null);
+          } catch (err: any) {
+            if (active) setPayment(null);
+          }
+          // Try marketplace context for direct payment receipt
+          try {
+            const ctx = await fetchMarketplaceTripByLoad(numericId);
+            if (active) {
+              setDirectPayment((ctx as any)?.direct_payment ?? null);
+            }
+          } catch {
+            if (active) setDirectPayment(null);
+          }
+        } else {
+          setPayment(null);
+          setDirectPayment(null);
+        }
+      } catch (err: any) {
+        if (!active) return;
+        setError(err?.message ?? "Failed to load trip");
+      } finally {
+        if (active) setLoading(false);
+      }
+    }
+    loadData();
+    return () => {
+      active = false;
+    };
+  }, [id]);
+
+  const paymentMode = useMemo(() => {
+    const mode =
+      (trip as any)?.payment_mode ||
+      (load as any)?.payment_mode ||
+      (payment as any)?.payment_mode;
+    return mode === "DIRECT" ? "DIRECT" : "ESCROW";
+  }, [trip, load, payment]);
+
+  const agreedAmount = (() => {
+    const amount =
+      (payment as any)?.amount ??
+      (load as any)?.offer_price ??
+      (load as any)?.price_offer_amount ??
+      null;
+    return typeof amount === "number" ? amount : amount ? Number(amount) : null;
+  })();
+  const pickupLabel =
+    load?.pickup_location ??
+    (load as any)?.pickup_location_text ??
+    "Origin TBD";
+  const dropoffLabel =
+    load?.dropoff_location ??
+    (load as any)?.dropoff_location_text ??
+    "Destination TBD";
+
+  return (
+    <div className="p-6 space-y-4">
+      <div>
+        <p className="text-xs text-gray-500 uppercase tracking-wide">Trip</p>
+        <h1 className="text-2xl font-semibold text-gray-900">Shipment #{id}</h1>
+      </div>
+      {loading ? (
+        <div className="rounded-lg border bg-white p-4 text-sm text-gray-500">Loading trip…</div>
+      ) : error ? (
+        <div className="rounded-lg border bg-white p-4 text-sm text-red-600">{error}</div>
+      ) : (
+        <div className="space-y-4">
+          <Card>
+            <CardHeader>
+              <CardTitle>Route</CardTitle>
+              <CardDescription>Origin, destination, and planned path</CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-2 text-sm text-gray-700">
+              <div className="flex flex-col gap-1">
+                <div className="font-semibold text-gray-900">
+                  {pickupLabel}
+                </div>
+                <div className="font-semibold text-gray-900">
+                  {dropoffLabel}
+                </div>
+              </div>
+              <p className="text-xs text-gray-500">
+                {trip?.route_distance_km
+                  ? `${trip.route_distance_km} km planned distance`
+                  : "Route plan not available yet. Mapping will appear here."}
+              </p>
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader>
+              <CardTitle>Payment Details</CardTitle>
+              <CardDescription>Funding and payout status</CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-2 text-sm text-gray-700">
+              <div className="flex items-center gap-2">
+                <Badge
+                  variant="secondary"
+                  className={
+                    paymentMode === "DIRECT"
+                      ? "bg-amber-50 text-amber-800 border border-amber-200"
+                      : "bg-emerald-50 text-emerald-800 border border-emerald-200"
+                  }
+                >
+                  Payment: {paymentMode === "DIRECT" ? "Direct" : "Escrow"}
+                </Badge>
+              </div>
+              <div>
+                <span className="text-gray-500">Agreed Amount:</span>{" "}
+                <span className="font-semibold">
+                  {agreedAmount != null ? `$${Number(agreedAmount).toLocaleString()}` : "—"}
+                </span>
+              </div>
+              {paymentMode !== "DIRECT" && (
+                <div>
+                  <span className="text-gray-500">Escrow Status:</span>{" "}
+                  <span className="font-semibold">
+                    {payment?.status ?? "Pending"}
+                  </span>
+                </div>
+              )}
+              {paymentMode === "DIRECT" && (
+                <div className="space-y-1 text-xs text-gray-700">
+                  <p className="text-amber-700">
+                    Direct payment selected. Escrow and disputes are disabled for this trip.
+                  </p>
+                  {directPayment && (
+                    <>
+                      <div>
+                        <span className="text-gray-500">Received Amount:</span>{" "}
+                        <span className="font-semibold">
+                          ${Number(directPayment.received_amount).toLocaleString()}
+                        </span>
+                      </div>
+                      <div>
+                        <span className="text-gray-500">Method:</span>{" "}
+                        <span className="font-semibold">
+                          {directPayment.received_payment_method.replace("_", " ")}
+                        </span>
+                      </div>
+                      {directPayment.received_reference && (
+                        <div>
+                          <span className="text-gray-500">Reference:</span>{" "}
+                          <span className="font-semibold">
+                            {directPayment.received_reference}
+                          </span>
+                        </div>
+                      )}
+                      <div>
+                        <span className="text-gray-500">Received At:</span>{" "}
+                        <span className="font-semibold">
+                          {new Date(directPayment.received_at).toLocaleString()}
+                        </span>
+                      </div>
+                    </>
+                  )}
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        </div>
+      )}
+    </div>
+  );
+}
+
+export function TripDetail() {
+  const role = storage.get<string | null>(STORAGE_KEYS.USER_ROLE, null);
+  if (role === "shipper") {
+    return <ShipperTripView />;
+  }
+  return <HaulerTripView />;
 }
 
 export default TripDetail;

@@ -1,7 +1,12 @@
 "use strict";
+var __importDefault = (this && this.__importDefault) || function (mod) {
+    return (mod && mod.__esModule) ? mod : { "default": mod };
+};
 Object.defineProperty(exports, "__esModule", { value: true });
+exports.assertLoadboardAccess = assertLoadboardAccess;
 const express_1 = require("express");
 const database_1 = require("../config/database");
+const auth_1 = __importDefault(require("../middlewares/auth"));
 const router = (0, express_1.Router)();
 function normalizeType(value) {
     const str = getQueryString(value) || undefined;
@@ -38,10 +43,27 @@ function parseTruckNotes(raw) {
     }
     return { species_supported: raw };
 }
-router.get("/", async (req, res) => {
+function assertLoadboardAccess(user) {
+    const role = (user?.user_type ?? "").toString().toLowerCase();
+    if (role === "shipper") {
+        const err = new Error("Shippers cannot access loadboard");
+        err.status = 403;
+        throw err;
+    }
+}
+router.get("/", auth_1.default, async (req, res) => {
     const listType = normalizeType(req.query.type);
     const speciesFilter = getQueryString(req.query.species);
     try {
+        try {
+            assertLoadboardAccess(req.user);
+        }
+        catch (err) {
+            if (err?.status === 403) {
+                return res.status(403).json({ message: err.message });
+            }
+            throw err;
+        }
         let loads = [];
         let trucks = [];
         if (listType === "all" || listType === "loads") {

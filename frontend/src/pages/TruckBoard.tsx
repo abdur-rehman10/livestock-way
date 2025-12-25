@@ -3,6 +3,7 @@ import {
   fetchTruckAvailability,
   createTruckAvailabilityEntry,
   updateTruckAvailabilityEntry,
+  deleteTruckAvailabilityEntry,
   requestBookingForTruckListing,
   startTruckChat,
   fetchHaulerVehicles,
@@ -930,6 +931,22 @@ export default function TruckBoard() {
                       </Badge>
                       <Button size="sm" variant="outline" onClick={() => openEditDialog(listing)}>
                         Edit
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant="destructive"
+                        onClick={async () => {
+                          try {
+                            await deleteTruckAvailabilityEntry(listing.id);
+                            toast.success("Listing removed");
+                            refreshMyListings();
+                            refresh();
+                          } catch (err: any) {
+                            toast.error(err?.message ?? "Unable to delete listing. It may have an accepted booking.");
+                          }
+                        }}
+                      >
+                        Delete
                       </Button>
                     </div>
                   </div>

@@ -3,6 +3,10 @@ import { pool } from "../config/database";
 import authRequired from "../middlewares/auth";
 import { requireRoles } from "../middlewares/rbac";
 import { auditRequest } from "../middlewares/auditLogger";
+import {
+  validateCompanyPricingInput,
+  validateIndividualPricingInput,
+} from "../utils/pricing";
 
 function normalizeStatus(value?: string) {
   if (!value) return null;
@@ -282,6 +286,209 @@ router.get("/earnings", async (_req, res) => {
   } catch (error) {
     console.error("admin earnings error", error);
     return res.status(500).json({ message: "Failed to load platform earnings" });
+  }
+});
+
+router.get("/pricing/hauler-individual", async (_req, res) => {
+  try {
+    const result = await pool.query(
+      `
+        SELECT *
+        FROM pricing_configs
+        WHERE target_user_type = 'HAULER_INDIVIDUAL' AND is_active = TRUE
+        ORDER BY created_at DESC
+        LIMIT 1
+      `
+    );
+    return res.json(result.rows[0] ?? null);
+  } catch (error) {
+    console.error("admin pricing individual get error", error);
+    return res.status(500).json({ message: "Failed to load individual pricing" });
+  }
+});
+
+router.put("/pricing/hauler-individual", async (req, res) => {
+  try {
+    const { monthly_price } = validateIndividualPricingInput(
+      req.user?.user_type,
+      req.body?.monthly_price
+    );
+
+    const existing = await pool.query(
+      `SELECT id FROM pricing_configs WHERE target_user_type = 'HAULER_INDIVIDUAL' AND is_active = TRUE LIMIT 1`
+    );
+
+    if (existing.rowCount) {
+      const updated = await pool.query(
+        `
+          UPDATE pricing_configs
+          SET monthly_price = $1, updated_at = NOW(), is_active = TRUE
+          WHERE id = $2
+          RETURNING *
+        `,
+        [monthly_price, existing.rows[0].id]
+      );
+      return res.json(updated.rows[0]);
+    }
+
+    await pool.query("BEGIN");
+    await pool.query(
+      `UPDATE pricing_configs SET is_active = FALSE WHERE target_user_type = 'HAULER_INDIVIDUAL'`
+    );
+    const inserted = await pool.query(
+      `
+        INSERT INTO pricing_configs (target_user_type, monthly_price, is_active)
+        VALUES ('HAULER_INDIVIDUAL', $1, TRUE)
+        RETURNING *
+      `,
+      [monthly_price]
+    );
+    await pool.query("COMMIT");
+    return res.status(201).json(inserted.rows[0]);
+  } catch (error: any) {
+    await pool.query("ROLLBACK").catch(() => null);
+    const message = error?.message || "Failed to update individual pricing";
+    const status =
+      message.includes("super admins") || message.includes("positive number")
+        ? 400
+        : 500;
+    if (status === 500) console.error("admin pricing individual put error", error);
+    return res.status(status).json({ message });
+  }
+});
+
+router.get("/pricing/hauler-company", async (_req, res) => {
+  try {
+    const configResult = await pool.query(
+      `
+        SELECT *
+        FROM pricing_configs
+        WHERE target_user_type = 'HAULER_COMPANY' AND is_active = TRUE
+        ORDER BY created_at DESC
+        LIMIT 1
+      `
+    );
+    const config = configResult.rows[0] ?? null;
+    const tiers = config
+      ? (
+          await pool.query(
+            `
+              SELECT *
+              FROM pricing_company_tiers
+              WHERE pricing_config_id = $1
+              ORDER BY sort_order ASC, id ASC
+            `,
+            [config.id]
+          )
+        ).rows
+      : [];
+    return res.json({ config, tiers });
+  } catch (error) {
+    console.error("admin pricing company get error", error);
+    return res.status(500).json({ message: "Failed to load company pricing" });
+  }
+});
+
+router.put("/pricing/hauler-company", async (req, res) => {
+  try {
+    const validatedTiers = validateCompanyPricingInput(req.user?.user_type, req.body?.tiers || []);
+
+    await pool.query("BEGIN");
+    let config = await pool.query(
+      `
+        SELECT *
+        FROM pricing_configs
+        WHERE target_user_type = 'HAULER_COMPANY' AND is_active = TRUE
+        ORDER BY created_at DESC
+        LIMIT 1
+      `
+    );
+
+    if (!config.rowCount) {
+      config = await pool.query(
+        `
+          INSERT INTO pricing_configs (target_user_type, is_active)
+          VALUES ('HAULER_COMPANY', TRUE)
+          RETURNING *
+        `
+      );
+    }
+    const configId = config.rows[0].id;
+
+    await pool.query(
+      `DELETE FROM pricing_company_tiers WHERE pricing_config_id = $1`,
+      [configId]
+    );
+
+    if (validatedTiers.length > 0) {
+      const values: any[] = [];
+      const placeholders: string[] = [];
+      validatedTiers.forEach((tier, idx) => {
+        values.push(
+          configId,
+          tier.name,
+          tier.min_vehicles,
+          tier.max_vehicles,
+          tier.monthly_price,
+          tier.sales_form_link,
+          tier.sort_order ?? idx,
+          tier.is_enterprise
+        );
+        const base = idx * 8;
+        placeholders.push(
+          `($${base + 1}, $${base + 2}, $${base + 3}, $${base + 4}, $${base + 5}, $${base + 6}, $${base + 7}, $${base + 8})`
+        );
+      });
+      await pool.query(
+        `
+          INSERT INTO pricing_company_tiers (
+            pricing_config_id,
+            name,
+            min_vehicles,
+            max_vehicles,
+            monthly_price,
+            sales_form_link,
+            sort_order,
+            is_enterprise
+          ) VALUES ${placeholders.join(", ")}
+        `,
+        values
+      );
+    }
+
+    await pool.query(
+      `UPDATE pricing_configs SET updated_at = NOW(), is_active = TRUE WHERE id = $1`,
+      [configId]
+    );
+
+    const tiers = (
+      await pool.query(
+        `
+          SELECT *
+          FROM pricing_company_tiers
+          WHERE pricing_config_id = $1
+          ORDER BY sort_order ASC, id ASC
+        `,
+        [configId]
+      )
+    ).rows;
+
+    await pool.query("COMMIT");
+    return res.json({ config: config.rows[0], tiers });
+  } catch (error: any) {
+    await pool.query("ROLLBACK").catch(() => null);
+    const message = error?.message || "Failed to update company pricing";
+    const status =
+      message.includes("super admins") ||
+      message.includes("Maximum of 4 tiers") ||
+      message.includes("Tier ranges must not overlap") ||
+      message.includes("Tier") ||
+      message.includes("Enterprise tier") ||
+      message.includes("sales_form_link")
+        ? 400
+        : 500;
+    if (status === 500) console.error("admin pricing company put error", error);
+    return res.status(status).json({ message });
   }
 });
 

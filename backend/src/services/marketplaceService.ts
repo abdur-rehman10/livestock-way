@@ -181,6 +181,9 @@ export interface LoadRecord {
   asking_amount: string | null;
   awarded_offer_id: string | null;
   assigned_to_user_id?: string | null;
+  payment_mode?: PaymentMode;
+  direct_payment_disclaimer_accepted_at?: string | null;
+  direct_payment_disclaimer_version?: string | null;
 }
 
 export interface LoadOfferRecord {
@@ -197,6 +200,9 @@ export interface LoadOfferRecord {
   rejected_at: string | null;
   created_at: string;
   updated_at: string;
+  payment_mode?: PaymentMode;
+  direct_payment_disclaimer_accepted_at?: string | null;
+  direct_payment_disclaimer_version?: string | null;
 }
 
 export interface TruckAvailabilityRecord {
@@ -276,33 +282,41 @@ export interface TruckChatSummary {
 export async function getLoadOfferById(
   offerId: string
 ): Promise<LoadOfferRecord | null> {
-  const result = await pool.query<LoadOfferRecord>(
+  const result = await pool.query(
     `
-      SELECT *
-      FROM load_offers
-      WHERE id = $1
+      SELECT lo.*,
+             l.payment_mode                           AS load_payment_mode,
+             l.direct_payment_disclaimer_accepted_at  AS load_direct_payment_disclaimer_accepted_at,
+             l.direct_payment_disclaimer_version      AS load_direct_payment_disclaimer_version
+      FROM load_offers lo
+      LEFT JOIN loads l ON l.id = lo.load_id
+      WHERE lo.id = $1
     `,
     [offerId]
   );
-  return result.rows[0] ?? null;
+  return result.rows[0] ? mapOfferRow(result.rows[0]) : null;
 }
 
 export async function getLatestOfferForHauler(
   loadId: string,
   haulerId: string
 ): Promise<LoadOfferRecord | null> {
-  const result = await pool.query<LoadOfferRecord>(
+  const result = await pool.query(
     `
-      SELECT *
-      FROM load_offers
-      WHERE load_id = $1
-        AND hauler_id = $2
-      ORDER BY created_at DESC
+      SELECT lo.*,
+             l.payment_mode                           AS load_payment_mode,
+             l.direct_payment_disclaimer_accepted_at  AS load_direct_payment_disclaimer_accepted_at,
+             l.direct_payment_disclaimer_version      AS load_direct_payment_disclaimer_version
+      FROM load_offers lo
+      LEFT JOIN loads l ON l.id = lo.load_id
+      WHERE lo.load_id = $1
+        AND lo.hauler_id = $2
+      ORDER BY lo.created_at DESC
       LIMIT 1
     `,
     [loadId, haulerId]
   );
-  return result.rows[0] ?? null;
+  return result.rows[0] ? mapOfferRow(result.rows[0]) : null;
 }
 
 export interface TripRecord {
@@ -360,6 +374,62 @@ export interface DisputeRecord {
   updated_at: string;
 }
 
+export type DirectPaymentMethod = "CASH" | "BANK_TRANSFER" | "OTHER";
+
+export interface TripDirectPaymentRecord {
+  id: string;
+  trip_id: string;
+  received_amount: string;
+  received_payment_method: DirectPaymentMethod;
+  received_reference: string | null;
+  received_at: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export async function upsertDirectPaymentReceipt(
+  input: {
+    tripId: string;
+    receivedAmount: number;
+    paymentMethod: DirectPaymentMethod;
+    reference?: string | null;
+    receivedAt?: string | null;
+  },
+  client: PoolClient | null = null
+): Promise<TripDirectPaymentRecord> {
+  const runner = client ?? pool;
+  const result = await runner.query(
+    `
+      INSERT INTO trip_direct_payments (
+        trip_id,
+        received_amount,
+        received_payment_method,
+        received_reference,
+        received_at,
+        created_at,
+        updated_at
+      )
+      VALUES ($1,$2,$3,$4,COALESCE($5, NOW()), NOW(), NOW())
+      ON CONFLICT (trip_id)
+      DO UPDATE SET
+        received_amount = EXCLUDED.received_amount,
+        received_payment_method = EXCLUDED.received_payment_method,
+        received_reference = EXCLUDED.received_reference,
+        received_at = EXCLUDED.received_at,
+        updated_at = NOW()
+      RETURNING *
+    `,
+    [
+      input.tripId,
+      input.receivedAmount,
+      input.paymentMethod,
+      input.reference ?? null,
+      input.receivedAt ?? null,
+    ]
+  );
+  return mapTripDirectPaymentRow(result.rows[0]);
+}
+
 type LoadRow = {
   id: string;
   shipper_id: string;
@@ -368,6 +438,9 @@ type LoadRow = {
   currency: string | null;
   asking_amount: string | null;
   awarded_offer_id: string | null;
+  payment_mode?: string | null;
+  direct_payment_disclaimer_accepted_at?: string | null;
+  direct_payment_disclaimer_version?: string | null;
 };
 
 export interface HaulerSummary {
@@ -396,10 +469,14 @@ export interface HaulerVehicleRecord {
   status: string | null;
 }
 
-function mapLoadRow(row: LoadRow): LoadRecord {
+export function mapLoadRow(row: LoadRow): LoadRecord {
   return {
     ...row,
     status: mapLoadStatusFromDb(row.status),
+    payment_mode:
+      (row.payment_mode as PaymentMode | null | undefined) === "DIRECT" ? "DIRECT" : "ESCROW",
+    direct_payment_disclaimer_accepted_at: row.direct_payment_disclaimer_accepted_at ?? null,
+    direct_payment_disclaimer_version: row.direct_payment_disclaimer_version ?? null,
   };
 }
 
@@ -411,8 +488,11 @@ type TripRow = {
   truck_id: string | null;
   status: string | null;
   payment_mode?: string | null;
+  load_payment_mode?: string | null;
   direct_payment_disclaimer_accepted_at?: string | null;
+  load_direct_payment_disclaimer_accepted_at?: string | null;
   direct_payment_disclaimer_version?: string | null;
+  load_direct_payment_disclaimer_version?: string | null;
   actual_start_time: string | null;
   actual_end_time: string | null;
   delivered_confirmed_at: string | null;
@@ -420,7 +500,7 @@ type TripRow = {
   updated_at: string;
 };
 
-function mapTripRow(row: TripRow): TripRecord {
+export function mapTripRow(row: TripRow): TripRecord {
   return {
     id: row.id,
     load_id: row.load_id,
@@ -429,9 +509,18 @@ function mapTripRow(row: TripRow): TripRecord {
     assigned_vehicle_id: row.truck_id,
     status: mapTripStatusFromDb(row.status),
     payment_mode:
-      (row.payment_mode as PaymentMode | null | undefined) === "DIRECT" ? "DIRECT" : "ESCROW",
-    direct_payment_disclaimer_accepted_at: row.direct_payment_disclaimer_accepted_at ?? null,
-    direct_payment_disclaimer_version: row.direct_payment_disclaimer_version ?? null,
+      (row.payment_mode as PaymentMode | null | undefined) === "DIRECT" ||
+      (row.load_payment_mode as PaymentMode | null | undefined) === "DIRECT"
+        ? "DIRECT"
+        : "ESCROW",
+    direct_payment_disclaimer_accepted_at:
+      row.direct_payment_disclaimer_accepted_at ??
+      row.load_direct_payment_disclaimer_accepted_at ??
+      null,
+    direct_payment_disclaimer_version:
+      row.direct_payment_disclaimer_version ??
+      row.load_direct_payment_disclaimer_version ??
+      null,
     started_at: row.actual_start_time,
     delivered_at: row.actual_end_time,
     delivered_confirmed_at: row.delivered_confirmed_at,
@@ -481,15 +570,42 @@ function mapTruckAvailabilityRow(row: any): TruckAvailabilityRecord {
   };
 }
 
+export function mapOfferRow(row: any): LoadOfferRecord {
+  const modeSource =
+    row.payment_mode ??
+    row.load_payment_mode ??
+    row.load_paymentmode ??
+    null;
+  return {
+    id: row.id,
+    load_id: row.load_id,
+    hauler_id: row.hauler_id,
+    created_by_user_id: row.created_by_user_id,
+    offered_amount: row.offered_amount,
+    currency: row.currency,
+    message: row.message ?? null,
+    status: row.status as LoadOfferStatus,
+    expires_at: row.expires_at ?? null,
+    accepted_at: row.accepted_at ?? null,
+    rejected_at: row.rejected_at ?? null,
+    created_at: row.created_at,
+    updated_at: row.updated_at,
+    payment_mode: (modeSource as PaymentMode | null | undefined) === "DIRECT" ? "DIRECT" : "ESCROW",
+    direct_payment_disclaimer_accepted_at:
+      row.direct_payment_disclaimer_accepted_at ??
+      row.load_direct_payment_disclaimer_accepted_at ??
+      null,
+    direct_payment_disclaimer_version:
+      row.direct_payment_disclaimer_version ??
+      row.load_direct_payment_disclaimer_version ??
+      null,
+  };
+}
+
+// Only treat truly active trips as blocking when assigning a truck.
 const ACTIVE_TRIP_STATUS_VALUES: string[] = [
-  mapTripStatusToDb(TripStatus.PENDING_ESCROW).toLowerCase(),
-  mapTripStatusToDb(TripStatus.READY_TO_START).toLowerCase(),
   mapTripStatusToDb(TripStatus.IN_PROGRESS).toLowerCase(),
-  mapTripStatusToDb(TripStatus.DELIVERED_AWAITING_CONFIRMATION).toLowerCase(),
   mapTripStatusToDb(TripStatus.DISPUTED).toLowerCase(),
-  "planned",
-  "assigned",
-  "en_route",
   "in_progress",
 ];
 
@@ -706,6 +822,10 @@ function mapBookingRow(row: any): LoadBookingRecord {
     offered_currency: row.offered_currency ?? null,
     status: (row.status as BookingStatus) ?? BookingStatus.REQUESTED,
     notes: row.notes ?? null,
+    payment_mode:
+      (row.payment_mode as PaymentMode | null | undefined) === "DIRECT" ? "DIRECT" : "ESCROW",
+    direct_payment_disclaimer_accepted_at: row.direct_payment_disclaimer_accepted_at ?? null,
+    direct_payment_disclaimer_version: row.direct_payment_disclaimer_version ?? null,
     created_by_user_id: row.created_by_user_id,
     updated_by_user_id: row.updated_by_user_id ?? null,
     created_at: row.created_at,
@@ -763,6 +883,20 @@ function mapPaymentRow(row: PaymentRow): PaymentRecord {
   };
 }
 
+export function mapTripDirectPaymentRow(row: any): TripDirectPaymentRecord {
+  return {
+    id: String(row.id),
+    trip_id: String(row.trip_id),
+    received_amount: String(row.received_amount),
+    received_payment_method:
+      (row.received_payment_method as DirectPaymentMethod) ?? "OTHER",
+    received_reference: row.received_reference ?? null,
+    received_at: row.received_at,
+    created_at: row.created_at,
+    updated_at: row.updated_at ?? row.created_at,
+  };
+}
+
 type DisputeRow = {
   id: string;
   trip_id: string;
@@ -810,7 +944,10 @@ export async function getLoadById(loadId: string): Promise<LoadRecord | null> {
              l.asking_currency  AS currency,
              l.asking_amount::text AS asking_amount,
              l.awarded_offer_id::text AS awarded_offer_id,
-             l.assigned_to_user_id::text AS assigned_to_user_id
+             l.assigned_to_user_id::text AS assigned_to_user_id,
+             l.payment_mode,
+             l.direct_payment_disclaimer_accepted_at,
+             l.direct_payment_disclaimer_version
       FROM loads l
       JOIN shippers s ON s.id = l.shipper_id
       WHERE l.id = $1
@@ -855,7 +992,8 @@ export async function createLoadOffer(input: CreateLoadOfferInput): Promise<Load
   if (!row) {
     throw new Error("Failed to create load offer");
   }
-  return row;
+  const hydrated = await getLoadOfferById(row.id);
+  return hydrated ?? row;
 }
 
 export async function listLoadOffers(
@@ -866,10 +1004,14 @@ export async function listLoadOffers(
 
   const itemsQuery = pool.query<LoadOfferRecord>(
     `
-      SELECT *
-      FROM load_offers
-      WHERE load_id = $1
-      ORDER BY created_at DESC
+      SELECT lo.*,
+             l.payment_mode                           AS load_payment_mode,
+             l.direct_payment_disclaimer_accepted_at  AS load_direct_payment_disclaimer_accepted_at,
+             l.direct_payment_disclaimer_version      AS load_direct_payment_disclaimer_version
+      FROM load_offers lo
+      JOIN loads l ON l.id = lo.load_id
+      WHERE lo.load_id = $1
+      ORDER BY lo.created_at DESC
       LIMIT $2 OFFSET $3
     `,
     [loadId, limit, offset]
@@ -882,7 +1024,7 @@ export async function listLoadOffers(
 
   const [itemsResult, countResult] = await Promise.all([itemsQuery, countQuery]);
   return {
-    items: itemsResult.rows,
+    items: itemsResult.rows.map(mapOfferRow),
     total: Number(countResult.rows[0]?.count ?? 0),
   };
 }
@@ -916,7 +1058,10 @@ export async function updateOfferStatus(
   `;
 
   const result = await pool.query<LoadOfferRecord>(query, [offerId, ...values]);
-  return result.rows[0] ?? null;
+  const updated = result.rows[0] ?? null;
+  if (!updated) return null;
+  const hydrated = await getLoadOfferById(updated.id);
+  return hydrated ?? updated;
 }
 
 export async function getTruckAvailabilityById(id: string): Promise<TruckAvailabilityRecord | null> {
@@ -1752,10 +1897,13 @@ export async function createBookingFromOffer(params: {
         offered_currency,
         status,
         notes,
-        created_by_user_id
+        created_by_user_id,
+        payment_mode,
+        direct_payment_disclaimer_accepted_at,
+        direct_payment_disclaimer_version
       )
       VALUES (
-        $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11
+        $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14
       )
       RETURNING *
     `,
@@ -1771,6 +1919,9 @@ export async function createBookingFromOffer(params: {
       BookingStatus.REQUESTED,
       params.notes ?? null,
       params.shipperUserId,
+      load.payment_mode ?? "ESCROW",
+      load.direct_payment_disclaimer_accepted_at ?? null,
+      load.direct_payment_disclaimer_version ?? null,
     ]
   );
   return mapBookingRow(insert.rows[0]);
@@ -1873,6 +2024,8 @@ export async function createBookingForAvailability(params: {
     requestedWeight = ensureNumeric(details?.estimated_weight_kg);
   }
   await ensureTruckCapacity(availability, requestedHeadcount ?? null, requestedWeight ?? null);
+  const load = await getLoadById(params.loadId);
+  if (!load) throw new Error("Load not found");
   const insert = await pool.query(
     `
       INSERT INTO load_bookings (
@@ -1886,10 +2039,13 @@ export async function createBookingForAvailability(params: {
         offered_currency,
         status,
         notes,
-        created_by_user_id
+        created_by_user_id,
+        payment_mode,
+        direct_payment_disclaimer_accepted_at,
+        direct_payment_disclaimer_version
       )
       VALUES (
-        $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11
+        $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14
       )
       RETURNING *
     `,
@@ -1905,6 +2061,9 @@ export async function createBookingForAvailability(params: {
       BookingStatus.REQUESTED,
       params.notes ?? null,
       params.shipperUserId,
+      load.payment_mode ?? "ESCROW",
+      load.direct_payment_disclaimer_accepted_at ?? null,
+      load.direct_payment_disclaimer_version ?? null,
     ]
   );
   const bookingRow = mapBookingRow(insert.rows[0]);
@@ -2112,6 +2271,21 @@ export async function respondToBooking(params: {
     if (!offer) throw new Error("Offer not found for booking");
     const loadRow = await getLoadById(booking.load_id);
     if (!loadRow) throw new Error("Load not found");
+    const bookingPaymentSelection =
+      params.paymentModeSelection ||
+      (booking.payment_mode
+        ? {
+            paymentMode: booking.payment_mode,
+            directDisclaimerAt: booking.direct_payment_disclaimer_accepted_at ?? null,
+            directDisclaimerVersion: booking.direct_payment_disclaimer_version ?? null,
+          }
+        : loadRow.payment_mode
+        ? {
+            paymentMode: loadRow.payment_mode,
+            directDisclaimerAt: loadRow.direct_payment_disclaimer_accepted_at ?? null,
+            directDisclaimerVersion: loadRow.direct_payment_disclaimer_version ?? null,
+          }
+        : null);
     const result = await acceptOfferAndCreateTrip({
       offerId: offer.id,
       loadId: offer.load_id,
@@ -2121,16 +2295,30 @@ export async function respondToBooking(params: {
       haulerUserId: offer.created_by_user_id,
       amount: Number(offer.offered_amount),
       currency: offer.currency,
-      ...(params.paymentModeSelection
-        ? { paymentModeSelection: params.paymentModeSelection }
-        : {}),
+      ...(bookingPaymentSelection ? { paymentModeSelection: bookingPaymentSelection } : {}),
     });
     trip = result.trip;
     payment = result.payment;
   } else if (booking.truck_availability_id) {
+    const loadRow = await getLoadById(booking.load_id);
     const result = await createTripFromTruckBooking(
       booking,
-      params.paymentModeSelection ? params.paymentModeSelection : undefined
+      (
+        params.paymentModeSelection ||
+        (booking.payment_mode
+          ? {
+              paymentMode: booking.payment_mode,
+              directDisclaimerAt: booking.direct_payment_disclaimer_accepted_at ?? null,
+              directDisclaimerVersion: booking.direct_payment_disclaimer_version ?? null,
+            }
+          : loadRow?.payment_mode
+          ? {
+              paymentMode: loadRow.payment_mode,
+              directDisclaimerAt: loadRow.direct_payment_disclaimer_accepted_at ?? null,
+              directDisclaimerVersion: loadRow.direct_payment_disclaimer_version ?? null,
+            }
+          : null)
+      ) || undefined
     );
     trip = result.trip;
     payment = result.payment;
@@ -2194,7 +2382,10 @@ export async function updateOfferDetails(
     `,
     [offerId, ...values]
   );
-  return result.rows[0] ?? null;
+  const updated = result.rows[0] ?? null;
+  if (!updated) return null;
+  const hydrated = await getLoadOfferById(updated.id);
+  return hydrated ?? updated;
 }
 
 export async function expireOtherOffers(loadId: string, acceptedOfferId: string, client?: PoolClient) {
@@ -2236,41 +2427,20 @@ export async function acceptOfferAndCreateTrip(params: {
     : PaymentStatus.NOT_APPLICABLE;
 
   async function ensureTruckId(): Promise<string> {
-    let truckRows = (
+    const truckRows = (
       await client.query(
         `
           SELECT id::text
           FROM trucks
           WHERE hauler_id = $1
+            AND status <> 'inactive'
           ORDER BY updated_at DESC
         `,
         [params.haulerId]
       )
     ).rows;
     if (truckRows.length === 0) {
-      const inserted = await client.query(
-        `
-          INSERT INTO trucks (
-            hauler_id,
-            plate_number,
-            truck_type,
-            status,
-            created_at,
-            updated_at
-          )
-          VALUES (
-            $1,
-            $2,
-            'mixed_livestock',
-            'active',
-            NOW(),
-            NOW()
-          )
-          RETURNING id::text
-        `,
-        [params.haulerId, `AUTO-${Date.now()}`]
-      );
-      truckRows = inserted.rows;
+      throw new Error("No trucks found for this hauler. Please add a truck before accepting loads.");
     }
     const busyTripRows = await client.query(
       `
@@ -2525,19 +2695,26 @@ export async function offerHasShipperMessage(offerId: string): Promise<boolean> 
 export async function getTripById(tripId: string): Promise<TripRecord | null> {
   const result = await pool.query<TripRow>(
     `
-      SELECT id::text,
-             load_id::text,
-             hauler_id::text,
-             driver_id::text,
-             truck_id::text,
-             status::text,
-             actual_start_time,
-             actual_end_time,
-             delivered_confirmed_at,
-             created_at,
-             updated_at
-      FROM trips
-      WHERE id = $1
+      SELECT t.id::text,
+             t.load_id::text,
+             t.hauler_id::text,
+             t.driver_id::text,
+             t.truck_id::text,
+             t.status::text,
+             t.payment_mode::text,
+             l.payment_mode::text        AS load_payment_mode,
+             t.direct_payment_disclaimer_accepted_at,
+             t.direct_payment_disclaimer_version,
+             l.direct_payment_disclaimer_accepted_at AS load_direct_payment_disclaimer_accepted_at,
+             l.direct_payment_disclaimer_version     AS load_direct_payment_disclaimer_version,
+             t.actual_start_time,
+             t.actual_end_time,
+             t.delivered_confirmed_at,
+             t.created_at,
+             t.updated_at
+      FROM trips t
+      LEFT JOIN loads l ON l.id = t.load_id
+      WHERE t.id = $1
     `,
     [tripId]
   );
@@ -2549,20 +2726,27 @@ export async function getLatestTripForLoad(loadId: string): Promise<TripRecord |
   const result = await pool.query<TripRow>(
     `
       SELECT
-        id::text,
-        load_id::text,
-        hauler_id::text,
-        driver_id::text,
-        truck_id::text,
-        status::text,
-        actual_start_time,
-        actual_end_time,
-        delivered_confirmed_at,
-        created_at,
-        updated_at
-      FROM trips
-      WHERE load_id = $1
-      ORDER BY created_at DESC
+        t.id::text,
+        t.load_id::text,
+        t.hauler_id::text,
+        t.driver_id::text,
+        t.truck_id::text,
+        t.status::text,
+        t.payment_mode::text,
+        l.payment_mode::text        AS load_payment_mode,
+        t.direct_payment_disclaimer_accepted_at,
+        t.direct_payment_disclaimer_version,
+        l.direct_payment_disclaimer_accepted_at AS load_direct_payment_disclaimer_accepted_at,
+        l.direct_payment_disclaimer_version     AS load_direct_payment_disclaimer_version,
+        t.actual_start_time,
+        t.actual_end_time,
+        t.delivered_confirmed_at,
+        t.created_at,
+        t.updated_at
+      FROM trips t
+      LEFT JOIN loads l ON l.id = t.load_id
+      WHERE t.load_id = $1
+      ORDER BY t.created_at DESC
       LIMIT 1
     `,
     [loadId]
@@ -2571,26 +2755,46 @@ export async function getLatestTripForLoad(loadId: string): Promise<TripRecord |
   return row ? mapTripRow(row) : null;
 }
 
+export async function getDirectPaymentForTrip(
+  tripId: string,
+  client: PoolClient | null = null
+): Promise<TripDirectPaymentRecord | null> {
+  const runner = client ?? pool;
+  const result = await runner.query(
+    `
+      SELECT *
+      FROM trip_direct_payments
+      WHERE trip_id = $1
+      LIMIT 1
+    `,
+    [tripId]
+  );
+  return result.rows[0] ? mapTripDirectPaymentRow(result.rows[0]) : null;
+}
+
 export async function getTripAndLoad(
   tripId: string
-): Promise<{ trip: TripRecord; load: LoadRecord } | null> {
+): Promise<{ trip: TripRecord; load: LoadRecord; direct_payment: TripDirectPaymentRecord | null } | null> {
   const trip = await getTripById(tripId);
   if (!trip) return null;
   const load = await getLoadById(trip.load_id);
   if (!load) return null;
-  return { trip, load };
+  const direct_payment = trip.payment_mode === "DIRECT" ? await getDirectPaymentForTrip(trip.id) : null;
+  return { trip, load, direct_payment };
 }
 
 export async function getTripContextByLoadId(
   loadId: string
-): Promise<{ trip: TripRecord | null; load: LoadRecord; payment: PaymentRecord | null }> {
+): Promise<{ trip: TripRecord | null; load: LoadRecord; payment: PaymentRecord | null; direct_payment: TripDirectPaymentRecord | null }> {
   const load = await getLoadById(loadId);
   if (!load) {
     throw new Error("Load not found");
   }
   const trip = await getLatestTripForLoad(loadId);
   const payment = trip ? await getPaymentForTrip(trip.id) : null;
-  return { trip, load, payment };
+  const direct_payment =
+    trip && trip.payment_mode === "DIRECT" ? await getDirectPaymentForTrip(trip.id) : null;
+  return { trip, load, payment, direct_payment };
 }
 
 export async function listDriversForHauler(haulerId: string): Promise<HaulerDriverRecord[]> {

@@ -3,6 +3,11 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.BookingStatus = exports.DisputeStatus = exports.PaymentStatus = exports.TripStatus = exports.LoadOfferStatus = exports.LoadStatus = void 0;
 exports.getLoadOfferById = getLoadOfferById;
 exports.getLatestOfferForHauler = getLatestOfferForHauler;
+exports.upsertDirectPaymentReceipt = upsertDirectPaymentReceipt;
+exports.mapLoadRow = mapLoadRow;
+exports.mapTripRow = mapTripRow;
+exports.mapOfferRow = mapOfferRow;
+exports.mapTripDirectPaymentRow = mapTripDirectPaymentRow;
 exports.getLoadById = getLoadById;
 exports.createLoadOffer = createLoadOffer;
 exports.listLoadOffers = listLoadOffers;
@@ -32,6 +37,7 @@ exports.listOfferMessages = listOfferMessages;
 exports.offerHasShipperMessage = offerHasShipperMessage;
 exports.getTripById = getTripById;
 exports.getLatestTripForLoad = getLatestTripForLoad;
+exports.getDirectPaymentForTrip = getDirectPaymentForTrip;
 exports.getTripAndLoad = getTripAndLoad;
 exports.getTripContextByLoadId = getTripContextByLoadId;
 exports.listDriversForHauler = listDriversForHauler;
@@ -99,6 +105,7 @@ var PaymentStatus;
     PaymentStatus["REFUNDED_TO_SHIPPER"] = "REFUNDED_TO_SHIPPER";
     PaymentStatus["SPLIT_BETWEEN_PARTIES"] = "SPLIT_BETWEEN_PARTIES";
     PaymentStatus["CANCELLED"] = "CANCELLED";
+    PaymentStatus["NOT_APPLICABLE"] = "NOT_APPLICABLE";
 })(PaymentStatus || (exports.PaymentStatus = PaymentStatus = {}));
 var DisputeStatus;
 (function (DisputeStatus) {
@@ -184,6 +191,7 @@ const PAYMENT_STATUS_DB_TO_APP = {
     SPLIT_BETWEEN_PARTIES: PaymentStatus.SPLIT_BETWEEN_PARTIES,
     failed: PaymentStatus.CANCELLED,
     CANCELLED: PaymentStatus.CANCELLED,
+    NOT_APPLICABLE: PaymentStatus.NOT_APPLICABLE,
 };
 const PAYMENT_STATUS_APP_TO_DB = {
     [PaymentStatus.AWAITING_FUNDING]: "AWAITING_FUNDING",
@@ -192,6 +200,7 @@ const PAYMENT_STATUS_APP_TO_DB = {
     [PaymentStatus.REFUNDED_TO_SHIPPER]: "REFUNDED_TO_SHIPPER",
     [PaymentStatus.SPLIT_BETWEEN_PARTIES]: "SPLIT_BETWEEN_PARTIES",
     [PaymentStatus.CANCELLED]: "CANCELLED",
+    [PaymentStatus.NOT_APPLICABLE]: "NOT_APPLICABLE",
 };
 function mapLoadStatusFromDb(value) {
     if (!value)
@@ -219,27 +228,68 @@ function mapPaymentStatusToDb(status) {
 }
 async function getLoadOfferById(offerId) {
     const result = await database_1.pool.query(`
-      SELECT *
-      FROM load_offers
-      WHERE id = $1
+      SELECT lo.*,
+             l.payment_mode                           AS load_payment_mode,
+             l.direct_payment_disclaimer_accepted_at  AS load_direct_payment_disclaimer_accepted_at,
+             l.direct_payment_disclaimer_version      AS load_direct_payment_disclaimer_version
+      FROM load_offers lo
+      LEFT JOIN loads l ON l.id = lo.load_id
+      WHERE lo.id = $1
     `, [offerId]);
-    return result.rows[0] ?? null;
+    return result.rows[0] ? mapOfferRow(result.rows[0]) : null;
 }
 async function getLatestOfferForHauler(loadId, haulerId) {
     const result = await database_1.pool.query(`
-      SELECT *
-      FROM load_offers
-      WHERE load_id = $1
-        AND hauler_id = $2
-      ORDER BY created_at DESC
+      SELECT lo.*,
+             l.payment_mode                           AS load_payment_mode,
+             l.direct_payment_disclaimer_accepted_at  AS load_direct_payment_disclaimer_accepted_at,
+             l.direct_payment_disclaimer_version      AS load_direct_payment_disclaimer_version
+      FROM load_offers lo
+      LEFT JOIN loads l ON l.id = lo.load_id
+      WHERE lo.load_id = $1
+        AND lo.hauler_id = $2
+      ORDER BY lo.created_at DESC
       LIMIT 1
     `, [loadId, haulerId]);
-    return result.rows[0] ?? null;
+    return result.rows[0] ? mapOfferRow(result.rows[0]) : null;
+}
+async function upsertDirectPaymentReceipt(input, client = null) {
+    const runner = client ?? database_1.pool;
+    const result = await runner.query(`
+      INSERT INTO trip_direct_payments (
+        trip_id,
+        received_amount,
+        received_payment_method,
+        received_reference,
+        received_at,
+        created_at,
+        updated_at
+      )
+      VALUES ($1,$2,$3,$4,COALESCE($5, NOW()), NOW(), NOW())
+      ON CONFLICT (trip_id)
+      DO UPDATE SET
+        received_amount = EXCLUDED.received_amount,
+        received_payment_method = EXCLUDED.received_payment_method,
+        received_reference = EXCLUDED.received_reference,
+        received_at = EXCLUDED.received_at,
+        updated_at = NOW()
+      RETURNING *
+    `, [
+        input.tripId,
+        input.receivedAmount,
+        input.paymentMethod,
+        input.reference ?? null,
+        input.receivedAt ?? null,
+    ]);
+    return mapTripDirectPaymentRow(result.rows[0]);
 }
 function mapLoadRow(row) {
     return {
         ...row,
         status: mapLoadStatusFromDb(row.status),
+        payment_mode: row.payment_mode === "DIRECT" ? "DIRECT" : "ESCROW",
+        direct_payment_disclaimer_accepted_at: row.direct_payment_disclaimer_accepted_at ?? null,
+        direct_payment_disclaimer_version: row.direct_payment_disclaimer_version ?? null,
     };
 }
 function mapTripRow(row) {
@@ -250,9 +300,16 @@ function mapTripRow(row) {
         assigned_driver_id: row.driver_id,
         assigned_vehicle_id: row.truck_id,
         status: mapTripStatusFromDb(row.status),
-        payment_mode: row.payment_mode === "DIRECT" ? "DIRECT" : "ESCROW",
-        direct_payment_disclaimer_accepted_at: row.direct_payment_disclaimer_accepted_at ?? null,
-        direct_payment_disclaimer_version: row.direct_payment_disclaimer_version ?? null,
+        payment_mode: row.payment_mode === "DIRECT" ||
+            row.load_payment_mode === "DIRECT"
+            ? "DIRECT"
+            : "ESCROW",
+        direct_payment_disclaimer_accepted_at: row.direct_payment_disclaimer_accepted_at ??
+            row.load_direct_payment_disclaimer_accepted_at ??
+            null,
+        direct_payment_disclaimer_version: row.direct_payment_disclaimer_version ??
+            row.load_direct_payment_disclaimer_version ??
+            null,
         started_at: row.actual_start_time,
         delivered_at: row.actual_end_time,
         delivered_confirmed_at: row.delivered_confirmed_at,
@@ -294,15 +351,38 @@ function mapTruckAvailabilityRow(row) {
         updated_at: row.updated_at,
     };
 }
+function mapOfferRow(row) {
+    const modeSource = row.payment_mode ??
+        row.load_payment_mode ??
+        row.load_paymentmode ??
+        null;
+    return {
+        id: row.id,
+        load_id: row.load_id,
+        hauler_id: row.hauler_id,
+        created_by_user_id: row.created_by_user_id,
+        offered_amount: row.offered_amount,
+        currency: row.currency,
+        message: row.message ?? null,
+        status: row.status,
+        expires_at: row.expires_at ?? null,
+        accepted_at: row.accepted_at ?? null,
+        rejected_at: row.rejected_at ?? null,
+        created_at: row.created_at,
+        updated_at: row.updated_at,
+        payment_mode: modeSource === "DIRECT" ? "DIRECT" : "ESCROW",
+        direct_payment_disclaimer_accepted_at: row.direct_payment_disclaimer_accepted_at ??
+            row.load_direct_payment_disclaimer_accepted_at ??
+            null,
+        direct_payment_disclaimer_version: row.direct_payment_disclaimer_version ??
+            row.load_direct_payment_disclaimer_version ??
+            null,
+    };
+}
+// Only treat truly active trips as blocking when assigning a truck.
 const ACTIVE_TRIP_STATUS_VALUES = [
-    mapTripStatusToDb(TripStatus.PENDING_ESCROW).toLowerCase(),
-    mapTripStatusToDb(TripStatus.READY_TO_START).toLowerCase(),
     mapTripStatusToDb(TripStatus.IN_PROGRESS).toLowerCase(),
-    mapTripStatusToDb(TripStatus.DELIVERED_AWAITING_CONFIRMATION).toLowerCase(),
     mapTripStatusToDb(TripStatus.DISPUTED).toLowerCase(),
-    "planned",
-    "assigned",
-    "en_route",
     "in_progress",
 ];
 function toNumericId(value) {
@@ -484,6 +564,9 @@ function mapBookingRow(row) {
         offered_currency: row.offered_currency ?? null,
         status: row.status ?? BookingStatus.REQUESTED,
         notes: row.notes ?? null,
+        payment_mode: row.payment_mode === "DIRECT" ? "DIRECT" : "ESCROW",
+        direct_payment_disclaimer_accepted_at: row.direct_payment_disclaimer_accepted_at ?? null,
+        direct_payment_disclaimer_version: row.direct_payment_disclaimer_version ?? null,
         created_by_user_id: row.created_by_user_id,
         updated_by_user_id: row.updated_by_user_id ?? null,
         created_at: row.created_at,
@@ -519,6 +602,18 @@ function mapPaymentRow(row) {
         status: mapPaymentStatusFromDb(row.status),
     };
 }
+function mapTripDirectPaymentRow(row) {
+    return {
+        id: String(row.id),
+        trip_id: String(row.trip_id),
+        received_amount: String(row.received_amount),
+        received_payment_method: row.received_payment_method ?? "OTHER",
+        received_reference: row.received_reference ?? null,
+        received_at: row.received_at,
+        created_at: row.created_at,
+        updated_at: row.updated_at ?? row.created_at,
+    };
+}
 function mapDisputeRow(row) {
     return {
         ...row,
@@ -534,7 +629,10 @@ async function getLoadById(loadId) {
              l.asking_currency  AS currency,
              l.asking_amount::text AS asking_amount,
              l.awarded_offer_id::text AS awarded_offer_id,
-             l.assigned_to_user_id::text AS assigned_to_user_id
+             l.assigned_to_user_id::text AS assigned_to_user_id,
+             l.payment_mode,
+             l.direct_payment_disclaimer_accepted_at,
+             l.direct_payment_disclaimer_version
       FROM loads l
       JOIN shippers s ON s.id = l.shipper_id
       WHERE l.id = $1
@@ -571,21 +669,26 @@ async function createLoadOffer(input) {
     if (!row) {
         throw new Error("Failed to create load offer");
     }
-    return row;
+    const hydrated = await getLoadOfferById(row.id);
+    return hydrated ?? row;
 }
 async function listLoadOffers(loadId, options = {}) {
     const { limit = 20, offset = 0 } = options;
     const itemsQuery = database_1.pool.query(`
-      SELECT *
-      FROM load_offers
-      WHERE load_id = $1
-      ORDER BY created_at DESC
+      SELECT lo.*,
+             l.payment_mode                           AS load_payment_mode,
+             l.direct_payment_disclaimer_accepted_at  AS load_direct_payment_disclaimer_accepted_at,
+             l.direct_payment_disclaimer_version      AS load_direct_payment_disclaimer_version
+      FROM load_offers lo
+      JOIN loads l ON l.id = lo.load_id
+      WHERE lo.load_id = $1
+      ORDER BY lo.created_at DESC
       LIMIT $2 OFFSET $3
     `, [loadId, limit, offset]);
     const countQuery = database_1.pool.query(`SELECT COUNT(*)::text AS count FROM load_offers WHERE load_id = $1`, [loadId]);
     const [itemsResult, countResult] = await Promise.all([itemsQuery, countQuery]);
     return {
-        items: itemsResult.rows,
+        items: itemsResult.rows.map(mapOfferRow),
         total: Number(countResult.rows[0]?.count ?? 0),
     };
 }
@@ -610,7 +713,11 @@ async function updateOfferStatus(offerId, status, patch = {}) {
     RETURNING *
   `;
     const result = await database_1.pool.query(query, [offerId, ...values]);
-    return result.rows[0] ?? null;
+    const updated = result.rows[0] ?? null;
+    if (!updated)
+        return null;
+    const hydrated = await getLoadOfferById(updated.id);
+    return hydrated ?? updated;
 }
 async function getTruckAvailabilityById(id) {
     const result = await database_1.pool.query(`
@@ -1317,10 +1424,13 @@ async function createBookingFromOffer(params) {
         offered_currency,
         status,
         notes,
-        created_by_user_id
+        created_by_user_id,
+        payment_mode,
+        direct_payment_disclaimer_accepted_at,
+        direct_payment_disclaimer_version
       )
       VALUES (
-        $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11
+        $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14
       )
       RETURNING *
     `, [
@@ -1335,6 +1445,9 @@ async function createBookingFromOffer(params) {
         BookingStatus.REQUESTED,
         params.notes ?? null,
         params.shipperUserId,
+        load.payment_mode ?? "ESCROW",
+        load.direct_payment_disclaimer_accepted_at ?? null,
+        load.direct_payment_disclaimer_version ?? null,
     ]);
     return mapBookingRow(insert.rows[0]);
 }
@@ -1413,6 +1526,9 @@ async function createBookingForAvailability(params) {
         requestedWeight = ensureNumeric(details?.estimated_weight_kg);
     }
     await ensureTruckCapacity(availability, requestedHeadcount ?? null, requestedWeight ?? null);
+    const load = await getLoadById(params.loadId);
+    if (!load)
+        throw new Error("Load not found");
     const insert = await database_1.pool.query(`
       INSERT INTO load_bookings (
         load_id,
@@ -1425,10 +1541,13 @@ async function createBookingForAvailability(params) {
         offered_currency,
         status,
         notes,
-        created_by_user_id
+        created_by_user_id,
+        payment_mode,
+        direct_payment_disclaimer_accepted_at,
+        direct_payment_disclaimer_version
       )
       VALUES (
-        $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11
+        $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14
       )
       RETURNING *
     `, [
@@ -1443,6 +1562,9 @@ async function createBookingForAvailability(params) {
         BookingStatus.REQUESTED,
         params.notes ?? null,
         params.shipperUserId,
+        load.payment_mode ?? "ESCROW",
+        load.direct_payment_disclaimer_accepted_at ?? null,
+        load.direct_payment_disclaimer_version ?? null,
     ]);
     const bookingRow = mapBookingRow(insert.rows[0]);
     await refreshTruckAvailabilityState(params.truckAvailabilityId);
@@ -1497,6 +1619,10 @@ async function createTripFromTruckBooking(booking, paymentModeSelection) {
     }
     const paymentMode = paymentModeSelection?.paymentMode ?? "ESCROW";
     const isEscrow = paymentMode !== "DIRECT";
+    const tripStatus = isEscrow ? TripStatus.PENDING_ESCROW : TripStatus.READY_TO_START;
+    const paymentStatus = isEscrow
+        ? PaymentStatus.AWAITING_FUNDING
+        : PaymentStatus.NOT_APPLICABLE;
     const tripResult = await database_1.pool.query(`
       INSERT INTO trips (
         load_id,
@@ -1515,7 +1641,7 @@ async function createTripFromTruckBooking(booking, paymentModeSelection) {
         booking.load_id,
         booking.hauler_id,
         availability.truck_id,
-        mapTripStatusToDb(TripStatus.PENDING_ESCROW),
+        mapTripStatusToDb(tripStatus),
         paymentMode,
         paymentMode === "DIRECT" ? paymentModeSelection?.directDisclaimerAt ?? null : null,
         paymentMode === "DIRECT" ? paymentModeSelection?.directDisclaimerVersion ?? null : null,
@@ -1547,7 +1673,7 @@ async function createTripFromTruckBooking(booking, paymentModeSelection) {
         haulerUserId,
         amount,
         booking.offered_currency ?? "USD",
-        mapPaymentStatusToDb(PaymentStatus.AWAITING_FUNDING),
+        mapPaymentStatusToDb(paymentStatus),
         isEscrow,
     ]);
     const paymentRow = paymentResult.rows[0];
@@ -1593,6 +1719,20 @@ async function respondToBooking(params) {
         const loadRow = await getLoadById(booking.load_id);
         if (!loadRow)
             throw new Error("Load not found");
+        const bookingPaymentSelection = params.paymentModeSelection ||
+            (booking.payment_mode
+                ? {
+                    paymentMode: booking.payment_mode,
+                    directDisclaimerAt: booking.direct_payment_disclaimer_accepted_at ?? null,
+                    directDisclaimerVersion: booking.direct_payment_disclaimer_version ?? null,
+                }
+                : loadRow.payment_mode
+                    ? {
+                        paymentMode: loadRow.payment_mode,
+                        directDisclaimerAt: loadRow.direct_payment_disclaimer_accepted_at ?? null,
+                        directDisclaimerVersion: loadRow.direct_payment_disclaimer_version ?? null,
+                    }
+                    : null);
         const result = await acceptOfferAndCreateTrip({
             offerId: offer.id,
             loadId: offer.load_id,
@@ -1602,13 +1742,27 @@ async function respondToBooking(params) {
             haulerUserId: offer.created_by_user_id,
             amount: Number(offer.offered_amount),
             currency: offer.currency,
-            paymentModeSelection: params.paymentModeSelection ?? undefined,
+            ...(bookingPaymentSelection ? { paymentModeSelection: bookingPaymentSelection } : {}),
         });
         trip = result.trip;
         payment = result.payment;
     }
     else if (booking.truck_availability_id) {
-        const result = await createTripFromTruckBooking(booking, params.paymentModeSelection ?? undefined);
+        const loadRow = await getLoadById(booking.load_id);
+        const result = await createTripFromTruckBooking(booking, (params.paymentModeSelection ||
+            (booking.payment_mode
+                ? {
+                    paymentMode: booking.payment_mode,
+                    directDisclaimerAt: booking.direct_payment_disclaimer_accepted_at ?? null,
+                    directDisclaimerVersion: booking.direct_payment_disclaimer_version ?? null,
+                }
+                : loadRow?.payment_mode
+                    ? {
+                        paymentMode: loadRow.payment_mode,
+                        directDisclaimerAt: loadRow.direct_payment_disclaimer_accepted_at ?? null,
+                        directDisclaimerVersion: loadRow.direct_payment_disclaimer_version ?? null,
+                    }
+                    : null)) || undefined);
         trip = result.trip;
         payment = result.payment;
     }
@@ -1653,7 +1807,11 @@ async function updateOfferDetails(offerId, patch) {
       WHERE id = $1
       RETURNING *
     `, [offerId, ...values]);
-    return result.rows[0] ?? null;
+    const updated = result.rows[0] ?? null;
+    if (!updated)
+        return null;
+    const hydrated = await getLoadOfferById(updated.id);
+    return hydrated ?? updated;
 }
 async function expireOtherOffers(loadId, acceptedOfferId, client) {
     const runner = client ?? database_1.pool;
@@ -1670,34 +1828,20 @@ async function acceptOfferAndCreateTrip(params) {
     const client = await database_1.pool.connect();
     const paymentMode = params.paymentModeSelection?.paymentMode ?? "ESCROW";
     const isEscrow = paymentMode !== "DIRECT";
+    const tripStatus = isEscrow ? TripStatus.PENDING_ESCROW : TripStatus.READY_TO_START;
+    const paymentStatus = isEscrow
+        ? PaymentStatus.AWAITING_FUNDING
+        : PaymentStatus.NOT_APPLICABLE;
     async function ensureTruckId() {
-        let truckRows = (await client.query(`
+        const truckRows = (await client.query(`
           SELECT id::text
           FROM trucks
           WHERE hauler_id = $1
+            AND status <> 'inactive'
           ORDER BY updated_at DESC
         `, [params.haulerId])).rows;
         if (truckRows.length === 0) {
-            const inserted = await client.query(`
-          INSERT INTO trucks (
-            hauler_id,
-            plate_number,
-            truck_type,
-            status,
-            created_at,
-            updated_at
-          )
-          VALUES (
-            $1,
-            $2,
-            'mixed_livestock',
-            'active',
-            NOW(),
-            NOW()
-          )
-          RETURNING id::text
-        `, [params.haulerId, `AUTO-${Date.now()}`]);
-            truckRows = inserted.rows;
+            throw new Error("No trucks found for this hauler. Please add a truck before accepting loads.");
         }
         const busyTripRows = await client.query(`
         SELECT DISTINCT truck_id::text AS truck_id
@@ -1775,23 +1919,23 @@ async function acceptOfferAndCreateTrip(params) {
         INSERT INTO trips (
           load_id,
           hauler_id,
-          truck_id,
-          driver_id,
-          status,
-          payment_mode,
-          direct_payment_disclaimer_accepted_at,
-          direct_payment_disclaimer_version
-        )
-        VALUES (
-          $1,$2,$3,$4,$5,$6,$7,$8
-        )
-        RETURNING *
-      `, [
+        truck_id,
+        driver_id,
+        status,
+        payment_mode,
+        direct_payment_disclaimer_accepted_at,
+        direct_payment_disclaimer_version
+      )
+      VALUES (
+        $1,$2,$3,$4,$5,$6,$7,$8
+      )
+      RETURNING *
+    `, [
             params.loadId,
             params.haulerId,
             truckId,
             driverId,
-            mapTripStatusToDb(TripStatus.PENDING_ESCROW),
+            mapTripStatusToDb(tripStatus),
             paymentMode,
             paymentMode === "DIRECT" ? params.paymentModeSelection?.directDisclaimerAt ?? null : null,
             paymentMode === "DIRECT" ? params.paymentModeSelection?.directDisclaimerVersion ?? null : null,
@@ -1823,7 +1967,7 @@ async function acceptOfferAndCreateTrip(params) {
             params.haulerUserId,
             params.amount,
             params.currency,
-            mapPaymentStatusToDb(PaymentStatus.AWAITING_FUNDING),
+            mapPaymentStatusToDb(paymentStatus),
             isEscrow,
         ]);
         const paymentRow = paymentResult.rows[0];
@@ -1899,19 +2043,26 @@ async function offerHasShipperMessage(offerId) {
 }
 async function getTripById(tripId) {
     const result = await database_1.pool.query(`
-      SELECT id::text,
-             load_id::text,
-             hauler_id::text,
-             driver_id::text,
-             truck_id::text,
-             status::text,
-             actual_start_time,
-             actual_end_time,
-             delivered_confirmed_at,
-             created_at,
-             updated_at
-      FROM trips
-      WHERE id = $1
+      SELECT t.id::text,
+             t.load_id::text,
+             t.hauler_id::text,
+             t.driver_id::text,
+             t.truck_id::text,
+             t.status::text,
+             t.payment_mode::text,
+             l.payment_mode::text        AS load_payment_mode,
+             t.direct_payment_disclaimer_accepted_at,
+             t.direct_payment_disclaimer_version,
+             l.direct_payment_disclaimer_accepted_at AS load_direct_payment_disclaimer_accepted_at,
+             l.direct_payment_disclaimer_version     AS load_direct_payment_disclaimer_version,
+             t.actual_start_time,
+             t.actual_end_time,
+             t.delivered_confirmed_at,
+             t.created_at,
+             t.updated_at
+      FROM trips t
+      LEFT JOIN loads l ON l.id = t.load_id
+      WHERE t.id = $1
     `, [tripId]);
     const row = result.rows[0];
     return row ? mapTripRow(row) : null;
@@ -1919,24 +2070,41 @@ async function getTripById(tripId) {
 async function getLatestTripForLoad(loadId) {
     const result = await database_1.pool.query(`
       SELECT
-        id::text,
-        load_id::text,
-        hauler_id::text,
-        driver_id::text,
-        truck_id::text,
-        status::text,
-        actual_start_time,
-        actual_end_time,
-        delivered_confirmed_at,
-        created_at,
-        updated_at
-      FROM trips
-      WHERE load_id = $1
-      ORDER BY created_at DESC
+        t.id::text,
+        t.load_id::text,
+        t.hauler_id::text,
+        t.driver_id::text,
+        t.truck_id::text,
+        t.status::text,
+        t.payment_mode::text,
+        l.payment_mode::text        AS load_payment_mode,
+        t.direct_payment_disclaimer_accepted_at,
+        t.direct_payment_disclaimer_version,
+        l.direct_payment_disclaimer_accepted_at AS load_direct_payment_disclaimer_accepted_at,
+        l.direct_payment_disclaimer_version     AS load_direct_payment_disclaimer_version,
+        t.actual_start_time,
+        t.actual_end_time,
+        t.delivered_confirmed_at,
+        t.created_at,
+        t.updated_at
+      FROM trips t
+      LEFT JOIN loads l ON l.id = t.load_id
+      WHERE t.load_id = $1
+      ORDER BY t.created_at DESC
       LIMIT 1
     `, [loadId]);
     const row = result.rows[0];
     return row ? mapTripRow(row) : null;
+}
+async function getDirectPaymentForTrip(tripId, client = null) {
+    const runner = client ?? database_1.pool;
+    const result = await runner.query(`
+      SELECT *
+      FROM trip_direct_payments
+      WHERE trip_id = $1
+      LIMIT 1
+    `, [tripId]);
+    return result.rows[0] ? mapTripDirectPaymentRow(result.rows[0]) : null;
 }
 async function getTripAndLoad(tripId) {
     const trip = await getTripById(tripId);
@@ -1945,7 +2113,8 @@ async function getTripAndLoad(tripId) {
     const load = await getLoadById(trip.load_id);
     if (!load)
         return null;
-    return { trip, load };
+    const direct_payment = trip.payment_mode === "DIRECT" ? await getDirectPaymentForTrip(trip.id) : null;
+    return { trip, load, direct_payment };
 }
 async function getTripContextByLoadId(loadId) {
     const load = await getLoadById(loadId);
@@ -1954,7 +2123,8 @@ async function getTripContextByLoadId(loadId) {
     }
     const trip = await getLatestTripForLoad(loadId);
     const payment = trip ? await getPaymentForTrip(trip.id) : null;
-    return { trip, load, payment };
+    const direct_payment = trip && trip.payment_mode === "DIRECT" ? await getDirectPaymentForTrip(trip.id) : null;
+    return { trip, load, payment, direct_payment };
 }
 async function listDriversForHauler(haulerId) {
     const result = await database_1.pool.query(`
@@ -2082,6 +2252,9 @@ async function updateLoadStatus(loadId, status, client) {
 async function attachEscrowPaymentIntent(input) {
     const trip = await getTripById(input.tripId);
     (0, escrowGuard_1.assertEscrowEnabled)({ trip });
+    if (trip?.payment_mode && trip.payment_mode !== "ESCROW") {
+        throw new Error("PAYMENT_MODE_IMMUTABLE");
+    }
     const result = await database_1.pool.query(`
       UPDATE payments
       SET status = $1,
@@ -2105,6 +2278,9 @@ async function markPaymentFunded(tripId) {
         await client.query("BEGIN");
         const trip = await getTripById(tripId);
         (0, escrowGuard_1.assertEscrowEnabled)({ trip });
+        if (trip?.payment_mode && trip.payment_mode !== "ESCROW") {
+            throw new Error("PAYMENT_MODE_IMMUTABLE");
+        }
         const paymentResult = await client.query(`
         UPDATE payments
         SET status = $1,
@@ -2141,6 +2317,9 @@ async function markPaymentFunded(tripId) {
 async function scheduleAutoRelease(input) {
     const trip = await getTripById(input.tripId);
     (0, escrowGuard_1.assertEscrowEnabled)({ trip });
+    if (trip?.payment_mode && trip.payment_mode !== "ESCROW") {
+        throw new Error("PAYMENT_MODE_IMMUTABLE");
+    }
     const result = await database_1.pool.query(`
       UPDATE payments
       SET auto_release_at = $1,
@@ -2188,6 +2367,9 @@ async function updatePaymentStatus(paymentId, status, patch = {}) {
     if (existing) {
         const trip = existing.trip_id ? await getTripById(existing.trip_id) : null;
         (0, escrowGuard_1.assertEscrowEnabled)({ trip, payment: existing });
+        if (trip?.payment_mode && trip.payment_mode !== "ESCROW") {
+            throw new Error("PAYMENT_MODE_IMMUTABLE");
+        }
     }
     const sets = ["status = $2", "updated_at = NOW()"];
     const values = [paymentId, mapPaymentStatusToDb(status)];
@@ -2213,6 +2395,9 @@ async function clearAutoReleaseForPayment(paymentId) {
     if (existing) {
         const trip = existing.trip_id ? await getTripById(existing.trip_id) : null;
         (0, escrowGuard_1.assertEscrowEnabled)({ trip, payment: existing });
+        if (trip?.payment_mode && trip.payment_mode !== "ESCROW") {
+            throw new Error("PAYMENT_MODE_IMMUTABLE");
+        }
     }
     const result = await database_1.pool.query(`
       UPDATE payments
@@ -2273,7 +2458,10 @@ async function updatePaymentTripLoadWithinClient(client, paymentId, paymentStatu
 async function finalizePaymentLifecycle(params) {
     const paymentExisting = await getPaymentById(params.paymentId);
     const tripExisting = paymentExisting?.trip_id ? await getTripById(paymentExisting.trip_id) : null;
-    (0, escrowGuard_1.assertEscrowEnabled)({ trip: tripExisting ?? undefined, payment: paymentExisting ?? undefined });
+    (0, escrowGuard_1.assertEscrowEnabled)({ trip: tripExisting ?? null, payment: paymentExisting ?? null });
+    if (tripExisting?.payment_mode && tripExisting.payment_mode !== "ESCROW") {
+        throw new Error("PAYMENT_MODE_IMMUTABLE");
+    }
     const client = await database_1.pool.connect();
     try {
         await client.query("BEGIN");
@@ -2401,7 +2589,7 @@ async function resolveDisputeLifecycle(params) {
         const dispute = mapDisputeRow(disputeRow);
         const existingPayment = await getPaymentById(dispute.payment_id);
         const trip = dispute.trip_id ? await getTripById(dispute.trip_id) : null;
-        (0, escrowGuard_1.assertEscrowEnabled)({ trip, payment: existingPayment ?? undefined });
+        (0, escrowGuard_1.assertEscrowEnabled)({ trip, payment: existingPayment ?? null });
         const lifecycle = await updatePaymentTripLoadWithinClient(client, dispute.payment_id, params.paymentStatus, { tripStatus: TripStatus.CLOSED, loadStatus: LoadStatus.COMPLETED });
         await client.query("COMMIT");
         return { dispute, ...lifecycle };

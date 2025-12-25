@@ -1,5 +1,6 @@
 import { Router, Request, Response } from "express";
 import { pool } from "../config/database";
+import authRequired from "../middlewares/auth";
 
 const router = Router();
 
@@ -41,11 +42,29 @@ function parseTruckNotes(raw: string | null): { species_supported?: string | nul
   return { species_supported: raw };
 }
 
-router.get("/", async (req: Request, res: Response) => {
+export function assertLoadboardAccess(user?: { user_type?: string | null }) {
+  const role = (user?.user_type ?? "").toString().toLowerCase();
+  if (role === "shipper") {
+    const err = new Error("Shippers cannot access loadboard");
+    (err as any).status = 403;
+    throw err;
+  }
+}
+
+router.get("/", authRequired, async (req: Request, res: Response) => {
   const listType = normalizeType(req.query.type);
   const speciesFilter = getQueryString(req.query.species);
 
   try {
+    try {
+      assertLoadboardAccess((req as any).user);
+    } catch (err: any) {
+      if (err?.status === 403) {
+        return res.status(403).json({ message: err.message });
+      }
+      throw err;
+    }
+
     let loads: any[] = [];
     let trucks: any[] = [];
 

@@ -51,6 +51,8 @@ function mapPaymentRow(row) {
         amount,
         currency: row.currency || "USD",
         status,
+        payment_mode: row.payment_mode ?? null,
+        is_escrow: row.is_escrow !== undefined ? Boolean(row.is_escrow) : null,
         created_at: row.created_at,
         updated_at: row.updated_at || null,
         funded_at: row.funded_at || null,

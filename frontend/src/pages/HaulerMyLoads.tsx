@@ -140,6 +140,17 @@ const [disputeMessagesLoading, setDisputeMessagesLoading] = useState(false);
 const [disputeMessageError, setDisputeMessageError] = useState<string | null>(null);
 const [disputeMessageDraft, setDisputeMessageDraft] = useState("");
 const [disputeMessageSending, setDisputeMessageSending] = useState(false);
+  const [directDialog, setDirectDialog] = useState<{
+    open: boolean;
+    tripId: number | null;
+    loadId: number | null;
+  }>({ open: false, tripId: null, loadId: null });
+  const [directAmount, setDirectAmount] = useState("");
+  const [directMethod, setDirectMethod] = useState<"CASH" | "BANK_TRANSFER" | "OTHER" | "">("");
+  const [directReference, setDirectReference] = useState("");
+  const [directReceivedAt, setDirectReceivedAt] = useState("");
+  const [directError, setDirectError] = useState<string | null>(null);
+  const [directSubmitting, setDirectSubmitting] = useState(false);
   const loadsRef = useRef<Load[]>([]);
   const tripContextCache = useRef<Record<number, TripEnvelope | null>>({});
   const dialogLoad = detailsDialog.load;
@@ -345,7 +356,16 @@ useEffect(() => {
     try {
       setBusyId(loadId);
       const context = await getTripContext(loadId);
+      const mode =
+        (context?.trip as any)?.payment_mode ||
+        (context?.load as any)?.payment_mode ||
+        (context?.payment as any)?.payment_mode;
       if (context?.trip?.id) {
+        if (mode === "DIRECT") {
+          setDirectDialog({ open: true, tripId: Number(context.trip.id), loadId });
+          setBusyId(null);
+          return;
+        }
         await markMarketplaceTripDelivered(context.trip.id);
         tripContextCache.current[loadId] = await fetchMarketplaceTripByLoad(loadId);
       } else {
@@ -384,6 +404,55 @@ useEffect(() => {
       await handleComplete(numericId);
     }
     setConfirmDialog({ open: false, type: null, load: null });
+  };
+
+  const resetDirectDialog = () => {
+    setDirectDialog({ open: false, tripId: null, loadId: null });
+    setDirectAmount("");
+    setDirectMethod("");
+    setDirectReference("");
+    setDirectReceivedAt("");
+    setDirectError(null);
+    setDirectSubmitting(false);
+  };
+
+  const submitDirectPayment = async () => {
+    if (!directDialog.tripId) {
+      resetDirectDialog();
+      return;
+    }
+    setDirectError(null);
+    const amountNum = Number(directAmount);
+    if (!Number.isFinite(amountNum) || amountNum <= 0) {
+      setDirectError("Enter a valid received amount.");
+      return;
+    }
+    if (!directMethod) {
+      setDirectError("Select a payment method.");
+      return;
+    }
+    try {
+      setDirectSubmitting(true);
+      await markMarketplaceTripDelivered(directDialog.tripId, {
+        received_amount: amountNum,
+        received_payment_method: directMethod as "CASH" | "BANK_TRANSFER" | "OTHER",
+        received_reference: directReference.trim() || null,
+        received_at: directReceivedAt ? new Date(directReceivedAt).toISOString() : null,
+      });
+      toast.success("Load marked as delivered");
+      if (directDialog.loadId) {
+        tripContextCache.current[directDialog.loadId] = await fetchMarketplaceTripByLoad(
+          directDialog.loadId
+        );
+      }
+      await refresh();
+      resetDirectDialog();
+    } catch (err: any) {
+      setDirectError(err?.message ?? "Failed to submit direct payment receipt.");
+    } finally {
+      setDirectSubmitting(false);
+      setBusyId(null);
+    }
   };
 
   if (loading) {
@@ -761,6 +830,76 @@ useEffect(() => {
               </div>
             </div>
           )}
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={directDialog.open} onOpenChange={(open) => !open && resetDirectDialog()}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Record Direct Payment</DialogTitle>
+            <DialogDescription>
+              Enter receipt details before completing this direct-payment trip.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-3">
+            <div className="space-y-1">
+              <Label className="text-xs">Received Amount</Label>
+              <input
+                type="number"
+                min="0"
+                step="0.01"
+                value={directAmount}
+                onChange={(e) => setDirectAmount(e.target.value)}
+                className="w-full rounded-md border px-2 py-1.5 text-sm"
+                placeholder="0.00"
+              />
+            </div>
+            <div className="space-y-1">
+              <Label className="text-xs">Payment Method</Label>
+              <select
+                value={directMethod}
+                onChange={(e) =>
+                  setDirectMethod(
+                    e.target.value as "CASH" | "BANK_TRANSFER" | "OTHER" | ""
+                  )
+                }
+                className="w-full rounded-md border px-2 py-1.5 text-sm"
+              >
+                <option value="">Select method</option>
+                <option value="CASH">Cash</option>
+                <option value="BANK_TRANSFER">Bank transfer</option>
+                <option value="OTHER">Other</option>
+              </select>
+            </div>
+            <div className="space-y-1">
+              <Label className="text-xs">Reference (optional)</Label>
+              <input
+                type="text"
+                value={directReference}
+                onChange={(e) => setDirectReference(e.target.value)}
+                className="w-full rounded-md border px-2 py-1.5 text-sm"
+                placeholder="Receipt/transfer reference"
+              />
+            </div>
+            <div className="space-y-1">
+              <Label className="text-xs">Received At (optional)</Label>
+              <input
+                type="datetime-local"
+                value={directReceivedAt}
+                onChange={(e) => setDirectReceivedAt(e.target.value)}
+                className="w-full rounded-md border px-2 py-1.5 text-sm"
+              />
+            </div>
+            {directError && <p className="text-xs text-rose-600">{directError}</p>}
+            <div className="flex justify-end gap-2">
+              <Button variant="outline" size="sm" onClick={resetDirectDialog}>
+                Cancel
+              </Button>
+              <Button size="sm" onClick={submitDirectPayment} disabled={directSubmitting}>
+                {directSubmitting ? "Submitting…" : "Submit & Complete"}
+              </Button>
+            </div>
+          </div>
         </DialogContent>
       </Dialog>
 
