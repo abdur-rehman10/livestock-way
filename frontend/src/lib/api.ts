@@ -18,6 +18,10 @@ export interface Load {
   dropoff_location: string;
   pickup_date: string;
   offer_price: string | null;
+  description?: string | null;
+  post_link?: string | null;
+  external_contact_email?: string | null;
+  external_contact_phone?: string | null;
   status: "open" | "assigned" | "in_transit" | "delivered";
   created_by: string | null;
   posted_by?: string | null;
@@ -31,6 +35,7 @@ export interface Load {
   payment_mode?: "ESCROW" | "DIRECT";
   direct_payment_disclaimer_accepted_at?: string | null;
   direct_payment_disclaimer_version?: string | null;
+  is_external?: boolean;
 }
 
 export interface CreateLoadPayload {

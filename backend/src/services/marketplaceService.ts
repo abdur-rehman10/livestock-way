@@ -183,6 +183,7 @@ export interface LoadRecord {
   currency: string | null;
   asking_amount: string | null;
   awarded_offer_id: string | null;
+  is_external?: boolean;
   assigned_to_user_id?: string | null;
   payment_mode?: PaymentMode;
   direct_payment_disclaimer_accepted_at?: string | null;
@@ -220,11 +221,15 @@ export interface TruckAvailabilityRecord {
   capacity_weight_kg: number | null;
   allow_shared: boolean;
   notes: string | null;
+  post_link?: string | null;
+  external_contact_email?: string | null;
+  external_contact_phone?: string | null;
   origin_lat: number | null;
   origin_lng: number | null;
   destination_lat: number | null;
   destination_lng: number | null;
   is_active: boolean;
+  is_external?: boolean;
   created_at: string;
   updated_at: string;
 }
@@ -441,6 +446,7 @@ type LoadRow = {
   currency: string | null;
   asking_amount: string | null;
   awarded_offer_id: string | null;
+  is_external?: boolean | null;
   payment_mode?: string | null;
   direct_payment_disclaimer_accepted_at?: string | null;
   direct_payment_disclaimer_version?: string | null;
@@ -542,6 +548,7 @@ export interface HaulerVehicleRecord {
 export function mapLoadRow(row: LoadRow): LoadRecord {
   return {
     ...row,
+    is_external: row.is_external ?? false,
     status: mapLoadStatusFromDb(row.status),
     payment_mode:
       (row.payment_mode as PaymentMode | null | undefined) === "DIRECT" ? "DIRECT" : "ESCROW",
@@ -618,6 +625,9 @@ function mapTruckAvailabilityRow(row: any): TruckAvailabilityRecord {
         : Number(row.capacity_weight_kg),
     allow_shared: row.allow_shared ?? true,
     notes: row.notes ?? null,
+    post_link: row.post_link ?? null,
+    external_contact_email: row.external_contact_email ?? null,
+    external_contact_phone: row.external_contact_phone ?? null,
     origin_lat:
       row.origin_lat === null || row.origin_lat === undefined
         ? null
@@ -635,6 +645,7 @@ function mapTruckAvailabilityRow(row: any): TruckAvailabilityRecord {
         ? null
         : Number(row.destination_lng),
     is_active: row.is_active ?? true,
+    is_external: row.is_external ?? false,
     created_at: row.created_at,
     updated_at: row.updated_at,
   };
@@ -1033,6 +1044,7 @@ export async function getLoadById(loadId: string): Promise<LoadRecord | null> {
              l.asking_amount::text AS asking_amount,
              l.awarded_offer_id::text AS awarded_offer_id,
              l.assigned_to_user_id::text AS assigned_to_user_id,
+             l.is_external,
              l.payment_mode,
              l.direct_payment_disclaimer_accepted_at,
              l.direct_payment_disclaimer_version
@@ -1167,11 +1179,15 @@ export async function getTruckAvailabilityById(id: string): Promise<TruckAvailab
         capacity_weight_kg,
         allow_shared,
         notes,
+        external_contact_email,
+        external_contact_phone,
         origin_lat,
         origin_lng,
         destination_lat,
         destination_lng,
         is_active,
+        is_external,
+        post_link,
         created_at,
         updated_at
       FROM truck_availability
@@ -1228,11 +1244,15 @@ export async function listTruckAvailability(options: {
         capacity_weight_kg,
         allow_shared,
         notes,
+        external_contact_email,
+        external_contact_phone,
         origin_lat,
         origin_lng,
         destination_lat,
         destination_lng,
         is_active,
+        is_external,
+        post_link,
         created_at,
         updated_at
       FROM truck_availability

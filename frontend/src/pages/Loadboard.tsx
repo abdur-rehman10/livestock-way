@@ -6,9 +6,6 @@ import { Button } from "../components/ui/button";
 import {
   Card,
   CardContent,
-  CardHeader,
-  CardTitle,
-  CardDescription,
 } from "../components/ui/card";
 import { Badge } from "../components/ui/badge";
 import { Input } from "../components/ui/input";
@@ -30,23 +27,19 @@ import {
 } from "../components/ui/dialog";
 import { DialogFooter } from "../components/ui/dialog";
 import { Slider } from "../components/ui/slider";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "../components/ui/tabs";
+import { Tabs, TabsList, TabsTrigger } from "../components/ui/tabs";
 import { ScrollArea } from "../components/ui/scroll-area";
-import { LoadCardSkeleton, TableSkeleton } from "./LoadingSkeleton";
 import {
   Search,
   Filter,
-  MapPin,
   DollarSign,
   Truck,
-  Calendar,
   TrendingUp,
   Star,
   Map as MapIcon,
   List,
   Save,
   X,
-  MessageSquare,
 } from "lucide-react";
 import { toast } from "sonner";
 import { filterLoads, searchFilter } from "../lib/filter-utils";
@@ -88,10 +81,15 @@ interface Load {
   postedBy: string;
   postedDate: string;
   pickupDate: string;
-  price: string;
+  price?: string;
   status: 'open' | 'assigned' | 'in-transit' | 'delivered';
   bids?: number;
   paymentMode?: "ESCROW" | "DIRECT";
+  isExternal?: boolean;
+  postLink?: string | null;
+  comments?: string | null;
+  contactEmail?: string | null;
+  contactPhone?: string | null;
 }
 
 // const mockLoads: Load[] = [ ... ];
@@ -136,6 +134,7 @@ export function Loadboard() {
   const [isAutoMatchOpen, setIsAutoMatchOpen] = useState(false);
   const [selectedLoad, setSelectedLoad] = useState<Load | null>(null);
   const [bidAmount, setBidAmount] = useState("");
+  const [detailLoad, setDetailLoad] = useState<Load | null>(null);
   const [offerDialogLoad, setOfferDialogLoad] = useState<Load | null>(null);
   const [offerAmount, setOfferAmount] = useState("");
   const [offerMessage, setOfferMessage] = useState("");
@@ -398,6 +397,10 @@ type LoadboardFilters = {
   };
 
   const openOfferDialog = async (load: Load) => {
+    if (load.isExternal) {
+      toast.info("This external load is read-only.");
+      return;
+    }
     setOfferDialogLoad(load);
     setOfferDialogExistingOffer(null);
     const preset = load.price?.replace(/[^0-9.]/g, "");
@@ -520,6 +523,10 @@ const loadUserOffer = async (load: Load, options: { silent?: boolean } = {}) => 
   };
 
   const openHaulerChat = async (load: Load) => {
+    if (load.isExternal) {
+      toast.info("Chat is disabled for external loads.");
+      return;
+    }
     setHaulerChatLoading(true);
     try {
       let offer = await loadUserOffer(load);
@@ -649,10 +656,15 @@ const loadUserOffer = async (load: Load, options: { silent?: boolean } = {}) => 
       pickupDate: load.pickup_date ? new Date(load.pickup_date).toLocaleString() : "—",
       price: load.offer_price
         ? `$${Number(load.offer_price).toFixed(0)}`
-        : "$0",
+        : "",
       status: normalizedStatus,
       bids: undefined,
       paymentMode: (load as any)?.payment_mode === "DIRECT" ? "DIRECT" : "ESCROW",
+      isExternal: Boolean((load as any)?.is_external),
+      postLink: (load as any)?.post_link ?? null,
+      comments: (load as any)?.description ?? null,
+      contactEmail: (load as any)?.external_contact_email ?? null,
+      contactPhone: (load as any)?.external_contact_phone ?? null,
     };
   });
 
@@ -798,14 +810,6 @@ const loadUserOffer = async (load: Load, options: { silent?: boolean } = {}) => 
         </Card>
         <Card>
           <CardContent className="p-4 text-center">
-            <div className="text-2xl text-[#29CA8D] mb-1">
-              ${loadsToDisplay.reduce((sum, l) => sum + parseInt(l.price.replace('$', '')), 0).toLocaleString()}
-            </div>
-            <div className="text-sm text-gray-600">Total Value</div>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardContent className="p-4 text-center">
             <div className="text-2xl text-[#F97316] mb-1">
               {loadsToDisplay.reduce((sum, l) => sum + (l.bids || 0), 0)}
             </div>
@@ -933,86 +937,125 @@ const loadUserOffer = async (load: Load, options: { silent?: boolean } = {}) => 
             <>
               {loadsToDisplay.map((load) => (
                 <Card key={load.id} className="hover:shadow-md transition-shadow">
-          <CardContent className="p-4 space-y-3">
-        <div className="flex items-center justify-between">
-          <div>
-            <h3 className="text-lg text-gray-900">Load #{load.id}</h3>
-            <p className="text-sm text-gray-500">
-              {load.species} • {load.quantity}
-            </p>
-            <p className="text-sm text-gray-600">
-              {load.origin} → {load.destination}
-            </p>
-            <p className="text-xs text-gray-400">
-              Pickup: {load.pickupDate}
-            </p>
-            <div className="mt-2">
-              <Badge
-                variant="secondary"
-                className={
-                  load.paymentMode === "DIRECT"
-                    ? "bg-amber-50 text-amber-800 border border-amber-200"
-                    : "bg-emerald-50 text-emerald-800 border border-emerald-200"
-                }
-              >
-                Payment: {load.paymentMode === "DIRECT" ? "Direct" : "Escrow"}
-              </Badge>
-            </div>
-          </div>
-                  <div className="text-right">
-                    {load.price && (
-                      <div className="text-xl text-[#29CA8D] mb-2">
-                        {load.price}
+                  <CardContent className="p-4 space-y-3">
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <h3 className="text-lg text-gray-900">Load #{load.id}</h3>
+                        <p className="text-sm text-gray-500">
+                          {load.species} • {load.quantity}
+                        </p>
+                        <p className="text-sm text-gray-600">
+                          {load.origin} → {load.destination}
+                        </p>
+                        <p className="text-xs text-gray-400">
+                          Pickup: {load.pickupDate}
+                        </p>
+                        {load.isExternal && (
+                          <div className="mt-2">
+                            <Badge variant="outline" className="border-dashed text-gray-500">
+                              External
+                            </Badge>
                           </div>
                         )}
-                        <div className="flex flex-col gap-2 relative">
+                        {!load.isExternal && load.paymentMode && (
+                          <div className="mt-2">
+                            <Badge
+                              variant="secondary"
+                              className={
+                                load.paymentMode === "DIRECT"
+                                  ? "bg-amber-50 text-amber-800 border border-amber-200"
+                                  : "bg-emerald-50 text-emerald-800 border border-emerald-200"
+                              }
+                            >
+                              Payment: {load.paymentMode === "DIRECT" ? "Direct" : "Escrow"}
+                            </Badge>
+                          </div>
+                        )}
+                      </div>
+                  <div className="text-right">
+                    {!load.isExternal && (
+                      <div className="mb-2">
+                        <div className="text-lg text-gray-900">{load.price || "—"}</div>
+                        {load.paymentMode && (
+                          <div className="text-xs text-gray-500">
+                            {load.paymentMode === "DIRECT" ? "Direct pay" : "Escrow"}
+                          </div>
+                        )}
+                      </div>
+                    )}
+                    <div className="flex flex-col gap-2">
+                      {!load.isExternal && (
+                        <>
+                          <div className="relative flex flex-col gap-2">
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              onClick={() => handleOfferClick(load)}
+                              disabled={offerBlocked}
+                            >
+                              {offerBlocked ? "Offers Disabled" : "Place Offer"}
+                            </Button>
+                            {offerBlocked && (
+                              <>
+                                <div
+                                  className="absolute inset-0 cursor-pointer"
+                                  onClick={() => handleOfferClick(load)}
+                                />
+                                <SubscriptionCTA
+                                  variant="BLOCKED_UPGRADE"
+                                  monthlyPrice={
+                                    subscriptionState?.monthly_price ??
+                                    subscriptionState?.current_individual_monthly_price ??
+                                    undefined
+                                  }
+                                  yearlyPrice={
+                                    subscriptionState?.yearly_price ??
+                                    (subscriptionState?.monthly_price ??
+                                    subscriptionState?.current_individual_monthly_price
+                                      ? Number(
+                                          (((subscriptionState?.monthly_price ??
+                                            subscriptionState?.current_individual_monthly_price) as number) *
+                                            10).toFixed(2)
+                                        )
+                                      : undefined)
+                                  }
+                                  onUpgradeClick={() => navigate("/hauler/subscription")}
+                                />
+                              </>
+                            )}
+                          </div>
                           <Button
                             size="sm"
                             variant="outline"
-                            onClick={() => handleOfferClick(load)}
-                            disabled={offerBlocked}
+                            onClick={() => {
+                              setSelectedLoad(load);
+                              setIsBidOpen(true);
+                            }}
                           >
-                            {offerBlocked ? "Offers Disabled" : "Place Offer"}
+                            Place Bid
                           </Button>
-                          {offerBlocked && (
-                            <>
-                              <div
-                                className="absolute inset-0 cursor-pointer"
-                                onClick={() => handleOfferClick(load)}
-                              />
-                              <SubscriptionCTA
-                                variant="BLOCKED_UPGRADE"
-                                monthlyPrice={
-                                  subscriptionState?.monthly_price ??
-                                  subscriptionState?.current_individual_monthly_price ??
-                                  undefined
-                                }
-                                yearlyPrice={
-                                  subscriptionState?.yearly_price ??
-                                  (subscriptionState?.monthly_price ??
-                                  subscriptionState?.current_individual_monthly_price
-                                    ? Number(
-                                        (((subscriptionState?.monthly_price ??
-                                          subscriptionState?.current_individual_monthly_price) as number) *
-                                          10).toFixed(2)
-                                      )
-                                    : undefined)
-                                }
-                                onUpgradeClick={() => navigate("/hauler/subscription")}
-                              />
-                            </>
-                          )}
                           <Button
                             size="sm"
-                            variant="ghost"
+                            variant="outline"
+                            onClick={() => handleViewBids(load)}
+                          >
+                            View Bids
+                          </Button>
+                          <Button
+                            size="sm"
+                            variant="outline"
                             onClick={() => openHaulerChat(load)}
                           >
-                            <MessageSquare className="mr-1 h-4 w-4" />
                             Chat
                           </Button>
-                        </div>
-                      </div>
+                        </>
+                      )}
+                      <Button size="sm" variant="outline" onClick={() => setDetailLoad(load)}>
+                        View Details
+                      </Button>
                     </div>
+                  </div>
+                </div>
                   </CardContent>
                 </Card>
               ))}
@@ -1105,31 +1148,6 @@ const loadUserOffer = async (load: Load, options: { silent?: boolean } = {}) => 
                   onChange={(e) =>
                     setFilters({ ...filters, destination: e.target.value })
                   }
-                />
-              </div>
-            </div>
-
-            <div className="grid gap-4 md:grid-cols-2">
-              <div className="space-y-2">
-                <Label>Min Price: ${numericPriceMin}</Label>
-                <Slider
-                  value={[numericPriceMin]}
-                  onValueChange={(v) =>
-                    setFilters({ ...filters, priceMin: v[0] })
-                  }
-                  max={10000}
-                  step={100}
-                />
-              </div>
-              <div className="space-y-2">
-                <Label>Max Price: ${numericPriceMax}</Label>
-                <Slider
-                  value={[numericPriceMax]}
-                  onValueChange={(v) =>
-                    setFilters({ ...filters, priceMax: v[0] })
-                  }
-                  max={10000}
-                  step={100}
                 />
               </div>
             </div>
@@ -1274,20 +1292,6 @@ const loadUserOffer = async (load: Load, options: { silent?: boolean } = {}) => 
                 : `Negotiate directly with the shipper for load #${offerDialogLoad?.id}`}
             </DialogDescription>
           </DialogHeader>
-          {offerDialogLoad && (
-            <div className="flex items-center gap-2 text-sm">
-              <Badge
-                variant="secondary"
-                className={
-                  offerDialogLoad.paymentMode === "DIRECT"
-                    ? "bg-amber-50 text-amber-800 border border-amber-200"
-                    : "bg-emerald-50 text-emerald-800 border border-emerald-200"
-                }
-              >
-                Payment: {offerDialogLoad.paymentMode === "DIRECT" ? "Direct" : "Escrow"}
-              </Badge>
-            </div>
-          )}
           {offerDialogCheckingExisting && (
             <p className="text-xs text-gray-500">Checking your existing offer…</p>
           )}
@@ -1456,27 +1460,8 @@ const loadUserOffer = async (load: Load, options: { silent?: boolean } = {}) => 
               Load #{selectedLoad?.id} - {selectedLoad?.species}
             </DialogDescription>
           </DialogHeader>
-          {selectedLoad && (
-            <div className="mb-2">
-              <Badge
-                variant="secondary"
-                className={
-                  selectedLoad.paymentMode === "DIRECT"
-                    ? "bg-amber-50 text-amber-800 border border-amber-200"
-                    : "bg-emerald-50 text-emerald-800 border border-emerald-200"
-                }
-              >
-                Payment: {selectedLoad.paymentMode === "DIRECT" ? "Direct" : "Escrow"}
-              </Badge>
-            </div>
-          )}
 
           <div className="space-y-4">
-            <div className="p-4 bg-gray-50 rounded-lg">
-              <div className="text-sm text-gray-600 mb-1">Suggested Price</div>
-              <div className="text-2xl text-gray-900">{selectedLoad?.price}</div>
-            </div>
-
             <div className="space-y-2">
               <Label>Your Bid Amount</Label>
               <div className="relative">
@@ -1513,7 +1498,7 @@ const loadUserOffer = async (load: Load, options: { silent?: boolean } = {}) => 
           <DialogHeader>
             <DialogTitle>Auto Match - Recommended Carriers</DialogTitle>
             <DialogDescription>
-              AI-powered recommendations based on distance, rating, and price
+              AI-powered recommendations based on distance and rating
             </DialogDescription>
           </DialogHeader>
 
@@ -1543,7 +1528,6 @@ const loadUserOffer = async (load: Load, options: { silent?: boolean } = {}) => 
                       </div>
                     </div>
                     <div className="text-right">
-                      <div className="text-lg text-[#29CA8D] mb-2">{carrier.pricePerMile}/mi</div>
                       <Button
                         size="sm"
                         onClick={() => handleAcceptCarrier(carrier.id)}
@@ -1557,6 +1541,69 @@ const loadUserOffer = async (load: Load, options: { silent?: boolean } = {}) => 
               </Card>
             ))}
           </div>
+        </DialogContent>
+      </Dialog>
+      <Dialog open={!!detailLoad} onOpenChange={(open) => !open && setDetailLoad(null)}>
+        <DialogContent className="max-w-2xl">
+          <DialogHeader>
+            <DialogTitle>Load Details</DialogTitle>
+            <DialogDescription>View the full load information.</DialogDescription>
+          </DialogHeader>
+          {detailLoad && (
+            <div className="space-y-3 text-sm text-gray-700">
+              <div>
+                <div className="text-xs uppercase text-gray-400">Route</div>
+                <div className="text-gray-900">
+                  {detailLoad.origin} → {detailLoad.destination}
+                </div>
+              </div>
+              <div className="grid md:grid-cols-2 gap-3">
+                <div>
+                  <div className="text-xs uppercase text-gray-400">Species</div>
+                  <div className="text-gray-900">{detailLoad.species}</div>
+                </div>
+                <div>
+                  <div className="text-xs uppercase text-gray-400">Quantity</div>
+                  <div className="text-gray-900">{detailLoad.quantity}</div>
+                </div>
+                {detailLoad.contactEmail && (
+                  <div>
+                    <div className="text-xs uppercase text-gray-400">Email</div>
+                    <div className="text-gray-900 break-all">{detailLoad.contactEmail}</div>
+                  </div>
+                )}
+                {detailLoad.contactPhone && (
+                  <div>
+                    <div className="text-xs uppercase text-gray-400">Contact</div>
+                    <div className="text-gray-900">{detailLoad.contactPhone}</div>
+                  </div>
+                )}
+                <div>
+                  <div className="text-xs uppercase text-gray-400">Pickup</div>
+                  <div className="text-gray-900">{detailLoad.pickupDate}</div>
+                </div>
+                <div>
+                  <div className="text-xs uppercase text-gray-400">Posted</div>
+                  <div className="text-gray-900">{detailLoad.postedDate}</div>
+                </div>
+              </div>
+              {detailLoad.comments && (
+                <div>
+                  <div className="text-xs uppercase text-gray-400">Notes</div>
+                  <div className="text-gray-900 whitespace-pre-line">{detailLoad.comments}</div>
+                </div>
+              )}
+              {detailLoad.postLink && (
+                <Button
+                  variant="outline"
+                  className="w-full"
+                  onClick={() => window.open(detailLoad.postLink!, "_blank")}
+                >
+                  Visit Post Link
+                </Button>
+              )}
+            </div>
+          )}
         </DialogContent>
       </Dialog>
     </div>

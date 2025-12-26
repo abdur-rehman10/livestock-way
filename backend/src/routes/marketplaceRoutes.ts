@@ -208,6 +208,15 @@ router.patch(
       if (!availability) {
         return res.status(404).json({ error: "Listing not found" });
       }
+      if (availability.is_external) {
+        return res.status(403).json({ error: "External listings are read-only." });
+      }
+      if (availability.is_external) {
+        return res.status(403).json({ error: "External listings are read-only." });
+      }
+      if (availability.is_external) {
+        return res.status(403).json({ error: "External listings are read-only." });
+      }
       const haulerId = await resolveHaulerId(authUser);
       if (
         !isSuperAdminUser(authUser) &&
@@ -342,6 +351,9 @@ router.post(
       const load = await getLoadById(loadId);
       if (!load) {
         return res.status(404).json({ error: "Load not found" });
+      }
+      if (load.is_external) {
+        return res.status(403).json({ error: "External loads are read-only and cannot receive offers." });
       }
       if (isShipperForLoad(authUser, load)) {
         return res.status(400).json({ error: "You cannot bid on your own load." });
@@ -1897,6 +1909,13 @@ router.post(
       const availabilityId = req.params.id;
       if (!availabilityId) {
         return res.status(400).json({ error: "Missing availability id" });
+      }
+      const availability = await getTruckAvailabilityById(availabilityId);
+      if (!availability) {
+        return res.status(404).json({ error: "Listing not found" });
+      }
+      if (availability.is_external) {
+        return res.status(403).json({ error: "External listings are read-only." });
       }
       const booking = await createBookingForAvailability({
         truckAvailabilityId: availabilityId,

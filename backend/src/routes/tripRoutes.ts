@@ -122,10 +122,25 @@ async function fetchRoute(
   origin: { lat: number; lon: number },
   destination: { lat: number; lon: number }
 ) {
-  const baseUrl = process.env.ROUTE_ENGINE_URL || DEFAULT_ROUTE_ENGINE_URL;
-  const url = `${baseUrl}/route/v1/driving/${origin.lon},${origin.lat};${destination.lon},${destination.lat}?overview=full&geometries=polyline6&steps=true`;
-  const response = await fetch(url, { headers: { Accept: "application/json" } });
-  if (!response.ok) return null;
+  const baseUrl = (process.env.ROUTE_ENGINE_URL || DEFAULT_ROUTE_ENGINE_URL).trim();
+  const trimmedBase = baseUrl.endsWith("/") ? baseUrl.slice(0, -1) : baseUrl;
+  const coords = `${origin.lon},${origin.lat};${destination.lon},${destination.lat}`;
+  const hasRoutePrefix = trimmedBase.includes("/route/v1/");
+  const path = hasRoutePrefix
+    ? `${trimmedBase}/${coords}`
+    : `${trimmedBase}/route/v1/driving/${coords}`;
+  const url = `${path}?overview=full&geometries=polyline6&steps=true`;
+  const response = await fetch(url, {
+    headers: {
+      Accept: "application/json",
+      "User-Agent": "livestockway-route-plan/1.0",
+    },
+  });
+  if (!response.ok) {
+    const detail = await response.text().catch(() => "");
+    console.error("OSRM route fetch failed:", response.status, detail.slice(0, 500));
+    return null;
+  }
   const data = await response.json();
   const route = data?.routes?.[0];
   if (!route) return null;
@@ -1426,6 +1441,16 @@ router.post(
     }
 
     const tripRow = tripResult.rows[0];
+    console.log("route-plan: trip row", {
+      tripId: tripRow.id,
+      pickup_location_text: tripRow.pickup_location_text,
+      dropoff_location_text: tripRow.dropoff_location_text,
+      pickup_lat: tripRow.pickup_lat,
+      pickup_lng: tripRow.pickup_lng,
+      dropoff_lat: tripRow.dropoff_lat,
+      dropoff_lng: tripRow.dropoff_lng,
+      route_distance_km: tripRow.route_distance_km,
+    });
     let origin =
       tripRow.pickup_lat && tripRow.pickup_lng
         ? { lat: Number(tripRow.pickup_lat), lon: Number(tripRow.pickup_lng) }
@@ -1436,21 +1461,30 @@ router.post(
         : null;
 
     if (!origin && tripRow.pickup_location_text) {
+      console.log("route-plan: geocoding origin");
       origin = await geocodeAddress(tripRow.pickup_location_text);
     }
     if (!destination && tripRow.dropoff_location_text) {
+      console.log("route-plan: geocoding destination");
       destination = await geocodeAddress(tripRow.dropoff_location_text);
     }
 
+    console.log("route-plan: resolved coords", { origin, destination });
     if (!origin || !destination) {
       return res.status(400).json({ message: "Missing origin/destination coordinates" });
     }
 
+    console.log("route-plan: fetching route");
     const route = await fetchRoute(origin, destination);
     if (!route) {
       return res.status(502).json({ message: "Failed to fetch route" });
     }
 
+    console.log("route-plan: route ok", {
+      distance_km: route.distance_km,
+      duration_min: route.duration_min,
+      has_geometry: Boolean(route.geometry),
+    });
     const restStopPlan = buildRestStopPlan(route.distance_km ?? tripRow.route_distance_km ?? null);
     const { directionsUrl, mapUrl } = buildMapUrls(origin, destination);
     const bboxes = buildSegmentBboxes(
@@ -1458,7 +1492,12 @@ router.post(
       destination,
       route.distance_km ?? tripRow.route_distance_km ?? null
     );
+    console.log("route-plan: overpass bboxes", { count: bboxes.length });
     const { washouts, feedStops } = await fetchOverpassPoisForBboxes(bboxes, origin);
+    console.log("route-plan: overpass results", {
+      washouts: washouts.length,
+      feedStops: feedStops.length,
+    });
 
     const planPayload = {
       distance_km: route.distance_km,
