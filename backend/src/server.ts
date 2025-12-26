@@ -18,6 +18,8 @@ import marketplaceRoutes from "./routes/marketplaceRoutes";
 import serviceRoutes from "./routes/serviceRoutes";
 import kycRoutes from "./routes/kycRoutes";
 import adminRoutes from "./routes/adminRoutes";
+import haulerRoutes from "./routes/haulerRoutes";
+import pricingRoutes from "./routes/pricingRoutes";
 import externalIngestRoutes from "./routes/externalIngestRoutes";
 import { initSocket } from "./socket";
 
@@ -73,6 +75,8 @@ app.use("/api/marketplace", marketplaceRoutes);
 app.use("/api/services", serviceRoutes);
 app.use("/api/kyc", kycRoutes);
 app.use("/api/admin", adminRoutes);
+app.use("/api/hauler", haulerRoutes);
+app.use("/api/pricing", pricingRoutes);
 app.use("/api/external", externalIngestRoutes);
 
 async function bootstrapSuperAdmin() {

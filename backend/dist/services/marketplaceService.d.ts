@@ -48,6 +48,9 @@ export declare enum BookingStatus {
     CANCELLED = "CANCELLED"
 }
 export type PaymentMode = "ESCROW" | "DIRECT";
+export type HaulerSubscriptionStatus = "NONE" | "ACTIVE" | "CANCELED" | "EXPIRED";
+export type HaulerSubscriptionLifecycleStatus = "PENDING" | "ACTIVE" | "CANCELED" | "EXPIRED";
+export type HaulerSubscriptionPlanType = "INDIVIDUAL";
 export interface LoadRecord {
     id: string;
     shipper_id: string;
@@ -239,8 +242,52 @@ export interface HaulerSummary {
     driver_count: number;
     completed_trips: number;
     hauler_type?: string | null;
+    free_trip_used: boolean;
+    free_trip_used_at: string | null;
+    subscription_status: HaulerSubscriptionStatus;
+    subscription_current_period_end: string | null;
     rating: number | null;
 }
+export type HaulerSubscriptionPaymentStatus = "PENDING" | "PAID" | "FAILED";
+export interface HaulerSubscriptionRecord {
+    id: string;
+    hauler_id: string;
+    plan_type: HaulerSubscriptionPlanType;
+    status: HaulerSubscriptionLifecycleStatus;
+    billing_cycle: "MONTHLY" | "YEARLY";
+    monthly_price: number;
+    price_per_month: number;
+    charged_amount: number;
+    currency: string;
+    started_at: string;
+    current_period_end: string | null;
+    created_at: string;
+    updated_at: string;
+}
+export interface HaulerSubscriptionPaymentRecord {
+    id: string;
+    subscription_id: string;
+    amount: number;
+    paid_amount: number;
+    billing_cycle: "MONTHLY" | "YEARLY";
+    currency: string;
+    provider: string;
+    provider_ref: string | null;
+    status: HaulerSubscriptionPaymentStatus;
+    created_at: string;
+    updated_at: string;
+}
+export declare function assertFreeTripEligibility(meta: {
+    haulerType?: string | null;
+    subscriptionStatus?: string | null;
+    freeTripUsed?: boolean | null;
+    hasActiveTrip: boolean;
+}): void;
+export declare function shouldConsumeFreeTrip(meta: {
+    haulerType?: string | null;
+    subscriptionStatus?: string | null;
+    freeTripUsed?: boolean | null;
+}): boolean;
 export interface HaulerDriverRecord {
     id: string;
     full_name: string | null;

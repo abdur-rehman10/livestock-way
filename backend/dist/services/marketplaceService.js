@@ -4,6 +4,8 @@ exports.BookingStatus = exports.DisputeStatus = exports.PaymentStatus = exports.
 exports.getLoadOfferById = getLoadOfferById;
 exports.getLatestOfferForHauler = getLatestOfferForHauler;
 exports.upsertDirectPaymentReceipt = upsertDirectPaymentReceipt;
+exports.assertFreeTripEligibility = assertFreeTripEligibility;
+exports.shouldConsumeFreeTrip = shouldConsumeFreeTrip;
 exports.mapLoadRow = mapLoadRow;
 exports.mapTripRow = mapTripRow;
 exports.mapOfferRow = mapOfferRow;
@@ -283,6 +285,30 @@ async function upsertDirectPaymentReceipt(input, client = null) {
     ]);
     return mapTripDirectPaymentRow(result.rows[0]);
 }
+function assertFreeTripEligibility(meta) {
+    const type = (meta.haulerType ?? "").toString().trim().toUpperCase();
+    if (type !== "INDIVIDUAL")
+        return;
+    const subscription = (meta.subscriptionStatus ?? "NONE").toString().trim().toUpperCase();
+    if (subscription === "ACTIVE")
+        return;
+    const freeTripUsed = Boolean(meta.freeTripUsed);
+    if (freeTripUsed || meta.hasActiveTrip) {
+        const err = new Error("Free trip already used or active trip exists. Upgrade required.");
+        err.status = 402;
+        err.code = "SUBSCRIPTION_REQUIRED";
+        throw err;
+    }
+}
+function shouldConsumeFreeTrip(meta) {
+    const type = (meta.haulerType ?? "").toString().trim().toUpperCase();
+    if (type !== "INDIVIDUAL")
+        return false;
+    const subscription = (meta.subscriptionStatus ?? "NONE").toString().trim().toUpperCase();
+    if (subscription === "ACTIVE")
+        return false;
+    return !Boolean(meta.freeTripUsed);
+}
 function mapLoadRow(row) {
     return {
         ...row,
@@ -385,6 +411,23 @@ const ACTIVE_TRIP_STATUS_VALUES = [
     mapTripStatusToDb(TripStatus.DISPUTED).toLowerCase(),
     "in_progress",
 ];
+const ACTIVE_TRIP_STATUS_VALUES_FOR_FREE_TRIAL = [
+    mapTripStatusToDb(TripStatus.PENDING_ESCROW),
+    mapTripStatusToDb(TripStatus.READY_TO_START),
+    mapTripStatusToDb(TripStatus.IN_PROGRESS),
+    mapTripStatusToDb(TripStatus.DELIVERED_AWAITING_CONFIRMATION),
+    mapTripStatusToDb(TripStatus.DELIVERED_CONFIRMED),
+    mapTripStatusToDb(TripStatus.DISPUTED),
+    "planned",
+    "assigned",
+    "en_route",
+    "pending_escrow",
+    "ready_to_start",
+    "delivered_awaiting_confirmation",
+    "delivered_confirmed",
+    "in_progress",
+    "disputed",
+].map((s) => s.toLowerCase());
 function toNumericId(value) {
     if (value === null || value === undefined)
         return null;
@@ -1824,6 +1867,17 @@ async function expireOtherOffers(loadId, acceptedOfferId, client) {
         AND status = $4
     `, [LoadOfferStatus.EXPIRED, loadId, acceptedOfferId, LoadOfferStatus.PENDING]);
 }
+async function haulerHasActiveTrip(haulerId, client) {
+    const runner = client ?? database_1.pool;
+    const result = await runner.query(`
+      SELECT 1
+      FROM trips
+      WHERE hauler_id = $1
+        AND LOWER(status::text) = ANY($2)
+      LIMIT 1
+    `, [haulerId, ACTIVE_TRIP_STATUS_VALUES_FOR_FREE_TRIAL]);
+    return (result.rowCount ?? 0) > 0;
+}
 async function acceptOfferAndCreateTrip(params) {
     const client = await database_1.pool.connect();
     const paymentMode = params.paymentModeSelection?.paymentMode ?? "ESCROW";
@@ -1905,6 +1959,23 @@ async function acceptOfferAndCreateTrip(params) {
     }
     try {
         await client.query("BEGIN");
+        const haulerMetaResult = await client.query(`
+        SELECT hauler_type, free_trip_used, subscription_status
+        FROM haulers
+        WHERE id = $1
+        LIMIT 1
+      `, [params.haulerId]);
+        if (!haulerMetaResult.rowCount) {
+            throw new Error("Hauler profile not found");
+        }
+        const haulerMeta = haulerMetaResult.rows[0];
+        const hasActiveTrip = await haulerHasActiveTrip(params.haulerId, client);
+        assertFreeTripEligibility({
+            haulerType: haulerMeta.hauler_type,
+            subscriptionStatus: haulerMeta.subscription_status,
+            freeTripUsed: haulerMeta.free_trip_used,
+            hasActiveTrip,
+        });
         await client.query(`
         UPDATE load_offers
         SET status = $1,
@@ -1989,6 +2060,15 @@ async function acceptOfferAndCreateTrip(params) {
             params.haulerUserId,
             params.loadId,
         ]);
+        if ((haulerMeta.hauler_type ?? "").toString().trim().toUpperCase() === "INDIVIDUAL" &&
+            (haulerMeta.subscription_status ?? "").toString().trim().toUpperCase() !== "ACTIVE") {
+            await client.query(`
+          UPDATE haulers
+          SET free_trip_used = TRUE,
+              free_trip_used_at = COALESCE(free_trip_used_at, NOW())
+          WHERE id = $1
+        `, [params.haulerId]);
+        }
         await client.query("COMMIT");
         return { trip, payment };
     }
@@ -2490,6 +2570,10 @@ async function getHaulerSummary(haulerId) {
         h.id::text,
         COALESCE(h.legal_name, u.full_name) AS name,
         h.hauler_type,
+        h.free_trip_used,
+        h.free_trip_used_at,
+        h.subscription_status,
+        h.subscription_current_period_end,
         (
           SELECT COUNT(*) FROM trucks t WHERE t.hauler_id = h.id
         )::int AS fleet_count,
@@ -2513,6 +2597,10 @@ async function getHaulerSummary(haulerId) {
         fleet_count: Number(row.fleet_count ?? 0),
         driver_count: Number(row.driver_count ?? 0),
         completed_trips: Number(row.completed_trips ?? 0),
+        free_trip_used: Boolean(row.free_trip_used),
+        free_trip_used_at: row.free_trip_used_at ?? null,
+        subscription_status: (row.subscription_status ?? "NONE"),
+        subscription_current_period_end: row.subscription_current_period_end ?? null,
         rating: null,
     };
 }

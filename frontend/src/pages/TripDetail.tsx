@@ -36,6 +36,8 @@ import {
 } from "../api/marketplace";
 import { PaymentCard } from "../components/PaymentCard";
 import { toast } from "sonner";
+import { SubscriptionCTA } from "../components/SubscriptionCTA";
+import { useHaulerSubscription } from "../hooks/useHaulerSubscription";
 import {
   Dialog,
   DialogContent,
@@ -156,6 +158,8 @@ export function HaulerTripView() {
   const [directReference, setDirectReference] = useState("");
   const [directReceivedAt, setDirectReceivedAt] = useState("");
   const [directError, setDirectError] = useState<string | null>(null);
+  const { isIndividualHauler, subscriptionStatus, freeTripUsed, monthlyPrice, yearlyPrice } =
+    useHaulerSubscription();
   const marketplaceTripId = marketplaceContext?.trip ? Number(marketplaceContext.trip.id) : null;
   const tripId = trip?.id ?? marketplaceTripId;
   const restStopPlan = useMemo(() => {

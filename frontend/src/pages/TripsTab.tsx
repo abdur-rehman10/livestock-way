@@ -5,6 +5,8 @@ import { Button } from '../components/ui/button';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '../components/ui/tabs';
 import { Progress } from '../components/ui/progress';
 import { MapPin, Clock, DollarSign, Calendar, Star, FileText } from 'lucide-react';
+import { SubscriptionCTA } from '../components/SubscriptionCTA';
+import { useHaulerSubscription } from '../hooks/useHaulerSubscription';
 
 interface Trip {
   id: string;
@@ -106,6 +108,8 @@ const completedTrips: Trip[] = [
 
 export function TripsTab({ onViewTrip }: TripsTabProps) {
   const [activeTab, setActiveTab] = useState<'active' | 'upcoming' | 'completed'>('active');
+  const { isIndividualHauler, subscriptionStatus, freeTripUsed, monthlyPrice, yearlyPrice } =
+    useHaulerSubscription();
 
   const activeTrips = mockTrips.filter(t => t.status === 'in-transit');
   const upcomingTrips = mockTrips.filter(t => t.status === 'scheduled');
@@ -208,6 +212,14 @@ export function TripsTab({ onViewTrip }: TripsTabProps) {
 
   return (
     <div className="p-4 space-y-4">
+      {isIndividualHauler && (subscriptionStatus ?? '').toUpperCase() !== 'ACTIVE' && (
+        <SubscriptionCTA
+          variant={freeTripUsed ? 'BLOCKED_UPGRADE' : 'INFO_FREE_TRIP'}
+          monthlyPrice={monthlyPrice ?? undefined}
+          yearlyPrice={yearlyPrice ?? undefined}
+          onUpgradeClick={() => (window.location.href = '/hauler/subscription')}
+        />
+      )}
       <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as any)} className="w-full">
         <TabsList className="w-full grid grid-cols-3">
           <TabsTrigger value="active">

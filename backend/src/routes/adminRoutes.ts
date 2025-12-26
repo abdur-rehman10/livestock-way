@@ -6,7 +6,26 @@ import { auditRequest } from "../middlewares/auditLogger";
 import {
   validateCompanyPricingInput,
   validateIndividualPricingInput,
+  validateIndividualPackageUpdateInput,
 } from "../utils/pricing";
+
+export function isSuperAdminUser(user?: { user_type?: string | null }) {
+  const role = (user?.user_type ?? "").toString().trim().toLowerCase();
+  return role === "super-admin" || role === "superadmin";
+}
+
+export function computePayingStatus(
+  subscriptionStatus?: string | null,
+  currentPeriodEnd?: string | null
+): "PAID" | "UNPAID" {
+  const status = (subscriptionStatus ?? "").toString().trim().toUpperCase();
+  if (status === "ACTIVE") {
+    if (!currentPeriodEnd) return "PAID";
+    const end = new Date(currentPeriodEnd);
+    if (Number.isFinite(end.getTime()) && end.getTime() > Date.now()) return "PAID";
+  }
+  return "UNPAID";
+}
 
 function normalizeStatus(value?: string) {
   if (!value) return null;
@@ -196,6 +215,147 @@ router.get("/stats", async (_req, res) => {
   }
 });
 
+router.get("/subscriptions", async (req, res) => {
+  try {
+    const user = (req as any)?.user ?? {};
+    if (!isSuperAdminUser(user)) {
+      return res.status(403).json({ error: "Forbidden" });
+    }
+    const paying = ((req.query?.paying as string) ?? "ALL").toString().toUpperCase();
+    const haulerTypeFilter = ((req.query?.hauler_type as string) ?? "ALL").toString().toUpperCase();
+    const search = (req.query?.q as string) ?? "";
+    const page = Math.max(1, Number(req.query?.page ?? 1));
+    const pageSize = Math.max(1, Math.min(100, Number(req.query?.pageSize ?? 20)));
+
+    const params: any[] = [];
+    const where: string[] = [];
+
+    if (haulerTypeFilter === "INDIVIDUAL" || haulerTypeFilter === "COMPANY") {
+      params.push(haulerTypeFilter);
+      where.push(`COALESCE(h.hauler_type, 'COMPANY') = $${params.length}`);
+    }
+
+    if (search) {
+      params.push(`%${search.toLowerCase()}%`);
+      where.push(
+        `(LOWER(u.full_name) LIKE $${params.length} OR LOWER(u.email) LIKE $${params.length} OR LOWER(COALESCE(u.phone_number, '')) LIKE $${params.length})`
+      );
+    }
+
+    let payFilterClause = "";
+    if (paying === "PAID") {
+      payFilterClause = `AND pay_status = 'PAID'`;
+    } else if (paying === "UNPAID") {
+      payFilterClause = `AND pay_status = 'UNPAID'`;
+    }
+
+    const offset = (page - 1) * pageSize;
+
+    const query = `
+      WITH base AS (
+        SELECT
+          u.id AS user_id,
+          u.full_name,
+          u.email,
+          LOWER(u.user_type::text) AS role,
+          h.hauler_type,
+          h.free_trip_used,
+          h.subscription_status,
+          h.subscription_current_period_end,
+          sub.billing_cycle,
+          sub.current_period_end,
+          sub.status AS sub_status,
+          pay.amount AS last_payment_amount,
+          pay.status AS last_payment_status,
+          pay.created_at AS last_payment_at,
+          CASE
+            WHEN COALESCE(sub.status, h.subscription_status) ILIKE 'ACTIVE' AND (sub.current_period_end IS NULL OR sub.current_period_end > NOW())
+              THEN 'PAID'
+            ELSE 'UNPAID'
+          END AS pay_status
+        FROM app_users u
+        LEFT JOIN haulers h ON h.user_id = u.id
+        LEFT JOIN LATERAL (
+          SELECT *
+          FROM hauler_subscriptions hs
+          WHERE h.id IS NOT NULL AND hs.hauler_id = h.id
+          ORDER BY hs.started_at DESC
+          LIMIT 1
+        ) sub ON TRUE
+        LEFT JOIN LATERAL (
+          SELECT *
+          FROM hauler_subscription_payments hsp
+          WHERE sub.id IS NOT NULL AND hsp.subscription_id = sub.id
+          ORDER BY hsp.created_at DESC
+          LIMIT 1
+        ) pay ON TRUE
+        ${where.length ? `WHERE ${where.join(" AND ")}` : ""}
+      )
+      SELECT *
+      FROM base
+      WHERE 1=1
+      ${payFilterClause}
+      ORDER BY COALESCE(last_payment_at, current_period_end, subscription_current_period_end, u.id::text::timestamp) DESC
+      LIMIT $${params.length + 1} OFFSET $${params.length + 2};
+    `;
+
+    const countQuery = `
+      WITH base AS (
+        SELECT
+          u.id AS user_id,
+          CASE
+            WHEN COALESCE(sub.status, h.subscription_status) ILIKE 'ACTIVE' AND (sub.current_period_end IS NULL OR sub.current_period_end > NOW())
+              THEN 'PAID'
+            ELSE 'UNPAID'
+          END AS pay_status
+        FROM app_users u
+        LEFT JOIN haulers h ON h.user_id = u.id
+        LEFT JOIN LATERAL (
+          SELECT *
+          FROM hauler_subscriptions hs
+          WHERE h.id IS NOT NULL AND hs.hauler_id = h.id
+          ORDER BY hs.started_at DESC
+          LIMIT 1
+        ) sub ON TRUE
+        ${where.length ? `WHERE ${where.join(" AND ")}` : ""}
+      )
+      SELECT COUNT(*)::int AS total
+      FROM base
+      WHERE 1=1
+      ${payFilterClause};
+    `;
+
+    params.push(pageSize, offset);
+
+    const [rowsResult, countResult] = await Promise.all([pool.query(query, params), pool.query(countQuery, params.slice(0, -2))]);
+
+    const total = countResult.rows[0]?.total ?? 0;
+
+    return res.json({
+      items: rowsResult.rows.map((r) => ({
+        user_id: r.user_id,
+        full_name: r.full_name,
+        email: r.email,
+        role: r.role,
+        hauler_type: r.hauler_type,
+        free_trip_used: r.free_trip_used,
+        subscription_status: r.subscription_status ?? r.sub_status ?? null,
+        billing_cycle: r.billing_cycle ?? null,
+        current_period_end: r.current_period_end ?? r.subscription_current_period_end ?? null,
+        last_payment_amount: r.last_payment_amount ?? null,
+        last_payment_status: r.last_payment_status ?? null,
+        last_payment_at: r.last_payment_at ?? null,
+        pay_status: r.pay_status,
+      })),
+      page,
+      pageSize,
+      total,
+    });
+  } catch (err) {
+    console.error("Error in GET /api/admin/subscriptions:", err);
+    res.status(500).json({ error: "Failed to load subscriptions" });
+  }
+});
 router.get("/earnings", async (_req, res) => {
   try {
     const earningsStatsResult = await pool.query<{
@@ -386,6 +546,66 @@ router.get("/pricing/hauler-company", async (_req, res) => {
   } catch (error) {
     console.error("admin pricing company get error", error);
     return res.status(500).json({ message: "Failed to load company pricing" });
+  }
+});
+
+router.get("/pricing/individual-packages", async (_req, res) => {
+  try {
+    const result = await pool.query(
+      `
+        SELECT id, code, name, description, features, is_active, created_at, updated_at
+        FROM pricing_individual_packages
+        ORDER BY code ASC
+      `
+    );
+    return res.json({ items: result.rows });
+  } catch (error) {
+    console.error("admin pricing individual packages get error", error);
+    return res.status(500).json({ message: "Failed to load individual packages" });
+  }
+});
+
+router.put("/pricing/individual-packages/:code", async (req, res) => {
+  try {
+    const validated = validateIndividualPackageUpdateInput(
+      req.user?.user_type,
+      req.params.code,
+      {
+        name: req.body?.name,
+        description: req.body?.description,
+        features: req.body?.features,
+      }
+    );
+
+    const result = await pool.query(
+      `
+        UPDATE pricing_individual_packages
+        SET name = $1,
+            description = $2,
+            features = $3,
+            updated_at = NOW()
+        WHERE code = $4
+        RETURNING id, code, name, description, features, is_active, created_at, updated_at
+      `,
+      [validated.name, validated.description, JSON.stringify(validated.features), validated.code]
+    );
+
+    if (result.rowCount === 0) {
+      return res.status(404).json({ message: "Package not found" });
+    }
+
+    return res.json(result.rows[0]);
+  } catch (error: any) {
+    const message = error?.message || "Failed to update package";
+    const status = message.includes("super admins") || message.includes("Invalid package code")
+      ? 400
+      : message.includes("must") || message.includes("cannot")
+      ? 400
+      : 500;
+    if (status === 500) {
+      console.error("admin pricing individual package put error", error);
+    }
+    return res.status(status).json({ message });
   }
 });
 

@@ -8,6 +8,8 @@ const bcrypt_1 = __importDefault(require("bcrypt"));
 const jsonwebtoken_1 = __importDefault(require("jsonwebtoken"));
 const database_1 = require("../config/database");
 const auditLogService_1 = require("../services/auditLogService");
+const auth_1 = __importDefault(require("../middlewares/auth"));
+const signupPlan_1 = require("../utils/signupPlan");
 const router = (0, express_1.Router)();
 const TOKEN_TTL = "7d";
 function signToken(payload) {
@@ -19,10 +21,24 @@ function signToken(payload) {
 function normalizeUserType(userType) {
     return userType?.toLowerCase();
 }
+function normalizeIndividualPlanCode(code) {
+    const normalized = (code ?? "").toString().trim().toUpperCase();
+    if (normalized === "FREE" || normalized === "PAID")
+        return normalized;
+    return null;
+}
 // ------------------ REGISTER ------------------
 router.post("/register", async (req, res) => {
-    const { full_name, email, password, phone, user_type, account_mode, company_name, } = req.body;
+    const { full_name, email, password, phone, user_type, account_mode, company_name, individual_plan_code, signup_plan_selected_at, onboarding_completed, } = req.body;
     const normalizedType = normalizeUserType(user_type);
+    const planSelection = (0, signupPlan_1.resolveSignupPlanSelection)({
+        userType: normalizedType,
+        accountMode: account_mode,
+        planCode: individual_plan_code ?? null,
+    });
+    const onboardingCompleted = planSelection.planCode !== null
+        ? planSelection.onboardingCompleted
+        : Boolean(onboarding_completed);
     try {
         const hashed = await bcrypt_1.default.hash(password, 10);
         const companyValue = account_mode === "COMPANY" ? company_name ?? null : null;
@@ -34,10 +50,13 @@ router.post("/register", async (req, res) => {
           user_type,
           account_status,
           company_name,
-          account_mode
+          account_mode,
+          individual_plan_code,
+          signup_plan_selected_at,
+          onboarding_completed
         )
-        VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
-        RETURNING id, full_name, email, user_type, company_name, account_status, account_mode`, [
+        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
+        RETURNING id, full_name, email, user_type, company_name, account_status, account_mode, individual_plan_code, signup_plan_selected_at, onboarding_completed`, [
             full_name,
             email,
             hashed,
@@ -46,6 +65,9 @@ router.post("/register", async (req, res) => {
             "pending",
             companyValue,
             account_mode ?? "COMPANY",
+            planSelection.planCode,
+            planSelection.selectedAt ? planSelection.selectedAt.toISOString() : null,
+            onboardingCompleted,
         ]);
         const token = signToken({
             id: user.rows[0].id,
@@ -127,12 +149,29 @@ router.post("/login", async (req, res) => {
                 company_name: user.company_name,
                 account_status: user.account_status,
                 account_mode: user.account_mode ?? "COMPANY",
+                individual_plan_code: user.individual_plan_code ?? null,
+                signup_plan_selected_at: user.signup_plan_selected_at ?? null,
+                onboarding_completed: Boolean(user.onboarding_completed),
             },
         });
     }
     catch (err) {
         console.error("login error:", err);
         res.status(500).json({ message: err?.message || "Login failed" });
+    }
+});
+router.post("/onboarding-complete", auth_1.default, async (req, res) => {
+    try {
+        const userId = req?.user?.id ? Number(req.user.id) : null;
+        if (!userId) {
+            return res.status(401).json({ message: "Unauthorized" });
+        }
+        await database_1.pool.query(`UPDATE app_users SET onboarding_completed = TRUE, updated_at = NOW() WHERE id = $1`, [userId]);
+        return res.json({ success: true });
+    }
+    catch (err) {
+        console.error("onboarding complete error:", err);
+        return res.status(500).json({ message: err?.message || "Failed to update onboarding status" });
     }
 });
 exports.default = router;

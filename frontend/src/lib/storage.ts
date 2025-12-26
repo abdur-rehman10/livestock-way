@@ -82,6 +82,7 @@ export const STORAGE_KEYS = {
   USER_EMAIL: 'livestockway_user_email',
   USER_PHONE: 'livestockway_user_phone',
   ONBOARDING_COMPLETED: 'livestockway_onboarding_completed',
+  INDIVIDUAL_PLAN_CODE: 'livestockway_individual_plan_code',
   FILTERS: 'livestockway_filters',
   LAST_SCREEN: 'livestockway_last_screen',
   DRIVER_ONLINE_STATUS: 'livestockway_driver_online',

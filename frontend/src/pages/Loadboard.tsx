@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef } from "react";
+import { useNavigate } from "react-router-dom";
 import { fetchLoads } from "../lib/api";
 import type { Load as ApiLoad } from "../lib/api";
 import { Button } from "../components/ui/button";
@@ -24,6 +25,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "../components/ui/dialog";
+import { DialogFooter } from "../components/ui/dialog";
 import { Slider } from "../components/ui/slider";
 import { Tabs, TabsList, TabsTrigger } from "../components/ui/tabs";
 import { ScrollArea } from "../components/ui/scroll-area";
@@ -59,7 +61,10 @@ import {
   postOfferMessage,
   type LoadOffer,
   type OfferMessage,
+  subscribeHauler,
 } from "../api/marketplace";
+import { useHaulerSubscription } from "../hooks/useHaulerSubscription";
+import { SubscriptionCTA } from "../components/SubscriptionCTA";
 import {
   SOCKET_EVENTS,
   subscribeToSocketEvent,
@@ -144,9 +149,18 @@ export function Loadboard() {
   const [loads, setLoads] = useState<ApiLoad[]>([]);
   const [isLoading, setIsLoading] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);
+  const [subscriptionDialogOpen, setSubscriptionDialogOpen] = useState(false);
+  const [oneTimeUpgradeOpen, setOneTimeUpgradeOpen] = useState(false);
+  const [subscriptionSaving, setSubscriptionSaving] = useState(false);
+  const {
+    data: subscriptionState,
+    loading: subscriptionLoading,
+    refresh: refreshSubscription,
+  } = useHaulerSubscription();
   const [searchQuery, setSearchQuery] = useState('');
   const [saveFilterName, setSaveFilterName] = useState('');
   const currentHaulerId = appStorage.get<string | null>(STORAGE_KEYS.USER_ID, null);
+  const navigate = useNavigate();
   const isEditingOffer = !!offerDialogExistingOffer;
   const activeOfferIdRef = useRef<string | null>(null);
   const haulerChatAllowedRef = useRef(false);
@@ -156,6 +170,10 @@ export function Loadboard() {
   useEffect(() => {
     haulerChatAllowedRef.current = haulerChatAllowed;
   }, [haulerChatAllowed]);
+
+  useEffect(() => {
+    if (subscriptionLoading) return;
+  }, [subscriptionLoading]);
   
   // Filters with persistence
 type LoadboardFilters = {
@@ -197,6 +215,34 @@ type LoadboardFilters = {
     typeof filters.distance === "number"
       ? filters.distance
       : Number(filters.distance) || 0;
+
+  const offerBlocked =
+    subscriptionState?.hauler_type === "INDIVIDUAL" &&
+    subscriptionState.subscription_status !== "ACTIVE" &&
+    subscriptionState.free_trip_used === true;
+  const offerBlockedMessage = "You have used your one free trip. Please subscribe to keep using LivestockWay.";
+  const individualPrice =
+    subscriptionState?.current_individual_monthly_price !== null &&
+    subscriptionState?.current_individual_monthly_price !== undefined
+      ? subscriptionState.current_individual_monthly_price
+      : null;
+
+  const parseApiError = (err: any): { code?: string; message: string } => {
+    const fallback = { message: "Failed to create offer." };
+    if (!err?.message) return fallback;
+    try {
+      const parsed = JSON.parse(err.message);
+      if (parsed && typeof parsed === "object") {
+        return {
+          code: parsed.error || parsed.code,
+          message: parsed.message || parsed.error || fallback.message,
+        };
+      }
+    } catch {
+      /* message is not JSON */
+    }
+    return { message: err.message || fallback.message };
+  };
 
   // Persist filters
   useEffect(() => {
@@ -320,6 +366,36 @@ type LoadboardFilters = {
     toast.info(`Viewing ${load.bids || 0} bids for Load #${load.id}`);
   };
 
+  const UPGRADE_MODAL_KEY = "haulerUpgradeModalSeenAt";
+  const shouldShowOneTimeUpgrade = () => {
+    if (typeof window === "undefined") return false;
+    const last = window.localStorage.getItem(UPGRADE_MODAL_KEY);
+    if (!last) return true;
+    const lastDate = new Date(last);
+    if (!Number.isFinite(lastDate.getTime())) return true;
+    const now = new Date();
+    const diffHours = (now.getTime() - lastDate.getTime()) / (1000 * 60 * 60);
+    return diffHours >= 24;
+  };
+
+  const markUpgradeModalSeen = () => {
+    if (typeof window === "undefined") return;
+    window.localStorage.setItem(UPGRADE_MODAL_KEY, new Date().toISOString());
+  };
+
+  const handleOfferClick = (load: Load) => {
+    if (offerBlocked) {
+      if (shouldShowOneTimeUpgrade()) {
+        setOneTimeUpgradeOpen(true);
+        markUpgradeModalSeen();
+      } else {
+        setSubscriptionDialogOpen(true);
+      }
+      return;
+    }
+    void openOfferDialog(load);
+  };
+
   const openOfferDialog = async (load: Load) => {
     if (load.isExternal) {
       toast.info("This external load is read-only.");
@@ -354,6 +430,25 @@ type LoadboardFilters = {
     }
   };
 
+  const openUpgradeDialog = () => {
+    setSubscriptionDialogOpen(true);
+  };
+
+  const handleSubscribe = async () => {
+    setSubscriptionSaving(true);
+    try {
+      await subscribeHauler({ billing_cycle: "MONTHLY" });
+      toast.success("Subscription activated. You can now place offers.");
+      setSubscriptionDialogOpen(false);
+    } catch (err: any) {
+      const message = err?.message || err?.error || "Failed to activate subscription.";
+      toast.error(message);
+    } finally {
+      setSubscriptionSaving(false);
+      await refreshSubscription();
+    }
+  };
+
 const submitOffer = async () => {
     if (!offerDialogLoad) return;
     const amountValue = Number(offerAmount);
@@ -384,11 +479,28 @@ const submitOffer = async () => {
       setOfferAmount("");
       setOfferMessage("");
     } catch (err: any) {
-      toast.error(err?.message ?? "Failed to submit offer.");
+      const parsed = parseApiError(err);
+      const normalizedMessage = parsed.message?.toLowerCase() ?? "";
+      if (
+        parsed.code === "PAYMENT_REQUIRED" ||
+        normalizedMessage.includes("payment_required")
+      ) {
+        toast.error("Complete payment to continue with the Paid plan.");
+        navigate("/hauler/payment");
+      } else if (
+        parsed.code === "SUBSCRIPTION_REQUIRED" ||
+        parsed.message.includes("SUBSCRIPTION_REQUIRED") ||
+        normalizedMessage.includes("subscribe")
+      ) {
+        setSubscriptionDialogOpen(true);
+        toast.error(offerBlockedMessage);
+      } else {
+        toast.error(parsed.message || "Failed to submit offer.");
+      }
     } finally {
       setOfferSubmitting(false);
     }
-};
+  };
 
 const loadUserOffer = async (load: Load, options: { silent?: boolean } = {}) => {
   if (!currentHaulerId) {
@@ -621,7 +733,7 @@ const loadUserOffer = async (load: Load, options: { silent?: boolean } = {}) => 
   };
 
   return (
-    <div className="p-6 space-y-6">
+    <div className="p-6 space-y-6 relative">
       {/* Header */}
       <div className="flex items-center justify-between">
         <div>
@@ -721,6 +833,54 @@ const loadUserOffer = async (load: Load, options: { silent?: boolean } = {}) => 
         </Card>
       </div>
 
+      {offerBlocked && (
+        <Card className="border-amber-200 bg-amber-50">
+          <CardContent className="py-3 flex items-center justify-between">
+            <div className="text-sm text-amber-900 font-medium">
+              {offerBlockedMessage}
+            </div>
+            <div className="flex items-center gap-2">
+              <Badge variant="secondary" className="bg-white text-amber-900 border-amber-200">
+                Individual plan
+              </Badge>
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() => navigate("/hauler/subscription")}
+                className="border-amber-300 text-amber-900 hover:bg-white"
+              >
+                Upgrade
+              </Button>
+            </div>
+          </CardContent>
+      </Card>
+    )}
+
+      {subscriptionState?.hauler_type === "INDIVIDUAL" &&
+        subscriptionState.subscription_status !== "ACTIVE" && (
+          <div className="sticky bottom-4 z-20">
+            <SubscriptionCTA
+              variant={subscriptionState.free_trip_used ? "BLOCKED_UPGRADE" : "REMINDER"}
+              monthlyPrice={
+                subscriptionState.monthly_price ??
+                subscriptionState.current_individual_monthly_price ??
+                undefined
+              }
+              yearlyPrice={
+                subscriptionState.yearly_price ??
+                (subscriptionState.monthly_price ?? subscriptionState.current_individual_monthly_price
+                  ? Number(
+                      (((subscriptionState.monthly_price ??
+                        subscriptionState.current_individual_monthly_price) as number) *
+                        10).toFixed(2)
+                    )
+                  : undefined)
+              }
+              onUpgradeClick={() => navigate("/hauler/subscription")}
+            />
+          </div>
+        )}
+
       {/* View Modes */}
       {viewMode === 'list' ? (
         <div className="space-y-3">
@@ -745,6 +905,31 @@ const loadUserOffer = async (load: Load, options: { silent?: boolean } = {}) => 
                     Clear Filters
                   </Button>
                 )}
+                {subscriptionState?.hauler_type === "INDIVIDUAL" &&
+                  subscriptionState.subscription_status !== "ACTIVE" && (
+                    <div className="mt-4">
+                      <SubscriptionCTA
+                        variant="REMINDER"
+                        monthlyPrice={
+                          subscriptionState.monthly_price ??
+                          subscriptionState.current_individual_monthly_price ??
+                          undefined
+                        }
+                        yearlyPrice={
+                          subscriptionState.yearly_price ??
+                          (subscriptionState.monthly_price ??
+                          subscriptionState.current_individual_monthly_price
+                            ? Number(
+                                (((subscriptionState.monthly_price ??
+                                  subscriptionState.current_individual_monthly_price) as number) *
+                                  10).toFixed(2)
+                              )
+                            : undefined)
+                        }
+                        onUpgradeClick={() => navigate("/hauler/subscription")}
+                      />
+                    </div>
+                  )}
               </CardContent>
             </Card>
           )}
@@ -753,26 +938,40 @@ const loadUserOffer = async (load: Load, options: { silent?: boolean } = {}) => 
               {loadsToDisplay.map((load) => (
                 <Card key={load.id} className="hover:shadow-md transition-shadow">
                   <CardContent className="p-4 space-y-3">
-                <div className="flex items-center justify-between">
-                  <div>
-                    <h3 className="text-lg text-gray-900">Load #{load.id}</h3>
-                    <p className="text-sm text-gray-500">
-                      {load.species} • {load.quantity}
-                    </p>
-                    <p className="text-sm text-gray-600">
-                      {load.origin} → {load.destination}
-                    </p>
-                    <p className="text-xs text-gray-400">
-                      Pickup: {load.pickupDate}
-                    </p>
-                    {load.isExternal && (
-                      <div className="mt-2">
-                        <Badge variant="outline" className="border-dashed text-gray-500">
-                          External
-                        </Badge>
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <h3 className="text-lg text-gray-900">Load #{load.id}</h3>
+                        <p className="text-sm text-gray-500">
+                          {load.species} • {load.quantity}
+                        </p>
+                        <p className="text-sm text-gray-600">
+                          {load.origin} → {load.destination}
+                        </p>
+                        <p className="text-xs text-gray-400">
+                          Pickup: {load.pickupDate}
+                        </p>
+                        {load.isExternal && (
+                          <div className="mt-2">
+                            <Badge variant="outline" className="border-dashed text-gray-500">
+                              External
+                            </Badge>
+                          </div>
+                        )}
+                        {!load.isExternal && load.paymentMode && (
+                          <div className="mt-2">
+                            <Badge
+                              variant="secondary"
+                              className={
+                                load.paymentMode === "DIRECT"
+                                  ? "bg-amber-50 text-amber-800 border border-amber-200"
+                                  : "bg-emerald-50 text-emerald-800 border border-emerald-200"
+                              }
+                            >
+                              Payment: {load.paymentMode === "DIRECT" ? "Direct" : "Escrow"}
+                            </Badge>
+                          </div>
+                        )}
                       </div>
-                    )}
-                  </div>
                   <div className="text-right">
                     {!load.isExternal && (
                       <div className="mb-2">
@@ -787,9 +986,44 @@ const loadUserOffer = async (load: Load, options: { silent?: boolean } = {}) => 
                     <div className="flex flex-col gap-2">
                       {!load.isExternal && (
                         <>
-                          <Button size="sm" onClick={() => openOfferDialog(load)}>
-                            Place Offer
-                          </Button>
+                          <div className="relative flex flex-col gap-2">
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              onClick={() => handleOfferClick(load)}
+                              disabled={offerBlocked}
+                            >
+                              {offerBlocked ? "Offers Disabled" : "Place Offer"}
+                            </Button>
+                            {offerBlocked && (
+                              <>
+                                <div
+                                  className="absolute inset-0 cursor-pointer"
+                                  onClick={() => handleOfferClick(load)}
+                                />
+                                <SubscriptionCTA
+                                  variant="BLOCKED_UPGRADE"
+                                  monthlyPrice={
+                                    subscriptionState?.monthly_price ??
+                                    subscriptionState?.current_individual_monthly_price ??
+                                    undefined
+                                  }
+                                  yearlyPrice={
+                                    subscriptionState?.yearly_price ??
+                                    (subscriptionState?.monthly_price ??
+                                    subscriptionState?.current_individual_monthly_price
+                                      ? Number(
+                                          (((subscriptionState?.monthly_price ??
+                                            subscriptionState?.current_individual_monthly_price) as number) *
+                                            10).toFixed(2)
+                                        )
+                                      : undefined)
+                                  }
+                                  onUpgradeClick={() => navigate("/hauler/subscription")}
+                                />
+                              </>
+                            )}
+                          </div>
                           <Button
                             size="sm"
                             variant="outline"
@@ -997,6 +1231,46 @@ const loadUserOffer = async (load: Load, options: { silent?: boolean } = {}) => 
         </DialogContent>
       </Dialog>
 
+      <Dialog open={oneTimeUpgradeOpen} onOpenChange={setOneTimeUpgradeOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Upgrade to keep hauling</DialogTitle>
+            <DialogDescription>
+              Your free trip is used. Subscribe to continue placing offers.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-3">
+            <div className="flex flex-col md:flex-row gap-2">
+              <Button
+                className="flex-1 bg-[#29CA8D] hover:bg-[#24b67d]"
+                onClick={() => navigate("/hauler/subscription")}
+              >
+                View Plans
+              </Button>
+              <Button
+                className="flex-1"
+                variant="outline"
+                onClick={() => navigate("/hauler/subscription")}
+              >
+                Pay Monthly
+              </Button>
+              <Button
+                className="flex-1"
+                variant="outline"
+                onClick={() => navigate("/hauler/subscription")}
+              >
+                Pay Yearly
+              </Button>
+            </div>
+            <DialogFooter className="sm:justify-end">
+              <Button variant="ghost" onClick={() => setOneTimeUpgradeOpen(false)}>
+                Maybe later
+              </Button>
+            </DialogFooter>
+          </div>
+        </DialogContent>
+      </Dialog>
+
       <Dialog
         open={!!offerDialogLoad}
         onOpenChange={(open) => {
@@ -1062,6 +1336,53 @@ const loadUserOffer = async (load: Load, options: { silent?: boolean } = {}) => 
                   : isEditingOffer
                     ? "Save Changes"
                     : "Send Offer"}
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={subscriptionDialogOpen} onOpenChange={setSubscriptionDialogOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Upgrade to place offers</DialogTitle>
+            <DialogDescription>
+              You have used your one free trip. Please subscribe to keep using LivestockWay.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div className="text-sm text-gray-700">
+              {individualPrice !== null ? (
+                <div className="flex items-baseline gap-2">
+                  <span className="text-3xl font-semibold text-[#172039]">
+                    ${individualPrice.toFixed(2)}
+                  </span>
+                  <span className="text-gray-500">per month</span>
+                </div>
+              ) : (
+                <p className="text-gray-600">Pricing unavailable right now.</p>
+              )}
+              {subscriptionState?.subscription_status === "ACTIVE" && (
+                <p className="text-xs text-emerald-700 mt-2">
+                  Already active — you can place offers.
+                </p>
+              )}
+            </div>
+            <div className="flex gap-2">
+              <Button
+                variant="outline"
+                className="flex-1"
+                onClick={() => setSubscriptionDialogOpen(false)}
+                disabled={subscriptionSaving}
+              >
+                Cancel
+              </Button>
+              <Button
+                className="flex-1 bg-[#29CA8D] hover:bg-[#24b67d]"
+                onClick={handleSubscribe}
+                disabled={subscriptionSaving || individualPrice === null}
+              >
+                {subscriptionSaving ? "Activating..." : "Pay & Activate"}
               </Button>
             </div>
           </div>

@@ -249,6 +249,13 @@ export function HaulerDashboard({ onLogout }: HaulerDashboardProps) {
           </div>
           
           <div className="flex items-center gap-3">
+            <Button
+              variant="outline"
+              className="border-amber-200 text-amber-800 hover:bg-amber-50"
+              onClick={() => navigate("/hauler/subscription")}
+            >
+              Subscription
+            </Button>
             <Button variant="ghost" size="icon">
               <Bell className="w-5 h-5" />
             </Button>

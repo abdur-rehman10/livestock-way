@@ -39,6 +39,9 @@ import { toast } from 'sonner';
 import { NotFound } from '../pages/ErrorPages';
 import MarketplaceDevLab from '../pages/MarketplaceDevLab';
 import AdminPricing from '../pages/AdminPricing';
+import HaulerSubscription from '../pages/HaulerSubscription';
+import AdminSubscriptions from '../pages/AdminSubscriptions';
+import HaulerPayment from '../pages/HaulerPayment';
 
 type UserRole = 'shipper' | 'driver' | 'hauler' | 'stakeholder' | 'super-admin' | null;
 type LandingRole = 'hauler' | 'shipper' | 'stakeholder';
@@ -124,6 +127,7 @@ export function AppRouter({ showKeyboardShortcuts, onKeyboardShortcutsToggle }: 
     storage.remove(STORAGE_KEYS.USER_EMAIL);
     storage.remove(STORAGE_KEYS.USER_ID);
     storage.remove(STORAGE_KEYS.ACCOUNT_MODE);
+    storage.remove(STORAGE_KEYS.INDIVIDUAL_PLAN_CODE);
     storage.remove('pendingRole');
     toast.success('Logged out successfully');
     
@@ -261,6 +265,8 @@ export function AppRouter({ showKeyboardShortcuts, onKeyboardShortcutsToggle }: 
                   <Route path="trips/:id/tracking" element={<TripTracking />} />
                   <Route path="trips/:id/chat" element={<TripChat />} />
                   <Route path="earnings" element={<WalletTab />} />
+                  <Route path="subscription" element={<HaulerSubscription />} />
+                  <Route path="payment" element={<HaulerPayment />} />
                   <Route path="team" element={<TeamManagement />} />
                   <Route path="truck-board" element={<TruckBoard />} />
                   <Route path="marketplace" element={<MarketplaceTab userRole="hauler" />} />
@@ -360,6 +366,7 @@ export function AppRouter({ showKeyboardShortcuts, onKeyboardShortcutsToggle }: 
                   <Route path="users" element={<div>User Management (Coming Soon)</div>} />
                   <Route path="approvals" element={<div>Approval Queue (Coming Soon)</div>} />
                   <Route path="pricing" element={<AdminPricing />} />
+                  <Route path="subscriptions" element={<AdminSubscriptions />} />
                   <Route path="analytics" element={<div>Analytics (Coming Soon)</div>} />
                   <Route path="marketplace" element={<MarketplaceTab userRole="super-admin" />} />
                   <Route path="support" element={<SupportTab />} />

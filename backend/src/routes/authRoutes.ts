@@ -3,6 +3,8 @@ import bcrypt from "bcrypt";
 import jwt from "jsonwebtoken";
 import { pool } from "../config/database";
 import { logAuditEvent } from "../services/auditLogService";
+import authRequired from "../middlewares/auth";
+import { resolveSignupPlanSelection } from "../utils/signupPlan";
 
 const router = Router();
 
@@ -14,6 +16,9 @@ interface RegisterRequestBody {
   user_type: string;
   account_mode: "INDIVIDUAL" | "COMPANY";
   company_name?: string;
+  individual_plan_code?: "FREE" | "PAID";
+  signup_plan_selected_at?: string;
+  onboarding_completed?: boolean;
 }
 
 interface LoginRequestBody {
@@ -35,6 +40,14 @@ function normalizeUserType(userType: string) {
   return userType?.toLowerCase();
 }
 
+function normalizeIndividualPlanCode(
+  code?: string | null
+): "FREE" | "PAID" | null {
+  const normalized = (code ?? "").toString().trim().toUpperCase();
+  if (normalized === "FREE" || normalized === "PAID") return normalized;
+  return null;
+}
+
 // ------------------ REGISTER ------------------
 router.post("/register", async (req, res) => {
   const {
@@ -45,9 +58,21 @@ router.post("/register", async (req, res) => {
     user_type,
     account_mode,
     company_name,
+    individual_plan_code,
+    signup_plan_selected_at,
+    onboarding_completed,
   } = req.body as RegisterRequestBody;
 
   const normalizedType = normalizeUserType(user_type);
+  const planSelection = resolveSignupPlanSelection({
+    userType: normalizedType,
+    accountMode: account_mode,
+    planCode: individual_plan_code ?? null,
+  });
+  const onboardingCompleted =
+    planSelection.planCode !== null
+      ? planSelection.onboardingCompleted
+      : Boolean(onboarding_completed);
 
   try {
     const hashed = await bcrypt.hash(password, 10);
@@ -64,10 +89,13 @@ router.post("/register", async (req, res) => {
           user_type,
           account_status,
           company_name,
-          account_mode
+          account_mode,
+          individual_plan_code,
+          signup_plan_selected_at,
+          onboarding_completed
         )
-        VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
-        RETURNING id, full_name, email, user_type, company_name, account_status, account_mode`,
+        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
+        RETURNING id, full_name, email, user_type, company_name, account_status, account_mode, individual_plan_code, signup_plan_selected_at, onboarding_completed`,
       [
         full_name,
         email,
@@ -77,6 +105,9 @@ router.post("/register", async (req, res) => {
         "pending",
         companyValue,
         account_mode ?? "COMPANY",
+        planSelection.planCode,
+        planSelection.selectedAt ? planSelection.selectedAt.toISOString() : null,
+        onboardingCompleted,
       ]
     );
 
@@ -172,11 +203,31 @@ router.post("/login", async (req, res) => {
         company_name: user.company_name,
         account_status: user.account_status,
         account_mode: user.account_mode ?? "COMPANY",
+        individual_plan_code: user.individual_plan_code ?? null,
+        signup_plan_selected_at: user.signup_plan_selected_at ?? null,
+        onboarding_completed: Boolean(user.onboarding_completed),
       },
     });
   } catch (err: any) {
     console.error("login error:", err);
     res.status(500).json({ message: err?.message || "Login failed" });
+  }
+});
+
+router.post("/onboarding-complete", authRequired, async (req, res) => {
+  try {
+    const userId = (req as any)?.user?.id ? Number((req as any).user.id) : null;
+    if (!userId) {
+      return res.status(401).json({ message: "Unauthorized" });
+    }
+    await pool.query(
+      `UPDATE app_users SET onboarding_completed = TRUE, updated_at = NOW() WHERE id = $1`,
+      [userId]
+    );
+    return res.json({ success: true });
+  } catch (err: any) {
+    console.error("onboarding complete error:", err);
+    return res.status(500).json({ message: err?.message || "Failed to update onboarding status" });
   }
 });
 

@@ -1,7 +1,15 @@
 import { useEffect, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import { Card, CardContent, CardHeader, CardTitle } from "../components/ui/card";
 import { Button } from "../components/ui/button";
 import { Badge } from "../components/ui/badge";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from "../components/ui/dialog";
 import { toast } from "sonner";
 import {
   fetchBookings,
@@ -10,9 +18,14 @@ import {
 } from "../api/marketplace";
 
 export default function HaulerBookingsTab() {
+  const navigate = useNavigate();
   const [bookings, setBookings] = useState<LoadBooking[]>([]);
   const [loading, setLoading] = useState(false);
   const [busyId, setBusyId] = useState<string | null>(null);
+  const [blockDialogOpen, setBlockDialogOpen] = useState(false);
+  const [blockDialogMessage, setBlockDialogMessage] = useState(
+    "Free trip already used or active trip exists. Please upgrade your subscription."
+  );
 
   const refresh = async () => {
     try {
@@ -37,7 +50,26 @@ export default function HaulerBookingsTab() {
       toast.success(action === "accept" ? "Booking accepted" : "Booking rejected");
       refresh();
     } catch (err: any) {
-      toast.error(err?.message ?? "Failed to update booking");
+      const rawMessage: string = err?.message ?? "Failed to update booking";
+      const normalized = rawMessage.toLowerCase();
+      if (
+        normalized.includes("free trip already used") ||
+        normalized.includes("subscription_required") ||
+        normalized.includes("upgrade required")
+      ) {
+        setBlockDialogMessage(
+          "Free trip already used or active trip exists. Please upgrade your subscription."
+        );
+        setBlockDialogOpen(true);
+      } else if (normalized.includes("payment_required")) {
+        setBlockDialogMessage(
+          "Payment required to activate your Paid plan. Complete payment to continue."
+        );
+        setBlockDialogOpen(true);
+        navigate("/hauler/payment");
+      } else {
+        toast.error(rawMessage);
+      }
     } finally {
       setBusyId(null);
     }
@@ -129,6 +161,20 @@ export default function HaulerBookingsTab() {
           )}
         </CardContent>
       </Card>
+
+      <Dialog open={blockDialogOpen} onOpenChange={setBlockDialogOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Upgrade Required</DialogTitle>
+            <DialogDescription>{blockDialogMessage}</DialogDescription>
+          </DialogHeader>
+          <div className="flex justify-end">
+            <Button onClick={() => setBlockDialogOpen(false)} className="bg-[#29CA8D] hover:bg-[#24b67d]">
+              OK
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

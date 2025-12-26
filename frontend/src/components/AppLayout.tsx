@@ -31,6 +31,8 @@ import { ThemeToggle } from "./ThemeToggle";
 import { NotificationsCenter } from "./NotificationsCenter";
 import logo from "../assets/livestockway-logo.svg";
 import { storage, STORAGE_KEYS } from "../lib/storage";
+import { SubscriptionCTA } from "./SubscriptionCTA";
+import { useHaulerSubscription } from "../hooks/useHaulerSubscription";
 
 interface AppLayoutProps {
   children: React.ReactNode;
@@ -44,6 +46,16 @@ export function AppLayout({ children, userRole, onLogout }: AppLayoutProps) {
   const navigate = useNavigate();
   const location = useLocation();
   const accountMode = storage.get<string>(STORAGE_KEYS.ACCOUNT_MODE, 'COMPANY');
+  const {
+    isIndividualHauler,
+    subscriptionStatus,
+    freeTripUsed,
+    monthlyPrice,
+    yearlyPrice,
+    planCode,
+    needsPayment,
+  } =
+    useHaulerSubscription();
 
   const roleConfig = {
     hauler: {
@@ -338,7 +350,19 @@ export function AppLayout({ children, userRole, onLogout }: AppLayoutProps) {
 
         {/* Page Content */}
         <main className="flex-1 overflow-y-auto">
-          <div className="container mx-auto p-6">
+          <div className="container mx-auto p-6 space-y-4">
+            {userRole === 'hauler' &&
+              isIndividualHauler &&
+              (subscriptionStatus ?? '').toUpperCase() !== 'ACTIVE' && (
+                <SubscriptionCTA
+                  variant={freeTripUsed || needsPayment ? 'BLOCKED_UPGRADE' : 'INFO_FREE_TRIP'}
+                  monthlyPrice={monthlyPrice ?? undefined}
+                  yearlyPrice={yearlyPrice ?? undefined}
+                  onUpgradeClick={() =>
+                    navigate(needsPayment || planCode === 'PAID' ? '/hauler/payment' : '/hauler/subscription')
+                  }
+                />
+              )}
             {children}
           </div>
         </main>
