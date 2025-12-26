@@ -1027,23 +1027,6 @@ const loadUserOffer = async (load: Load, options: { silent?: boolean } = {}) => 
                           <Button
                             size="sm"
                             variant="outline"
-                            onClick={() => {
-                              setSelectedLoad(load);
-                              setIsBidOpen(true);
-                            }}
-                          >
-                            Place Bid
-                          </Button>
-                          <Button
-                            size="sm"
-                            variant="outline"
-                            onClick={() => handleViewBids(load)}
-                          >
-                            View Bids
-                          </Button>
-                          <Button
-                            size="sm"
-                            variant="outline"
                             onClick={() => openHaulerChat(load)}
                           >
                             Chat
