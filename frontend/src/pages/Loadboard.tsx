@@ -774,7 +774,48 @@ const loadUserOffer = async (load: Load, options: { silent?: boolean } = {}) => 
                     )}
                   </div>
                   <div className="text-right">
+                    {!load.isExternal && (
+                      <div className="mb-2">
+                        <div className="text-lg text-gray-900">{load.price || "—"}</div>
+                        {load.paymentMode && (
+                          <div className="text-xs text-gray-500">
+                            {load.paymentMode === "DIRECT" ? "Direct pay" : "Escrow"}
+                          </div>
+                        )}
+                      </div>
+                    )}
                     <div className="flex flex-col gap-2">
+                      {!load.isExternal && (
+                        <>
+                          <Button size="sm" onClick={() => openOfferDialog(load)}>
+                            Place Offer
+                          </Button>
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            onClick={() => {
+                              setSelectedLoad(load);
+                              setIsBidOpen(true);
+                            }}
+                          >
+                            Place Bid
+                          </Button>
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            onClick={() => handleViewBids(load)}
+                          >
+                            View Bids
+                          </Button>
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            onClick={() => openHaulerChat(load)}
+                          >
+                            Chat
+                          </Button>
+                        </>
+                      )}
                       <Button size="sm" variant="outline" onClick={() => setDetailLoad(load)}>
                         View Details
                       </Button>
