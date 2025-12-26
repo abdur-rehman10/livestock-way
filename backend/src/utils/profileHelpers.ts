@@ -31,7 +31,7 @@ export async function ensureShipperProfile(userId: number) {
 }
 
 export async function ensureHaulerProfile(userId: number) {
-  const hasHaulerType = await pool.query(
+  const hasHaulerType:any = await pool.query(
     `
       SELECT 1
       FROM information_schema.columns
@@ -40,7 +40,7 @@ export async function ensureHaulerProfile(userId: number) {
       LIMIT 1
     `
   );
-  const haulerTypeAvailable = hasHaulerType.rowCount > 0;
+  const haulerTypeAvailable = hasHaulerType? hasHaulerType?.rowCount > 0 :0;
   const existing = await pool.query(
     haulerTypeAvailable
       ? "SELECT id, hauler_type FROM haulers WHERE user_id = $1 LIMIT 1"

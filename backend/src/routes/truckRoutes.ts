@@ -35,7 +35,7 @@ type TruckNotesMeta = {
 };
 
 async function getHaulerMeta(haulerId: number) {
-  const hasHaulerType = await pool.query(
+  const hasHaulerType:any = await pool.query(
     `
       SELECT 1
       FROM information_schema.columns
@@ -44,7 +44,7 @@ async function getHaulerMeta(haulerId: number) {
       LIMIT 1
     `
   );
-  const selectHaulerType = hasHaulerType.rowCount > 0 ? "h.hauler_type" : "NULL::text";
+  const selectHaulerType = hasHaulerType?.rowCount > 0 ? "h.hauler_type" : "NULL::text";
   const { rows } = await pool.query(
     `
       SELECT

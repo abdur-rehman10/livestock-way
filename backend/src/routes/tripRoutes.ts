@@ -121,10 +121,25 @@ async function fetchRoute(
   origin: { lat: number; lon: number },
   destination: { lat: number; lon: number }
 ) {
-  const baseUrl = process.env.ROUTE_ENGINE_URL || DEFAULT_ROUTE_ENGINE_URL;
-  const url = `${baseUrl}/route/v1/driving/${origin.lon},${origin.lat};${destination.lon},${destination.lat}?overview=full&geometries=polyline6&steps=true`;
-  const response = await fetch(url, { headers: { Accept: "application/json" } });
-  if (!response.ok) return null;
+  const baseUrl = (process.env.ROUTE_ENGINE_URL || DEFAULT_ROUTE_ENGINE_URL).trim();
+  const trimmedBase = baseUrl.endsWith("/") ? baseUrl.slice(0, -1) : baseUrl;
+  const coords = `${origin.lon},${origin.lat};${destination.lon},${destination.lat}`;
+  const hasRoutePrefix = trimmedBase.includes("/route/v1/");
+  const path = hasRoutePrefix
+    ? `${trimmedBase}/${coords}`
+    : `${trimmedBase}/route/v1/driving/${coords}`;
+  const url = `${path}?overview=full&geometries=polyline6&steps=true`;
+  const response = await fetch(url, {
+    headers: {
+      Accept: "application/json",
+      "User-Agent": "livestockway-route-plan/1.0",
+    },
+  });
+  if (!response.ok) {
+    const detail = await response.text().catch(() => "");
+    console.error("OSRM route fetch failed:", response.status, detail.slice(0, 500));
+    return null;
+  }
   const data = await response.json();
   const route = data?.routes?.[0];
   if (!route) return null;
