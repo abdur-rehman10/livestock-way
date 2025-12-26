@@ -31,15 +31,29 @@ export async function ensureShipperProfile(userId: number) {
 }
 
 export async function ensureHaulerProfile(userId: number) {
+  const hasHaulerType = await pool.query(
+    `
+      SELECT 1
+      FROM information_schema.columns
+      WHERE table_name = 'haulers'
+        AND column_name = 'hauler_type'
+      LIMIT 1
+    `
+  );
+  const haulerTypeAvailable = hasHaulerType.rowCount > 0;
   const existing = await pool.query(
-    "SELECT id, hauler_type FROM haulers WHERE user_id = $1 LIMIT 1",
+    haulerTypeAvailable
+      ? "SELECT id, hauler_type FROM haulers WHERE user_id = $1 LIMIT 1"
+      : "SELECT id FROM haulers WHERE user_id = $1 LIMIT 1",
     [userId]
   );
   if (existing.rowCount) {
-    const row = existing.rows[0];
-    // backfill hauler_type if missing
-    if (!row.hauler_type) {
-      await pool.query("UPDATE haulers SET hauler_type = 'company' WHERE id = $1", [row.id]);
+    const row = existing.rows[0] as { id: number; hauler_type?: string | null };
+    if (haulerTypeAvailable && !row.hauler_type) {
+      await pool.query(
+        "UPDATE haulers SET hauler_type = 'company' WHERE id = $1",
+        [row.id]
+      );
     }
     return row.id as number;
   }
@@ -52,13 +66,19 @@ export async function ensureHaulerProfile(userId: number) {
   );
   const accountMode = (accountModeResult.rows[0]?.account_mode ?? "COMPANY").toString().toLowerCase();
   const haulerType = accountMode === "individual" ? "individual" : "company";
-
-  const inserted = await pool.query(
-    `INSERT INTO haulers (user_id, legal_name, dot_number, hauler_type)
-     VALUES ($1, $2, $3, $4)
-     RETURNING id`,
-    [userId, fallbackName, dotNumber, haulerType]
-  );
+  const inserted = haulerTypeAvailable
+    ? await pool.query(
+        `INSERT INTO haulers (user_id, legal_name, dot_number, hauler_type)
+         VALUES ($1, $2, $3, $4)
+         RETURNING id`,
+        [userId, fallbackName, dotNumber, haulerType]
+      )
+    : await pool.query(
+        `INSERT INTO haulers (user_id, legal_name, dot_number)
+         VALUES ($1, $2, $3)
+         RETURNING id`,
+        [userId, fallbackName, dotNumber]
+      );
 
   return inserted.rows[0].id as number;
 }
