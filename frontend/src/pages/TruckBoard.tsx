@@ -581,6 +581,11 @@ export default function TruckBoard() {
   };
 
   const handleStartChat = async (availabilityId: string) => {
+    const listing = listings.find((item) => item.id === availabilityId) || null;
+    if (listing?.is_external) {
+      toast.info("Chat is disabled for external listings.");
+      return;
+    }
     const interest = interestForm[availabilityId] ?? { loadId: "", message: "" };
     if (!interest.loadId.trim() && !interest.message.trim()) {
       toast.error("Select a load or enter a message to start the conversation.");
@@ -606,6 +611,10 @@ export default function TruckBoard() {
     }
     const load = selectableLoads.find((l) => String(l.id) === interest.loadId) || null;
     const listing = listings.find((l) => l.id === availabilityId) || null;
+    if (listing?.is_external) {
+      toast.info("This external listing is read-only.");
+      return;
+    }
     setRequestDialog({
       open: true,
       listing,
@@ -618,6 +627,10 @@ export default function TruckBoard() {
   const handleConfirmRequest = async () => {
     if (!requestDialog.listing || !requestDialog.load) {
       setRequestDialog((prev) => ({ ...prev, error: "Select a load to request." }));
+      return;
+    }
+    if (requestDialog.listing.is_external) {
+      setRequestDialog((prev) => ({ ...prev, error: "External listings are read-only." }));
       return;
     }
     const key = `${requestDialog.listing.id}-${requestDialog.load.id}`;
@@ -737,6 +750,7 @@ export default function TruckBoard() {
                   .join(" • ") || "Not specified";
                 const key = listingInterest.loadId ? `${listing.id}-${listingInterest.loadId}` : "";
                 const requestDisabled =
+                  listing.is_external ||
                   !listingInterest.loadId ||
                   shipperLoadsLoading ||
                   selectableLoads.length === 0 ||
@@ -747,11 +761,18 @@ export default function TruckBoard() {
                     className="border rounded-xl p-4 flex flex-col gap-3 md:flex-row md:items-start md:justify-between"
                   >
                     <div>
-                      <div className="text-sm font-medium text-gray-900">
-                        {listing.origin_location_text}
-                        {listing.destination_location_text
-                          ? ` → ${listing.destination_location_text}`
-                          : ""}
+                      <div className="text-sm font-medium text-gray-900 flex flex-wrap items-center gap-2">
+                        <span>
+                          {listing.origin_location_text}
+                          {listing.destination_location_text
+                            ? ` → ${listing.destination_location_text}`
+                            : ""}
+                        </span>
+                        {listing.is_external && (
+                          <Badge variant="outline" className="border-dashed text-gray-500">
+                            External
+                          </Badge>
+                        )}
                       </div>
                       <div className="text-xs text-gray-500">
                         Available {new Date(listing.available_from).toLocaleDateString()}
@@ -858,6 +879,7 @@ export default function TruckBoard() {
                           <Button
                             size="sm"
                             variant="outline"
+                            disabled={listing.is_external}
                             className="flex-1"
                             onClick={() => handleStartChat(listing.id)}
                           >

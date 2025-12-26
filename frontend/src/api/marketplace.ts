@@ -174,6 +174,7 @@ export interface TruckAvailability {
   destination_lat: number | null;
   destination_lng: number | null;
   is_active?: boolean;
+  is_external?: boolean;
 }
 
 export interface LoadBooking {

@@ -31,6 +31,7 @@ export interface Load {
   payment_mode?: "ESCROW" | "DIRECT";
   direct_payment_disclaimer_accepted_at?: string | null;
   direct_payment_disclaimer_version?: string | null;
+  is_external?: boolean;
 }
 
 export interface CreateLoadPayload {

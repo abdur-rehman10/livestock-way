@@ -95,6 +95,7 @@ function mapTruckRow(row: any) {
     notes: meta.notes ?? null,
     truck_name: meta.truck_name ?? null,
     species_supported: meta.species_supported ?? null,
+    is_external: row.is_external ?? false,
     created_at: row.created_at,
   };
 }
@@ -291,6 +292,7 @@ router.post(
         hazmat_permitted,
         status,
         notes,
+        is_external,
         created_at`,
       [
         haulerId,
@@ -353,6 +355,7 @@ router.get("/", requireRoles(["hauler"]), async (req: AuthedRequest, res: Respon
         hazmat_permitted,
         status,
         notes,
+        is_external,
         created_at
       FROM trucks
       WHERE hauler_id = $1 AND status <> 'inactive'
@@ -391,6 +394,7 @@ router.get("/:id", requireRoles(["hauler"]), async (req: AuthedRequest, res: Res
         hazmat_permitted,
         status,
         notes,
+        is_external,
         created_at
       FROM trucks
       WHERE id = $1`,

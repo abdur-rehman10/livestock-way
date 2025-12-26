@@ -87,6 +87,7 @@ interface Load {
   status: 'open' | 'assigned' | 'in-transit' | 'delivered';
   bids?: number;
   paymentMode?: "ESCROW" | "DIRECT";
+  isExternal?: boolean;
 }
 
 // const mockLoads: Load[] = [ ... ];
@@ -322,6 +323,10 @@ type LoadboardFilters = {
   };
 
   const openOfferDialog = async (load: Load) => {
+    if (load.isExternal) {
+      toast.info("This external load is read-only.");
+      return;
+    }
     setOfferDialogLoad(load);
     setOfferDialogExistingOffer(null);
     const preset = load.price?.replace(/[^0-9.]/g, "");
@@ -408,6 +413,10 @@ const loadUserOffer = async (load: Load, options: { silent?: boolean } = {}) => 
   };
 
   const openHaulerChat = async (load: Load) => {
+    if (load.isExternal) {
+      toast.info("Chat is disabled for external loads.");
+      return;
+    }
     setHaulerChatLoading(true);
     try {
       let offer = await loadUserOffer(load);
@@ -541,6 +550,7 @@ const loadUserOffer = async (load: Load, options: { silent?: boolean } = {}) => 
       status: normalizedStatus,
       bids: undefined,
       paymentMode: (load as any)?.payment_mode === "DIRECT" ? "DIRECT" : "ESCROW",
+      isExternal: Boolean((load as any)?.is_external),
     };
   });
 
@@ -762,16 +772,23 @@ const loadUserOffer = async (load: Load, options: { silent?: boolean } = {}) => 
                       Pickup: {load.pickupDate}
                     </p>
                     <div className="mt-2">
-                      <Badge
-                        variant="secondary"
-                        className={
-                          load.paymentMode === "DIRECT"
-                            ? "bg-amber-50 text-amber-800 border border-amber-200"
-                            : "bg-emerald-50 text-emerald-800 border border-emerald-200"
-                        }
-                      >
-                        Payment: {load.paymentMode === "DIRECT" ? "Direct" : "Escrow"}
-                      </Badge>
+                      <div className="flex flex-wrap gap-2">
+                        <Badge
+                          variant="secondary"
+                          className={
+                            load.paymentMode === "DIRECT"
+                              ? "bg-amber-50 text-amber-800 border border-amber-200"
+                              : "bg-emerald-50 text-emerald-800 border border-emerald-200"
+                          }
+                        >
+                          Payment: {load.paymentMode === "DIRECT" ? "Direct" : "Escrow"}
+                        </Badge>
+                        {load.isExternal && (
+                          <Badge variant="outline" className="border-dashed text-gray-500">
+                            External
+                          </Badge>
+                        )}
+                      </div>
                     </div>
                   </div>
                   <div className="text-right">
@@ -784,6 +801,7 @@ const loadUserOffer = async (load: Load, options: { silent?: boolean } = {}) => 
                           <Button
                             size="sm"
                             variant="outline"
+                            disabled={load.isExternal}
                             onClick={() => void openOfferDialog(load)}
                           >
                             Place Offer
@@ -791,6 +809,7 @@ const loadUserOffer = async (load: Load, options: { silent?: boolean } = {}) => 
                           <Button
                             size="sm"
                             variant="ghost"
+                            disabled={load.isExternal}
                             onClick={() => openHaulerChat(load)}
                           >
                             <MessageSquare className="mr-1 h-4 w-4" />
