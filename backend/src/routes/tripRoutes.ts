@@ -1400,6 +1400,16 @@ router.post(
     }
 
     const tripRow = tripResult.rows[0];
+    console.log("route-plan: trip row", {
+      tripId: tripRow.id,
+      pickup_location_text: tripRow.pickup_location_text,
+      dropoff_location_text: tripRow.dropoff_location_text,
+      pickup_lat: tripRow.pickup_lat,
+      pickup_lng: tripRow.pickup_lng,
+      dropoff_lat: tripRow.dropoff_lat,
+      dropoff_lng: tripRow.dropoff_lng,
+      route_distance_km: tripRow.route_distance_km,
+    });
     let origin =
       tripRow.pickup_lat && tripRow.pickup_lng
         ? { lat: Number(tripRow.pickup_lat), lon: Number(tripRow.pickup_lng) }
@@ -1410,21 +1420,30 @@ router.post(
         : null;
 
     if (!origin && tripRow.pickup_location_text) {
+      console.log("route-plan: geocoding origin");
       origin = await geocodeAddress(tripRow.pickup_location_text);
     }
     if (!destination && tripRow.dropoff_location_text) {
+      console.log("route-plan: geocoding destination");
       destination = await geocodeAddress(tripRow.dropoff_location_text);
     }
 
+    console.log("route-plan: resolved coords", { origin, destination });
     if (!origin || !destination) {
       return res.status(400).json({ message: "Missing origin/destination coordinates" });
     }
 
+    console.log("route-plan: fetching route");
     const route = await fetchRoute(origin, destination);
     if (!route) {
       return res.status(502).json({ message: "Failed to fetch route" });
     }
 
+    console.log("route-plan: route ok", {
+      distance_km: route.distance_km,
+      duration_min: route.duration_min,
+      has_geometry: Boolean(route.geometry),
+    });
     const restStopPlan = buildRestStopPlan(route.distance_km ?? tripRow.route_distance_km ?? null);
     const { directionsUrl, mapUrl } = buildMapUrls(origin, destination);
     const bboxes = buildSegmentBboxes(
@@ -1432,7 +1451,12 @@ router.post(
       destination,
       route.distance_km ?? tripRow.route_distance_km ?? null
     );
+    console.log("route-plan: overpass bboxes", { count: bboxes.length });
     const { washouts, feedStops } = await fetchOverpassPoisForBboxes(bboxes, origin);
+    console.log("route-plan: overpass results", {
+      washouts: washouts.length,
+      feedStops: feedStops.length,
+    });
 
     const planPayload = {
       distance_km: route.distance_km,
