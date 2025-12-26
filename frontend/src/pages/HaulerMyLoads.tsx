@@ -31,6 +31,8 @@ import {
   DialogHeader,
   DialogTitle,
 } from "../components/ui/dialog";
+import { SubscriptionCTA } from "../components/SubscriptionCTA";
+import { useHaulerSubscription } from "../hooks/useHaulerSubscription";
 import { Textarea } from "../components/ui/textarea";
 import { Separator } from "../components/ui/separator";
 import {
@@ -118,6 +120,7 @@ export default function HaulerMyLoads() {
   const [busyId, setBusyId] = useState<number | null>(null);
   const [epodFile, setEpodFile] = useState<Record<number, File | null>>({});
   const [filter, setFilter] = useState<FilterOption>("all");
+  const { data: subscriptionState } = useHaulerSubscription();
   const [confirmDialog, setConfirmDialog] = useState<ConfirmDialogState>({
     open: false,
     type: null,
@@ -522,6 +525,17 @@ useEffect(() => {
         {!filteredLoads.length ? (
           <div className="py-12 text-center text-sm text-slate-500">
             No loads match this filter.
+            {subscriptionState?.hauler_type === "INDIVIDUAL" &&
+              subscriptionState.subscription_status !== "ACTIVE" && (
+                <div className="mt-4 flex justify-center">
+                  <SubscriptionCTA
+                    variant="REMINDER"
+                    monthlyPrice={subscriptionState.monthly_price ?? subscriptionState.current_individual_monthly_price ?? undefined}
+                    yearlyPrice={subscriptionState.yearly_price ?? (subscriptionState.monthly_price ?? subscriptionState.current_individual_monthly_price ? Number((((subscriptionState.monthly_price ?? subscriptionState.current_individual_monthly_price) as number) * 10).toFixed(2)) : undefined)}
+                    onUpgradeClick={() => navigate("/hauler/subscription")}
+                  />
+                </div>
+              )}
           </div>
         ) : (
           filteredLoads.map((load) => {

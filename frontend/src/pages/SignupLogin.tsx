@@ -1,16 +1,19 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { Button } from '../components/ui/button';
 import { Input } from '../components/ui/input';
 import { Label } from '../components/ui/label';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '../components/ui/tabs';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../components/ui/card';
+import { Card, CardContent, CardHeader } from '../components/ui/card';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../components/ui/select';
 import { Switch } from '../components/ui/switch';
 import { Truck, Home, Wrench, Eye, EyeOff, Check, X, User, Shield, ArrowLeft } from 'lucide-react';
 import { Progress } from '../components/ui/progress';
 import { storage, STORAGE_KEYS } from '../lib/storage';
 import { AddressSearch, type MappedAddress } from '../components/AddressSearch';
+import IndividualPlanChooseView from '../components/IndividualPlanChooseView';
+
+type PlanCode = 'FREE' | 'PAID';
 
 interface SignupLoginProps {
   preselectedRole?: 'hauler' | 'shipper' | 'stakeholder' | 'driver' | 'super-admin';
@@ -56,6 +59,8 @@ export default function SignupLogin({ preselectedRole, onAuth, onForgotPassword,
   const [companyAddressCoords, setCompanyAddressCoords] = useState<{ lat: string; lon: string } | null>(null);
   const [signupError, setSignupError] = useState<string | null>(null);
   const [signupLoading, setSignupLoading] = useState(false);
+  const [signupStep, setSignupStep] = useState<'info' | 'plan'>('info');
+  const [selectedPlan, setSelectedPlan] = useState<PlanCode>('FREE');
 
   const roleRedirects: Record<string, string> = {
     hauler: '/hauler/dashboard',
@@ -63,10 +68,14 @@ export default function SignupLogin({ preselectedRole, onAuth, onForgotPassword,
     stakeholder: '/stakeholder/dashboard',
   };
 
-  const navigateToRole = (userRole: string) => {
+  const navigateToRole = (userRole: string, planCodeOverride?: 'FREE' | 'PAID' | null) => {
     const normalizedRole = userRole.toLowerCase();
     onAuth?.(normalizedRole as any);
-    const target = roleRedirects[normalizedRole] || '/';
+    let target = roleRedirects[normalizedRole] || '/';
+    const effectivePlan = (planCodeOverride ?? selectedPlan)?.toUpperCase();
+    if (normalizedRole === 'hauler' && effectivePlan === 'PAID') {
+      target = '/hauler/payment';
+    }
     navigate(target, { replace: true });
   };
   
@@ -88,12 +97,11 @@ export default function SignupLogin({ preselectedRole, onAuth, onForgotPassword,
     return 'Strong';
   };
 
-  const getStrengthColor = () => {
-    if (passwordStrength <= 25) return 'bg-red-500';
-    if (passwordStrength <= 50) return 'bg-orange-500';
-    if (passwordStrength <= 75) return 'bg-yellow-500';
-    return 'bg-green-500';
-  };
+  useEffect(() => {
+    if (signupStep === 'plan' && (mode !== 'signup' || role !== 'hauler' || isCompany)) {
+      setSignupStep('info');
+    }
+  }, [signupStep, mode, role, isCompany]);
 
   const handleLoginSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -133,6 +141,7 @@ export default function SignupLogin({ preselectedRole, onAuth, onForgotPassword,
       const userRole: string = data?.user?.user_type;
       const userId: string | number | undefined = data?.user?.id;
       const accountMode: string = data?.user?.account_mode || 'COMPANY';
+      const planCode: PlanCode | null = data?.user?.individual_plan_code ?? null;
 
       if (!token || !userRole) {
         throw new Error('Invalid response from server');
@@ -141,11 +150,12 @@ export default function SignupLogin({ preselectedRole, onAuth, onForgotPassword,
       localStorage.setItem('token', token);
       localStorage.setItem('role', userRole);
       storage.set(STORAGE_KEYS.ACCOUNT_MODE, accountMode);
+      storage.set(STORAGE_KEYS.INDIVIDUAL_PLAN_CODE, planCode);
       if (userId !== undefined && userId !== null) {
         storage.set(STORAGE_KEYS.USER_ID, String(userId));
       }
 
-      navigateToRole(userRole);
+      navigateToRole(userRole, planCode);
     } catch (err: any) {
       setLoginError(err?.message || 'Login failed');
     } finally {
@@ -155,18 +165,32 @@ export default function SignupLogin({ preselectedRole, onAuth, onForgotPassword,
 
   const handleSignupSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (password !== confirmPassword) {
-      alert('Passwords do not match');
-      return;
-    }
-    if (passwordStrength < 50) {
-      alert('Please use a stronger password');
-      return;
+    if (signupStep === 'info') {
+      if (password !== confirmPassword) {
+        alert('Passwords do not match');
+        return;
+      }
+      if (passwordStrength < 50) {
+        alert('Please use a stronger password');
+        return;
+      }
+      const requiresPlan = role === 'hauler' && !isCompany;
+      if (requiresPlan) {
+        setSignupStep('plan');
+        return;
+      }
     }
 
+    await submitSignup();
+  };
+
+  const submitSignup = async (planOverride?: PlanCode) => {
     try {
       setSignupError(null);
       setSignupLoading(true);
+
+      const planToUse: PlanCode | undefined =
+        !isCompany && role === 'hauler' ? planOverride ?? selectedPlan ?? 'FREE' : undefined;
 
       const payload = {
         full_name: name,
@@ -176,6 +200,7 @@ export default function SignupLogin({ preselectedRole, onAuth, onForgotPassword,
         user_type: role,
         account_mode: isCompany ? 'COMPANY' : 'INDIVIDUAL',
         company_name: isCompany ? companyName : undefined,
+        individual_plan_code: planToUse,
       };
 
       const res = await fetch('/api/auth/register', {
@@ -202,6 +227,9 @@ export default function SignupLogin({ preselectedRole, onAuth, onForgotPassword,
       const userRole: string = data?.user?.user_type;
       const userId: string | number | undefined = data?.user?.id;
       const accountMode: string = data?.user?.account_mode || payload.account_mode || 'COMPANY';
+      const planCode: PlanCode | null =
+        data?.user?.individual_plan_code ??
+        (payload.account_mode === 'INDIVIDUAL' ? planToUse ?? null : null);
 
       if (!token || !userRole) {
         throw new Error('Invalid response from server');
@@ -210,16 +238,24 @@ export default function SignupLogin({ preselectedRole, onAuth, onForgotPassword,
       localStorage.setItem('token', token);
       localStorage.setItem('role', userRole);
       storage.set(STORAGE_KEYS.ACCOUNT_MODE, accountMode);
+      storage.set(STORAGE_KEYS.INDIVIDUAL_PLAN_CODE, planCode);
       if (userId !== undefined && userId !== null) {
         storage.set(STORAGE_KEYS.USER_ID, String(userId));
       }
 
-      navigateToRole(userRole);
+      setSelectedPlan(planToUse ?? selectedPlan);
+      navigateToRole(userRole, planCode ?? planToUse ?? null);
     } catch (err: any) {
       setSignupError(err?.message || 'Signup failed');
     } finally {
       setSignupLoading(false);
     }
+  };
+
+  const handlePlanContinue = async (planCode: PlanCode) => {
+    if (signupLoading) return;
+    setSelectedPlan(planCode);
+    await submitSignup(planCode);
   };
 
   const roles = [
@@ -235,9 +271,25 @@ export default function SignupLogin({ preselectedRole, onAuth, onForgotPassword,
     return roleData?.color || '#29CA8D';
   };
 
+  if (mode === 'signup' && signupStep === 'plan' && role === 'hauler' && !isCompany) {
+    return (
+      <IndividualPlanChooseView
+        variant="auth"
+        defaultSelected={selectedPlan}
+        onSelectChange={(code) => setSelectedPlan(code)}
+        onContinue={handlePlanContinue}
+        onBack={() => setSignupStep('info')}
+        continueDisabled={signupLoading}
+        getCtaConfig={(plan) =>
+          signupLoading ? { label: "Processing...", disabled: true } : {}
+        }
+      />
+    );
+  }
+
   return (
-    <div className="min-h-screen bg-gradient-to-br from-[#D1D5DB] to-white flex items-center justify-center p-4">
-      <div className="w-full max-w-md">
+    <div className="min-h-screen bg-gradient-to-b from-[#eef2f5] via-[#f5f7f9] to-white flex items-center justify-center p-6 md:p-10">
+      <div className={`w-full mx-auto ${mode === 'signup' && signupStep === 'plan' ? 'max-w-5xl' : 'max-w-md'}`}>
         {/* Back Button */}
         <Button
           variant="ghost"
@@ -260,7 +312,7 @@ export default function SignupLogin({ preselectedRole, onAuth, onForgotPassword,
         </div>
 
         {/* Main Card */}
-        <Card>
+        <Card className="w-full rounded-2xl shadow-md border border-slate-200">
           <CardHeader>
             <Tabs value={mode} onValueChange={(v) => setMode(v as 'login' | 'signup')}>
               <TabsList className="grid w-full grid-cols-2">
@@ -391,224 +443,230 @@ export default function SignupLogin({ preselectedRole, onAuth, onForgotPassword,
             ) : (
               /* SIGNUP FORM */
               <form onSubmit={handleSignupSubmit} className="space-y-4">
-                {/* Role Selection */}
-                <div className="space-y-2">
-                  <Label>I am a...</Label>
-                  <Select value={role} onValueChange={(v) => setRole(v as any)}>
-                    <SelectTrigger>
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {roles.map((r) => {
-                        const Icon = r.icon;
-                        return (
-                          <SelectItem key={r.id} value={r.id}>
-                            <div className="flex items-center gap-2">
-                              <Icon className="w-4 h-4" style={{ color: r.color }} />
-                              {r.label}
+                {signupStep === 'info' && (
+                  <>
+                    {/* Role Selection */}
+                    <div className="space-y-2">
+                      <Label>I am a...</Label>
+                      <Select value={role} onValueChange={(v) => setRole(v as any)}>
+                        <SelectTrigger>
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {roles.map((r) => {
+                            const Icon = r.icon;
+                            return (
+                              <SelectItem key={r.id} value={r.id}>
+                                <div className="flex items-center gap-2">
+                                  <Icon className="w-4 h-4" style={{ color: r.color }} />
+                                  {r.label}
+                                </div>
+                              </SelectItem>
+                            );
+                          })}
+                        </SelectContent>
+                      </Select>
+                    </div>
+
+                    {/* Company Toggle */}
+                    <div className="flex items-center justify-between p-3 bg-muted rounded-lg">
+                      <div className="flex-1">
+                        <Label htmlFor="company-toggle" className="cursor-pointer">
+                          Register as company
+                        </Label>
+                        <p className="text-xs text-muted-foreground">
+                          For businesses and organizations
+                        </p>
+                      </div>
+                      <Switch
+                        id="company-toggle"
+                        checked={isCompany}
+                        onCheckedChange={setIsCompany}
+                      />
+                    </div>
+
+                    {/* Company Fields */}
+                    {isCompany && (
+                      <div className="space-y-3 p-3 bg-muted/50 rounded-lg border">
+                        <div className="space-y-2">
+                          <Label htmlFor="company-name">Company Name *</Label>
+                          <Input
+                            id="company-name"
+                            placeholder="Acme Livestock Transport"
+                            value={companyName}
+                            onChange={(e) => setCompanyName(e.target.value)}
+                            required={isCompany}
+                          />
+                        </div>
+
+                        <div className="space-y-2">
+                          <Label htmlFor="business-id">Business ID / Tax ID *</Label>
+                          <Input
+                            id="business-id"
+                            placeholder="XX-XXXXXXX"
+                            value={businessId}
+                            onChange={(e) => setBusinessId(e.target.value)}
+                            required={isCompany}
+                          />
+                        </div>
+
+                        <div className="space-y-2">
+                          <Label htmlFor="company-address">Business Address *</Label>
+                          <AddressSearch
+                            value={companyAddressSearch}
+                            onChange={setCompanyAddressSearch}
+                            onSelect={(mapped: MappedAddress) => {
+                              setCompanyAddressSearch(mapped.fullText);
+                              setCompanyAddress(mapped.fullText);
+                              setCompanyAddressCoords({ lat: mapped.lat, lon: mapped.lon });
+                            }}
+                          />
+                          <Input
+                            id="company-address"
+                            placeholder="123 Main St, City, State ZIP"
+                            value={companyAddress}
+                            onChange={(e) => setCompanyAddress(e.target.value)}
+                            required={isCompany}
+                          />
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Personal Info */}
+                    <div className="space-y-2">
+                      <Label htmlFor="name">Full Name *</Label>
+                      <Input
+                        id="name"
+                        placeholder="John Doe"
+                        value={name}
+                        onChange={(e) => setName(e.target.value)}
+                        required
+                      />
+                    </div>
+
+                    {/* Contact Method */}
+                    <Tabs value={authMethod} onValueChange={(v) => setAuthMethod(v as 'email' | 'phone')}>
+                      <TabsList className="grid w-full grid-cols-2">
+                        <TabsTrigger value="email">Email</TabsTrigger>
+                        <TabsTrigger value="phone">Phone</TabsTrigger>
+                      </TabsList>
+
+                      <TabsContent value="email" className="space-y-2 mt-3">
+                        <Label htmlFor="email">Email Address *</Label>
+                        <Input
+                          id="email"
+                          type="email"
+                          placeholder="you@example.com"
+                          value={email}
+                          onChange={(e) => setEmail(e.target.value)}
+                          required
+                        />
+                      </TabsContent>
+
+                      <TabsContent value="phone" className="space-y-2 mt-3">
+                        <Label htmlFor="phone">Phone Number *</Label>
+                        <Input
+                          id="phone"
+                          type="tel"
+                          placeholder="+1 (555) 000-0000"
+                          value={phone}
+                          onChange={(e) => setPhone(e.target.value)}
+                          required
+                        />
+                      </TabsContent>
+                    </Tabs>
+
+                    {/* Password */}
+                    <div className="space-y-2">
+                      <Label htmlFor="password">Password *</Label>
+                      <div className="relative">
+                        <Input
+                          id="password"
+                          type={showPassword ? 'text' : 'password'}
+                          placeholder="Create a strong password"
+                          value={password}
+                          onChange={(e) => setPassword(e.target.value)}
+                          required
+                        />
+                        <button
+                          type="button"
+                          onClick={() => setShowPassword(!showPassword)}
+                          className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
+                        >
+                          {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                        </button>
+                      </div>
+                      
+                      {/* Password Strength Indicator */}
+                      {password && (
+                        <div className="space-y-1">
+                          <div className="flex items-center justify-between text-xs">
+                            <span className="text-muted-foreground">Password strength:</span>
+                            <span className={passwordStrength >= 75 ? 'text-green-600' : passwordStrength >= 50 ? 'text-yellow-600' : 'text-red-600'}>
+                              {getStrengthLabel()}
+                            </span>
+                          </div>
+                          <Progress value={passwordStrength} className="h-1" />
+                          <div className="text-xs text-muted-foreground space-y-1">
+                            <div className="flex items-center gap-1">
+                              {password.length >= 8 ? <Check className="w-3 h-3 text-green-600" /> : <X className="w-3 h-3 text-gray-400" />}
+                              <span>At least 8 characters</span>
                             </div>
-                          </SelectItem>
-                        );
-                      })}
-                    </SelectContent>
-                  </Select>
-                </div>
-
-                {/* Company Toggle */}
-                <div className="flex items-center justify-between p-3 bg-muted rounded-lg">
-                  <div className="flex-1">
-                    <Label htmlFor="company-toggle" className="cursor-pointer">
-                      Register as company
-                    </Label>
-                    <p className="text-xs text-muted-foreground">
-                      For businesses and organizations
-                    </p>
-                  </div>
-                  <Switch
-                    id="company-toggle"
-                    checked={isCompany}
-                    onCheckedChange={setIsCompany}
-                  />
-                </div>
-
-                {/* Company Fields */}
-                {isCompany && (
-                  <div className="space-y-3 p-3 bg-muted/50 rounded-lg border">
-                    <div className="space-y-2">
-                      <Label htmlFor="company-name">Company Name *</Label>
-                      <Input
-                        id="company-name"
-                        placeholder="Acme Livestock Transport"
-                        value={companyName}
-                        onChange={(e) => setCompanyName(e.target.value)}
-                        required={isCompany}
-                      />
+                            <div className="flex items-center gap-1">
+                              {/[A-Z]/.test(password) && /[a-z]/.test(password) ? <Check className="w-3 h-3 text-green-600" /> : <X className="w-3 h-3 text-gray-400" />}
+                              <span>Upper & lowercase letters</span>
+                            </div>
+                            <div className="flex items-center gap-1">
+                              {/[0-9]/.test(password) ? <Check className="w-3 h-3 text-green-600" /> : <X className="w-3 h-3 text-gray-400" />}
+                              <span>At least one number</span>
+                            </div>
+                          </div>
+                        </div>
+                      )}
                     </div>
 
+                    {/* Confirm Password */}
                     <div className="space-y-2">
-                      <Label htmlFor="business-id">Business ID / Tax ID *</Label>
+                      <Label htmlFor="confirm-password">Confirm Password *</Label>
                       <Input
-                        id="business-id"
-                        placeholder="XX-XXXXXXX"
-                        value={businessId}
-                        onChange={(e) => setBusinessId(e.target.value)}
-                        required={isCompany}
+                        id="confirm-password"
+                        type="password"
+                        placeholder="Re-enter your password"
+                        value={confirmPassword}
+                        onChange={(e) => setConfirmPassword(e.target.value)}
+                        required
                       />
+                      {confirmPassword && (
+                        <p className={`text-xs ${password === confirmPassword ? 'text-green-600' : 'text-red-600'}`}>
+                          {password === confirmPassword ? '✓ Passwords match' : '✗ Passwords do not match'}
+                        </p>
+                      )}
                     </div>
 
-                    <div className="space-y-2">
-                      <Label htmlFor="company-address">Business Address *</Label>
-                      <AddressSearch
-                        value={companyAddressSearch}
-                        onChange={setCompanyAddressSearch}
-                        onSelect={(mapped: MappedAddress) => {
-                          setCompanyAddressSearch(mapped.fullText);
-                          setCompanyAddress(mapped.fullText);
-                          setCompanyAddressCoords({ lat: mapped.lat, lon: mapped.lon });
-                        }}
-                      />
-                      <Input
-                        id="company-address"
-                        placeholder="123 Main St, City, State ZIP"
-                        value={companyAddress}
-                        onChange={(e) => setCompanyAddress(e.target.value)}
-                        required={isCompany}
-                      />
-                    </div>
-                  </div>
-                )}
+                    {signupError && (
+                      <p className="text-sm text-red-600">{signupError}</p>
+                    )}
 
-                {/* Personal Info */}
-                <div className="space-y-2">
-                  <Label htmlFor="name">Full Name *</Label>
-                  <Input
-                    id="name"
-                    placeholder="John Doe"
-                    value={name}
-                    onChange={(e) => setName(e.target.value)}
-                    required
-                  />
-                </div>
-
-                {/* Contact Method */}
-                <Tabs value={authMethod} onValueChange={(v) => setAuthMethod(v as 'email' | 'phone')}>
-                  <TabsList className="grid w-full grid-cols-2">
-                    <TabsTrigger value="email">Email</TabsTrigger>
-                    <TabsTrigger value="phone">Phone</TabsTrigger>
-                  </TabsList>
-
-                  <TabsContent value="email" className="space-y-2 mt-3">
-                    <Label htmlFor="email">Email Address *</Label>
-                    <Input
-                      id="email"
-                      type="email"
-                      placeholder="you@example.com"
-                      value={email}
-                      onChange={(e) => setEmail(e.target.value)}
-                      required
-                    />
-                  </TabsContent>
-
-                  <TabsContent value="phone" className="space-y-2 mt-3">
-                    <Label htmlFor="phone">Phone Number *</Label>
-                    <Input
-                      id="phone"
-                      type="tel"
-                      placeholder="+1 (555) 000-0000"
-                      value={phone}
-                      onChange={(e) => setPhone(e.target.value)}
-                      required
-                    />
-                  </TabsContent>
-                </Tabs>
-
-                {/* Password */}
-                <div className="space-y-2">
-                  <Label htmlFor="password">Password *</Label>
-                  <div className="relative">
-                    <Input
-                      id="password"
-                      type={showPassword ? 'text' : 'password'}
-                      placeholder="Create a strong password"
-                      value={password}
-                      onChange={(e) => setPassword(e.target.value)}
-                      required
-                    />
-                    <button
-                      type="button"
-                      onClick={() => setShowPassword(!showPassword)}
-                      className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
+                    <Button 
+                      type="submit" 
+                      className="w-full" 
+                      size="lg"
+                      disabled={signupLoading}
+                      style={{ backgroundColor: getRoleColor(role) }}
                     >
-                      {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-                    </button>
-                  </div>
-                  
-                  {/* Password Strength Indicator */}
-                  {password && (
-                    <div className="space-y-1">
-                      <div className="flex items-center justify-between text-xs">
-                        <span className="text-muted-foreground">Password strength:</span>
-                        <span className={passwordStrength >= 75 ? 'text-green-600' : passwordStrength >= 50 ? 'text-yellow-600' : 'text-red-600'}>
-                          {getStrengthLabel()}
-                        </span>
-                      </div>
-                      <Progress value={passwordStrength} className="h-1" />
-                      <div className="text-xs text-muted-foreground space-y-1">
-                        <div className="flex items-center gap-1">
-                          {password.length >= 8 ? <Check className="w-3 h-3 text-green-600" /> : <X className="w-3 h-3 text-gray-400" />}
-                          <span>At least 8 characters</span>
-                        </div>
-                        <div className="flex items-center gap-1">
-                          {/[A-Z]/.test(password) && /[a-z]/.test(password) ? <Check className="w-3 h-3 text-green-600" /> : <X className="w-3 h-3 text-gray-400" />}
-                          <span>Upper & lowercase letters</span>
-                        </div>
-                        <div className="flex items-center gap-1">
-                          {/[0-9]/.test(password) ? <Check className="w-3 h-3 text-green-600" /> : <X className="w-3 h-3 text-gray-400" />}
-                          <span>At least one number</span>
-                        </div>
-                      </div>
-                    </div>
-                  )}
-                </div>
-
-                {/* Confirm Password */}
-                <div className="space-y-2">
-                  <Label htmlFor="confirm-password">Confirm Password *</Label>
-                  <Input
-                    id="confirm-password"
-                    type="password"
-                    placeholder="Re-enter your password"
-                    value={confirmPassword}
-                    onChange={(e) => setConfirmPassword(e.target.value)}
-                    required
-                  />
-                  {confirmPassword && (
-                    <p className={`text-xs ${password === confirmPassword ? 'text-green-600' : 'text-red-600'}`}>
-                      {password === confirmPassword ? '✓ Passwords match' : '✗ Passwords do not match'}
-                    </p>
-                  )}
-                </div>
-
-                {signupError && (
-                  <p className="text-sm text-red-600">{signupError}</p>
+                      {role === 'hauler' && !isCompany ? 'Continue to Choose Plan' : signupLoading ? 'Creating account...' : 'Create Account'}
+                    </Button>
+                  </>
                 )}
 
-                <Button 
-                  type="submit" 
-                  className="w-full" 
-                  size="lg"
-                  disabled={signupLoading}
-                  style={{ backgroundColor: getRoleColor(role) }}
-                >
-                  {signupLoading ? 'Creating account...' : 'Create Account'}
-                </Button>
-
-                <p className="text-xs text-center text-muted-foreground">
-                  By signing up, you agree to our{' '}
-                  <button className="text-[#29CA8D] hover:underline">Terms</button>
-                  {' '}and{' '}
-                  <button className="text-[#29CA8D] hover:underline">Privacy Policy</button>
-                </p>
+                {signupStep === 'info' && (
+                  <p className="text-xs text-center text-muted-foreground">
+                    By signing up, you agree to our{' '}
+                    <button className="text-[#29CA8D] hover:underline">Terms</button>
+                    {' '}and{' '}
+                    <button className="text-[#29CA8D] hover:underline">Privacy Policy</button>
+                  </p>
+                )}
               </form>
             )}
           </CardContent>

@@ -6,10 +6,30 @@ import {
   mapOfferRow,
   mapTripRow,
   mapTripDirectPaymentRow,
+  HaulerSubscriptionStatus,
+  assertFreeTripEligibility,
+  shouldConsumeFreeTrip,
 } from "../services/marketplaceService";
 import { assertLoadboardAccess } from "../routes/loadboardRoutes";
 import { resolveDirectPaymentReceipt } from "../utils/directPaymentReceipt";
-import { validateCompanyPricingInput } from "../utils/pricing";
+import {
+  validateCompanyPricingInput,
+  validateIndividualPackageUpdateInput,
+} from "../utils/pricing";
+import { buildIndividualPackagesResponse } from "../routes/pricingRoutes";
+import { resolveSignupPlanSelection } from "../utils/signupPlan";
+import {
+  mapHaulerSubscriptionResponse,
+  assertHaulerUser,
+  assertIndividualHaulerType,
+  assertPricingConfigPresent,
+  computeNextPeriodEnd,
+  computeChargeAndPeriod,
+  resolveBillingCycle,
+  isSubscriptionActive,
+} from "../routes/haulerRoutes";
+import { computePayingStatus, isSuperAdminUser } from "../routes/adminRoutes";
+import { assertOfferSubscriptionEligibility as assertOfferSubscriptionEligibilityRoute } from "../routes/marketplaceRoutes";
 
 function test(name: string, fn: () => void) {
   try {
@@ -248,6 +268,122 @@ test("pricing validation accepts valid tiers", () => {
   assert.equal(tiers[2]?.is_enterprise, true);
 });
 
+test("individual package validation rejects non-admin", () => {
+  assert.throws(() =>
+    validateIndividualPackageUpdateInput("hauler", "FREE", {
+      name: "Free",
+      features: {
+        feature_list: ["a"],
+        trip_tracking_limit: 1,
+        documents_validation_limit: 1,
+        outside_trips_limit: 3,
+      },
+    })
+  );
+});
+
+test("individual package validation accepts FREE with required limits", () => {
+  const result = validateIndividualPackageUpdateInput("super-admin", "FREE", {
+    name: "Free",
+    description: "desc",
+    features: {
+      feature_list: ["Track up to 1 trip", "Validate 1 set of documents", "Up to 3 outside trips"],
+      trip_tracking_limit: 1,
+      documents_validation_limit: 1,
+      outside_trips_limit: 3,
+    },
+  });
+  assert.equal(result.code, "FREE");
+  assert.equal(result.name, "Free");
+});
+
+test("individual package validation rejects unknown code", () => {
+  assert.throws(() =>
+    validateIndividualPackageUpdateInput("super-admin", "BASIC", {
+      name: "Basic",
+      features: { feature_list: ["x"] },
+    })
+  );
+});
+
+test("individual package validation rejects missing FREE limits", () => {
+  assert.throws(() =>
+    validateIndividualPackageUpdateInput("super-admin", "FREE", {
+      name: "Free",
+      features: {
+        feature_list: ["x"],
+        trip_tracking_limit: 0,
+        documents_validation_limit: 1,
+        outside_trips_limit: 3,
+      },
+    })
+  );
+});
+
+test("individual packages response computes yearly price and returns both packages", () => {
+  const mockPackages = [
+    {
+      id: 1,
+      code: "FREE",
+      name: "Free",
+      description: "free tier",
+      features: { feature_list: ["a"] },
+      is_active: true,
+      created_at: "2024-01-01T00:00:00Z",
+      updated_at: "2024-01-01T00:00:00Z",
+    },
+    {
+      id: 2,
+      code: "PAID",
+      name: "Paid",
+      description: "paid tier",
+      features: { feature_list: ["b"] },
+      is_active: true,
+      created_at: "2024-01-01T00:00:00Z",
+      updated_at: "2024-01-01T00:00:00Z",
+    },
+  ];
+  const result = buildIndividualPackagesResponse(mockPackages as any, 70);
+  assert.equal(result.packages.length, 2);
+  assert.equal(result.paid_monthly_price, 70);
+  assert.equal(result.paid_yearly_price, 700);
+});
+
+test("individual signup without plan is rejected", () => {
+  assert.throws(
+    () =>
+      resolveSignupPlanSelection({
+        userType: "hauler",
+        accountMode: "INDIVIDUAL",
+        planCode: null,
+      }),
+    (err: any) =>
+      err?.status === 400 &&
+      /individual_plan_code is required/i.test(err.message)
+  );
+});
+
+test("FREE signup marks onboarding completed", () => {
+  const result = resolveSignupPlanSelection({
+    userType: "hauler",
+    accountMode: "INDIVIDUAL",
+    planCode: "FREE",
+  });
+  assert.equal(result.planCode, "FREE");
+  assert.equal(result.onboardingCompleted, true);
+  assert.ok(result.selectedAt instanceof Date);
+});
+
+test("PAID signup leaves onboarding incomplete", () => {
+  const result = resolveSignupPlanSelection({
+    userType: "hauler",
+    accountMode: "INDIVIDUAL",
+    planCode: "PAID",
+  });
+  assert.equal(result.planCode, "PAID");
+  assert.equal(result.onboardingCompleted, false);
+});
+
 test("direct trip completion succeeds with receipt", () => {
   const receipt = resolveDirectPaymentReceipt("DIRECT", {
     received_amount: 100,
@@ -271,6 +407,244 @@ test("escrow trip ignores receipt fields", () => {
   );
   const receipt = resolveDirectPaymentReceipt("ESCROW", {});
   assert.equal(receipt, null);
+});
+
+test("maps individual hauler subscription response", () => {
+  const payload = mapHaulerSubscriptionResponse(
+    {
+      hauler_type: "individual",
+      free_trip_used: true,
+      free_trip_used_at: "2024-02-01T00:00:00Z",
+      subscription_status: "active",
+      subscription_current_period_end: "2024-03-01T00:00:00Z",
+      billing_cycle: "YEARLY",
+    },
+    70
+  );
+  assert.equal(payload.hauler_type, "INDIVIDUAL");
+  assert.equal(payload.free_trip_used, true);
+  assert.equal(payload.subscription_status, "ACTIVE" as HaulerSubscriptionStatus);
+  assert.equal(payload.subscription_current_period_end, "2024-03-01T00:00:00Z");
+  assert.equal(payload.current_individual_monthly_price, 70);
+  assert.equal(payload.monthly_price, 70);
+  assert.equal(payload.yearly_price, 700);
+  assert.ok(payload.yearly_note?.includes("2 months free"));
+  assert.equal(payload.billing_cycle, "YEARLY");
+  assert.equal(payload.note, undefined);
+});
+
+test("company hauler subscription response includes note", () => {
+  const payload = mapHaulerSubscriptionResponse(
+    {
+      hauler_type: "company",
+      free_trip_used: false,
+      subscription_status: "none",
+      subscription_current_period_end: null,
+    },
+    null
+  );
+  assert.equal(payload.hauler_type, "COMPANY");
+  assert.equal(payload.subscription_status, "NONE" as HaulerSubscriptionStatus);
+  assert.ok(payload.note?.includes("Company subscription plan"));
+});
+
+test("assertHaulerUser blocks non-hauler roles", () => {
+  assert.throws(() => assertHaulerUser({ user_type: "shipper" }));
+  assert.doesNotThrow(() => assertHaulerUser({ user_type: "hauler" }));
+});
+
+test("individual subscription guard allows individuals and blocks companies", () => {
+  assert.doesNotThrow(() => assertIndividualHaulerType("INDIVIDUAL"));
+  assert.throws(
+    () => assertIndividualHaulerType("COMPANY"),
+    (err: any) => err?.status === 400 && /Only individual haulers/i.test(err.message)
+  );
+});
+
+test("missing pricing config throws clear error", () => {
+  assert.throws(
+    () => assertPricingConfigPresent(null),
+    (err: any) => err?.status === 400 && /pricing configuration is missing/i.test(err.message)
+  );
+});
+
+test("computeNextPeriodEnd adds roughly 30 days", () => {
+  const base = new Date("2024-01-01T00:00:00Z");
+  const next = computeNextPeriodEnd(base);
+  assert.equal(next.toISOString().startsWith("2024-01-31"), true);
+});
+
+test("computeNextPeriodEnd yearly adds 12 months", () => {
+  const base = new Date("2024-01-01T00:00:00Z");
+  const next = computeNextPeriodEnd(base, "YEARLY");
+  assert.equal(next.toISOString().startsWith("2025-01-01"), true);
+});
+
+test("computeChargeAndPeriod monthly", () => {
+  const base = new Date("2024-01-01T00:00:00Z");
+  const { chargedAmount, periodEnd } = computeChargeAndPeriod({ monthlyPrice: 50, billingCycle: "MONTHLY", startDate: base });
+  assert.equal(chargedAmount, 50);
+  assert.equal(periodEnd.toISOString().startsWith("2024-01-31"), true);
+});
+
+test("computeChargeAndPeriod yearly gives 10x charge and 12 months", () => {
+  const base = new Date("2024-01-01T00:00:00Z");
+  const { chargedAmount, periodEnd } = computeChargeAndPeriod({ monthlyPrice: 50, billingCycle: "YEARLY", startDate: base });
+  assert.equal(chargedAmount, 500);
+  assert.equal(periodEnd.toISOString().startsWith("2025-01-01"), true);
+});
+
+test("isSubscriptionActive detects active with future period", () => {
+  const future = new Date();
+  future.setDate(future.getDate() + 10);
+  assert.equal(isSubscriptionActive("ACTIVE", future.toISOString()), true);
+  assert.equal(isSubscriptionActive("ACTIVE", null), true);
+  assert.equal(isSubscriptionActive("NONE", future.toISOString()), false);
+});
+
+test("computePayingStatus aligns with active subscriptions", () => {
+  const future = new Date();
+  future.setDate(future.getDate() + 5);
+  assert.equal(computePayingStatus("ACTIVE", future.toISOString()), "PAID");
+  assert.equal(computePayingStatus("ACTIVE", null), "PAID");
+  const past = new Date();
+  past.setDate(past.getDate() - 1);
+  assert.equal(computePayingStatus("ACTIVE", past.toISOString()), "UNPAID");
+  assert.equal(computePayingStatus("NONE", future.toISOString()), "UNPAID");
+});
+
+test("isSuperAdminUser identifies super admin roles", () => {
+  assert.equal(isSuperAdminUser({ user_type: "super-admin" }), true);
+  assert.equal(isSuperAdminUser({ user_type: "SUPERADMIN" }), true);
+  assert.equal(isSuperAdminUser({ user_type: "hauler" }), false);
+});
+
+test("individual offer eligibility passes when free trip not used", () => {
+  assert.doesNotThrow(() =>
+    assertOfferSubscriptionEligibilityRoute({
+      hauler_type: "INDIVIDUAL",
+      free_trip_used: false,
+      subscription_status: "NONE",
+    })
+  );
+});
+
+test("individual offer eligibility blocks when free trip used without subscription", () => {
+  assert.throws(
+    () =>
+      assertOfferSubscriptionEligibilityRoute({
+        hauler_type: "INDIVIDUAL",
+        free_trip_used: true,
+        subscription_status: "NONE",
+        individual_plan_code: "FREE",
+      }),
+    (err: any) => err?.code === "SUBSCRIPTION_REQUIRED" && err?.status === 402
+  );
+});
+
+test("individual offer eligibility allows when subscribed", () => {
+  assert.doesNotThrow(() =>
+    assertOfferSubscriptionEligibilityRoute({
+      hauler_type: "INDIVIDUAL",
+      free_trip_used: true,
+      subscription_status: "ACTIVE",
+      individual_plan_code: "FREE",
+    })
+  );
+});
+
+test("paid plan blocks offers when not active", () => {
+  assert.throws(
+    () =>
+      assertOfferSubscriptionEligibilityRoute({
+        hauler_type: "INDIVIDUAL",
+        free_trip_used: false,
+        subscription_status: "NONE",
+        individual_plan_code: "PAID",
+      }),
+    (err: any) => err?.code === "PAYMENT_REQUIRED" && err?.status === 402
+  );
+});
+
+test("paid plan allows offers when subscription active", () => {
+  assert.doesNotThrow(() =>
+    assertOfferSubscriptionEligibilityRoute({
+      hauler_type: "INDIVIDUAL",
+      free_trip_used: true,
+      subscription_status: "ACTIVE",
+      individual_plan_code: "PAID",
+    })
+  );
+});
+
+test("free trip eligibility allows first trip when no active trips and not used", () => {
+  assert.doesNotThrow(() =>
+    assertFreeTripEligibility({
+      haulerType: "INDIVIDUAL",
+      subscriptionStatus: "NONE",
+      freeTripUsed: false,
+      hasActiveTrip: false,
+    })
+  );
+});
+
+test("free trip eligibility blocks when active trip exists even if free_trip_used is false", () => {
+  assert.throws(
+    () =>
+      assertFreeTripEligibility({
+        haulerType: "INDIVIDUAL",
+        subscriptionStatus: "NONE",
+        freeTripUsed: false,
+        hasActiveTrip: true,
+      }),
+    (err: any) => err?.code === "SUBSCRIPTION_REQUIRED" && err?.status === 402
+  );
+});
+
+test("free trip eligibility blocks when free_trip_used is true and unsubscribed", () => {
+  assert.throws(
+    () =>
+      assertFreeTripEligibility({
+        haulerType: "INDIVIDUAL",
+        subscriptionStatus: "NONE",
+        freeTripUsed: true,
+        hasActiveTrip: false,
+      }),
+    (err: any) => err?.code === "SUBSCRIPTION_REQUIRED" && err?.status === 402
+  );
+});
+
+test("shouldConsumeFreeTrip returns true for first unsubscribed individual completion", () => {
+  assert.equal(
+    shouldConsumeFreeTrip({
+      haulerType: "INDIVIDUAL",
+      subscriptionStatus: "NONE",
+      freeTripUsed: false,
+    }),
+    true
+  );
+});
+
+test("shouldConsumeFreeTrip returns false when already used", () => {
+  assert.equal(
+    shouldConsumeFreeTrip({
+      haulerType: "INDIVIDUAL",
+      subscriptionStatus: "NONE",
+      freeTripUsed: true,
+    }),
+    false
+  );
+});
+
+test("shouldConsumeFreeTrip returns false for subscribed individual", () => {
+  assert.equal(
+    shouldConsumeFreeTrip({
+      haulerType: "INDIVIDUAL",
+      subscriptionStatus: "ACTIVE",
+      freeTripUsed: false,
+    }),
+    false
+  );
 });
 
 if (process.exitCode && process.exitCode !== 0) {

@@ -6,10 +6,11 @@ Object.defineProperty(exports, "__esModule", { value: true });
 const express_1 = require("express");
 const database_1 = require("../config/database");
 const paymentsService_1 = require("../services/paymentsService");
+const marketplaceService_1 = require("../services/marketplaceService");
 const auth_1 = __importDefault(require("../middlewares/auth"));
 const rbac_1 = require("../middlewares/rbac");
 const auditLogger_1 = require("../middlewares/auditLogger");
-const marketplaceService_1 = require("../services/marketplaceService");
+const marketplaceService_2 = require("../services/marketplaceService");
 const auditLogService_1 = require("../services/auditLogService");
 const directPaymentReceipt_1 = require("../utils/directPaymentReceipt");
 const router = (0, express_1.Router)();
@@ -127,15 +128,104 @@ function buildMapUrls(origin, destination) {
     const directionsUrl = `https://www.openstreetmap.org/directions?engine=fossgis_osrm_car&route=${origin.lat},${origin.lon};${destination.lat},${destination.lon}`;
     return { directionsUrl, mapUrl: directionsUrl };
 }
-async function fetchOverpassPois(bbox) {
+function toRadians(value) {
+    return (value * Math.PI) / 180;
+}
+function haversineKm(a, b) {
+    const R = 6371;
+    const dLat = toRadians(b.lat - a.lat);
+    const dLon = toRadians(b.lon - a.lon);
+    const lat1 = toRadians(a.lat);
+    const lat2 = toRadians(b.lat);
+    const sinDlat = Math.sin(dLat / 2);
+    const sinDlon = Math.sin(dLon / 2);
+    const h = sinDlat * sinDlat +
+        Math.cos(lat1) * Math.cos(lat2) * sinDlon * sinDlon;
+    return 2 * R * Math.atan2(Math.sqrt(h), Math.sqrt(1 - h));
+}
+function sortByDistance(a, b) {
+    return (a.distance_km ?? 0) - (b.distance_km ?? 0);
+}
+function buildSegmentBboxes(origin, destination, distanceKm) {
+    const totalDistance = distanceKm && Number.isFinite(distanceKm)
+        ? Number(distanceKm)
+        : haversineKm(origin, destination);
+    const segments = Math.min(6, Math.max(1, Math.ceil(totalDistance / 500)));
+    const radiusKm = Math.min(120, Math.max(40, totalDistance / (segments * 6)));
+    const bboxes = [];
+    for (let i = 0; i < segments; i += 1) {
+        const t = segments === 1 ? 0.5 : i / (segments - 1);
+        const lat = origin.lat + (destination.lat - origin.lat) * t;
+        const lon = origin.lon + (destination.lon - origin.lon) * t;
+        const latPad = radiusKm / 111;
+        const lonPad = radiusKm / (111 * Math.cos((lat * Math.PI) / 180) || 1);
+        bboxes.push({
+            minLat: lat - latPad,
+            minLon: lon - lonPad,
+            maxLat: lat + latPad,
+            maxLon: lon + lonPad,
+        });
+    }
+    return bboxes;
+}
+async function fetchOverpassPois(bbox, origin, maxResults = 25) {
     const baseUrl = process.env.OVERPASS_URL || DEFAULT_OVERPASS_URL;
     const bboxString = `${bbox.minLat},${bbox.minLon},${bbox.maxLat},${bbox.maxLon}`;
     const query = `
     [out:json][timeout:25];
     (
       node["amenity"="car_wash"](${bboxString});
+      way["amenity"="car_wash"](${bboxString});
+      relation["amenity"="car_wash"](${bboxString});
+      node["amenity"="vehicle_wash"](${bboxString});
+      way["amenity"="vehicle_wash"](${bboxString});
+      relation["amenity"="vehicle_wash"](${bboxString});
+      node["amenity"="wash"](${bboxString});
+      way["amenity"="wash"](${bboxString});
+      relation["amenity"="wash"](${bboxString});
+      node["car_wash"](${bboxString});
+      way["car_wash"](${bboxString});
+      relation["car_wash"](${bboxString});
+
       node["shop"="animal_feed"](${bboxString});
+      way["shop"="animal_feed"](${bboxString});
+      relation["shop"="animal_feed"](${bboxString});
+
+      node["shop"="feed"](${bboxString});
+      way["shop"="feed"](${bboxString});
+      relation["shop"="feed"](${bboxString});
+
       node["shop"="agrarian"](${bboxString});
+      way["shop"="agrarian"](${bboxString});
+      relation["shop"="agrarian"](${bboxString});
+
+      node["shop"="farm"](${bboxString});
+      way["shop"="farm"](${bboxString});
+      relation["shop"="farm"](${bboxString});
+
+      node["shop"="agricultural"](${bboxString});
+      way["shop"="agricultural"](${bboxString});
+      relation["shop"="agricultural"](${bboxString});
+
+      node["shop"="pet"](${bboxString});
+      way["shop"="pet"](${bboxString});
+      relation["shop"="pet"](${bboxString});
+
+      node["amenity"="veterinary"](${bboxString});
+      way["amenity"="veterinary"](${bboxString});
+      relation["amenity"="veterinary"](${bboxString});
+
+      node["amenity"="animal_shelter"](${bboxString});
+      way["amenity"="animal_shelter"](${bboxString});
+      relation["amenity"="animal_shelter"](${bboxString});
+
+      node["amenity"="animal_boarding"](${bboxString});
+      way["amenity"="animal_boarding"](${bboxString});
+      relation["amenity"="animal_boarding"](${bboxString});
+
+      node["amenity"="marketplace"]["marketplace"="animals"](${bboxString});
+      way["amenity"="marketplace"]["marketplace"="animals"](${bboxString});
+      relation["amenity"="marketplace"]["marketplace"="animals"](${bboxString});
     );
     out center 50;
   `;
@@ -151,25 +241,68 @@ async function fetchOverpassPois(bbox) {
     const washouts = [];
     const feedStops = [];
     for (const element of elements) {
-        if (element?.type !== "node")
-            continue;
         const tags = element.tags ?? {};
         const name = tags.name || tags.operator || "Unnamed stop";
+        const lat = element.type === "node" ? Number(element.lat) : Number(element.center?.lat);
+        const lon = element.type === "node" ? Number(element.lon) : Number(element.center?.lon);
+        if (!Number.isFinite(lat) || !Number.isFinite(lon))
+            continue;
         const record = {
             name,
-            lat: Number(element.lat),
-            lon: Number(element.lon),
+            lat,
+            lon,
             category: tags.amenity || tags.shop || "poi",
-            distance_km: null,
+            distance_km: haversineKm(origin, { lat, lon }),
         };
-        if (tags.amenity === "car_wash") {
+        if (tags.amenity === "car_wash" ||
+            tags.amenity === "vehicle_wash" ||
+            tags.amenity === "wash" ||
+            tags.car_wash) {
             washouts.push(record);
         }
-        else if (tags.shop === "animal_feed" || tags.shop === "agrarian") {
+        else if (tags.shop === "animal_feed" ||
+            tags.shop === "feed" ||
+            tags.shop === "agrarian" ||
+            tags.shop === "farm" ||
+            tags.shop === "agricultural" ||
+            tags.shop === "pet" ||
+            tags.amenity === "veterinary" ||
+            tags.amenity === "animal_shelter" ||
+            tags.amenity === "animal_boarding" ||
+            (tags.amenity === "marketplace" && tags.marketplace === "animals")) {
             feedStops.push(record);
         }
     }
-    return { washouts, feedStops };
+    return {
+        washouts: washouts.sort(sortByDistance).slice(0, maxResults),
+        feedStops: feedStops.sort(sortByDistance).slice(0, maxResults),
+    };
+}
+async function fetchOverpassPoisForBboxes(bboxes, origin) {
+    const washouts = [];
+    const feedStops = [];
+    const seen = new Set();
+    for (const bbox of bboxes) {
+        const result = await fetchOverpassPois(bbox, origin, 25);
+        for (const record of result.washouts) {
+            const key = `${record.name}|${record.lat.toFixed(5)}|${record.lon.toFixed(5)}|wash`;
+            if (seen.has(key))
+                continue;
+            seen.add(key);
+            washouts.push(record);
+        }
+        for (const record of result.feedStops) {
+            const key = `${record.name}|${record.lat.toFixed(5)}|${record.lon.toFixed(5)}|feed`;
+            if (seen.has(key))
+                continue;
+            seen.add(key);
+            feedStops.push(record);
+        }
+    }
+    return {
+        washouts: washouts.sort(sortByDistance).slice(0, 15),
+        feedStops: feedStops.sort(sortByDistance).slice(0, 15),
+    };
 }
 function parseId(value) {
     const numeric = Number(value);
@@ -599,7 +732,7 @@ router.post("/:id/epod", (0, rbac_1.requireRoles)(["driver", "hauler"]), (0, aud
         }
         await client.query("BEGIN");
         const tripCheck = await client.query(`
-        SELECT id, payment_mode
+        SELECT id, payment_mode, hauler_id
         FROM trips
         WHERE id = $1
       `, [tripId]);
@@ -610,11 +743,21 @@ router.post("/:id/epod", (0, rbac_1.requireRoles)(["driver", "hauler"]), (0, aud
         }
         const tripRow = tripCheck.rows[0];
         const paymentMode = (tripRow.payment_mode || "").toUpperCase();
+        const haulerId = tripRow.hauler_id;
+        let haulerMeta = null;
+        if (haulerId) {
+            const metaResult = await client.query(`
+          SELECT hauler_type, subscription_status, free_trip_used, free_trip_used_at
+          FROM haulers
+          WHERE id = $1
+        `, [haulerId]);
+            haulerMeta = metaResult.rows[0] ?? null;
+        }
         let directReceipt = null;
         try {
             const receiptInput = (0, directPaymentReceipt_1.resolveDirectPaymentReceipt)(paymentMode, req.body);
             if (receiptInput) {
-                directReceipt = await (0, marketplaceService_1.upsertDirectPaymentReceipt)({
+                directReceipt = await (0, marketplaceService_2.upsertDirectPaymentReceipt)({
                     tripId: String(tripId),
                     receivedAmount: receiptInput.receivedAmount,
                     paymentMethod: receiptInput.paymentMethod,
@@ -678,6 +821,21 @@ router.post("/:id/epod", (0, rbac_1.requireRoles)(["driver", "hauler"]), (0, aud
             epodResult = await client.query(insertQuery, values);
         }
         const tripUpdate = await client.query(`UPDATE trips SET status = 'completed', updated_at = NOW() WHERE id = $1 RETURNING *`, [tripId]);
+        if (haulerMeta && haulerId) {
+            if ((0, marketplaceService_1.shouldConsumeFreeTrip)({
+                haulerType: haulerMeta.hauler_type ?? null,
+                subscriptionStatus: haulerMeta.subscription_status ?? null,
+                freeTripUsed: haulerMeta.free_trip_used ?? null,
+            })) {
+                await client.query(`
+            UPDATE haulers
+            SET free_trip_used = TRUE,
+                free_trip_used_at = COALESCE(free_trip_used_at, NOW())
+            WHERE id = $1
+              AND free_trip_used = FALSE
+          `, [haulerId]);
+            }
+        }
         const authUserIdRaw = req?.user?.id;
         const releasedPayment = await (0, paymentsService_1.releasePaymentForTrip)(tripId, {
             client,
@@ -992,14 +1150,8 @@ router.post("/:id/route-plan/generate", (0, rbac_1.requireRoles)(["driver", "hau
         }
         const restStopPlan = buildRestStopPlan(route.distance_km ?? tripRow.route_distance_km ?? null);
         const { directionsUrl, mapUrl } = buildMapUrls(origin, destination);
-        const padding = 0.25;
-        const bbox = {
-            minLat: Math.min(origin.lat, destination.lat) - padding,
-            minLon: Math.min(origin.lon, destination.lon) - padding,
-            maxLat: Math.max(origin.lat, destination.lat) + padding,
-            maxLon: Math.max(origin.lon, destination.lon) + padding,
-        };
-        const { washouts, feedStops } = await fetchOverpassPois(bbox);
+        const bboxes = buildSegmentBboxes(origin, destination, route.distance_km ?? tripRow.route_distance_km ?? null);
+        const { washouts, feedStops } = await fetchOverpassPoisForBboxes(bboxes, origin);
         const planPayload = {
             distance_km: route.distance_km,
             duration_min: route.duration_min,

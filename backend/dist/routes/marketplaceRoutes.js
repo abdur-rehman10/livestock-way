@@ -3,6 +3,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
+exports.assertOfferSubscriptionEligibility = assertOfferSubscriptionEligibility;
 const express_1 = require("express");
 const auth_1 = __importDefault(require("../middlewares/auth"));
 const profileHelpers_1 = require("../utils/profileHelpers");
@@ -199,6 +200,33 @@ router.post("/loads/:loadId/offers", auth_1.default, async (req, res) => {
         }
         if (!derivedHaulerId) {
             return res.status(400).json({ error: "hauler_id is required" });
+        }
+        const haulerMetaResult = await database_1.pool.query(`
+          SELECT h.hauler_type, h.free_trip_used, h.subscription_status, u.individual_plan_code
+          FROM haulers h
+          JOIN app_users u ON u.id = h.user_id
+          WHERE h.id = $1
+          LIMIT 1
+        `, [derivedHaulerId]);
+        if (!haulerMetaResult.rowCount) {
+            return res.status(400).json({ error: "Invalid hauler profile" });
+        }
+        try {
+            assertOfferSubscriptionEligibility(haulerMetaResult.rows[0]);
+        }
+        catch (err) {
+            const status = err?.status ?? 500;
+            if (err?.code === "SUBSCRIPTION_REQUIRED") {
+                return res
+                    .status(status)
+                    .json({ error: "SUBSCRIPTION_REQUIRED", message: "Active subscription required to place offers after your free trip." });
+            }
+            if (err?.code === "PAYMENT_REQUIRED") {
+                return res
+                    .status(status)
+                    .json({ error: "PAYMENT_REQUIRED", message: "Payment required to use paid plan features." });
+            }
+            throw err;
         }
         const load = await (0, marketplaceService_1.getLoadById)(loadId);
         if (!load) {
@@ -455,6 +483,26 @@ function isHaulerUser(user) {
 function isShipperUser(user) {
     const role = normalizeRole(user?.user_type);
     return role.startsWith("SHIPPER");
+}
+function assertOfferSubscriptionEligibility(meta) {
+    const type = (meta.hauler_type ?? "company").toString().trim().toUpperCase();
+    if (type !== "INDIVIDUAL")
+        return;
+    const planCode = (meta.individual_plan_code ?? "").toString().trim().toUpperCase();
+    const subscriptionStatus = (meta.subscription_status ?? "NONE").toString().trim().toUpperCase();
+    if (planCode === "PAID" && subscriptionStatus !== "ACTIVE") {
+        const err = new Error("PAYMENT_REQUIRED");
+        err.status = 402;
+        err.code = "PAYMENT_REQUIRED";
+        throw err;
+    }
+    const freeTripUsed = Boolean(meta.free_trip_used);
+    if (freeTripUsed && subscriptionStatus !== "ACTIVE") {
+        const err = new Error("SUBSCRIPTION_REQUIRED");
+        err.status = 402;
+        err.code = "SUBSCRIPTION_REQUIRED";
+        throw err;
+    }
 }
 async function resolveHaulerId(user) {
     const companyId = getCompanyId(user);
@@ -1866,7 +1914,8 @@ router.post("/bookings/:bookingId/accept", auth_1.default, async (req, res) => {
     }
     catch (err) {
         console.error("acceptBooking error", err);
-        res.status(400).json({ error: err?.message ?? "Failed to accept booking" });
+        const status = err?.status ?? 400;
+        res.status(status).json({ error: err?.message ?? "Failed to accept booking" });
     }
 });
 router.post("/bookings/:bookingId/reject", auth_1.default, async (req, res) => {

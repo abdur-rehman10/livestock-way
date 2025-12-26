@@ -144,6 +144,19 @@ export interface PricingConfig {
   updated_at: string;
 }
 
+export type IndividualPackageCode = "FREE" | "PAID";
+
+export interface IndividualPackage {
+  id: number;
+  code: IndividualPackageCode;
+  name: string;
+  description: string | null;
+  features: Record<string, any>;
+  is_active: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
 export interface PricingCompanyTier {
   id: number;
   pricing_config_id: number;
@@ -259,5 +272,20 @@ export async function updateCompanyPricing(
     method: "PUT",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ tiers }),
+  });
+}
+
+export async function fetchIndividualPackages(): Promise<{ items: IndividualPackage[] }> {
+  return adminRequest<{ items: IndividualPackage[] }>("/pricing/individual-packages");
+}
+
+export async function updateIndividualPackage(
+  code: IndividualPackageCode,
+  payload: Pick<IndividualPackage, "name" | "description" | "features">
+): Promise<IndividualPackage> {
+  return adminRequest<IndividualPackage>(`/pricing/individual-packages/${code}`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
   });
 }

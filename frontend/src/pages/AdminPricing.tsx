@@ -9,7 +9,10 @@ import {
   updateIndividualPricing,
   fetchCompanyPricing,
   updateCompanyPricing,
+  fetchIndividualPackages,
+  updateIndividualPackage,
   type PricingCompanyTier,
+  type IndividualPackage,
 } from "../api/admin";
 import { toast } from "sonner";
 import {
@@ -22,6 +25,11 @@ import {
 } from "../components/ui/dialog";
 import { Label } from "../components/ui/label";
 import { Switch } from "../components/ui/switch";
+import { Textarea } from "../components/ui/textarea";
+
+type EditablePackage = Pick<IndividualPackage, "code" | "name" | "description" | "features"> & {
+  id?: number;
+};
 
 export default function AdminPricing() {
   const [individualPrice, setIndividualPrice] = useState<string>("");
@@ -46,6 +54,13 @@ export default function AdminPricing() {
   const [tiers, setTiers] = useState<EditableTier[]>([]);
   const [editingTier, setEditingTier] = useState<EditableTier | null>(null);
   const [dialogOpen, setDialogOpen] = useState(false);
+  const [packages, setPackages] = useState<EditablePackage[]>([]);
+  const [packagesLoading, setPackagesLoading] = useState(false);
+  const [packagesError, setPackagesError] = useState<string | null>(null);
+  const [packageDialogOpen, setPackageDialogOpen] = useState(false);
+  const [editingPackage, setEditingPackage] = useState<EditablePackage | null>(null);
+  const [packageSaving, setPackageSaving] = useState(false);
+  const [packageFormError, setPackageFormError] = useState<string | null>(null);
 
   useEffect(() => {
     let ignore = false;
@@ -100,6 +115,35 @@ export default function AdminPricing() {
       .finally(() => {
         if (ignore) return;
         setCompanyLoading(false);
+      });
+    return () => {
+      ignore = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    let ignore = false;
+    setPackagesLoading(true);
+    setPackagesError(null);
+    fetchIndividualPackages()
+      .then((resp) => {
+        if (ignore) return;
+        const normalized = (resp.items || []).map((p) => ({
+          id: p.id,
+          code: p.code,
+          name: p.name,
+          description: p.description,
+          features: p.features || {},
+        }));
+        setPackages(normalized);
+      })
+      .catch((err: any) => {
+        if (ignore) return;
+        setPackagesError(err?.message || "Failed to load packages");
+      })
+      .finally(() => {
+        if (ignore) return;
+        setPackagesLoading(false);
       });
     return () => {
       ignore = true;
@@ -459,6 +503,344 @@ export default function AdminPricing() {
           </Tabs>
         </CardContent>
       </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>Individual Hauler Packages</CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          {packagesError && <div className="text-xs text-rose-600">{packagesError}</div>}
+          {packagesLoading ? (
+            <div className="text-sm text-slate-600">Loading packages…</div>
+          ) : (
+            <div className="grid gap-4 md:grid-cols-2">
+              {["FREE", "PAID"].map((code) => {
+                const pkg = packages.find((p) => p.code === code);
+                return (
+                  <Card key={code} className="border border-slate-200">
+                    <CardHeader className="space-y-1">
+                      <div className="flex items-center justify-between">
+                        <CardTitle className="text-lg">{pkg?.name || `${code} Plan`}</CardTitle>
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          onClick={() => {
+                            setEditingPackage(
+                              pkg ?? {
+                                code: code as EditablePackage["code"],
+                                name: `${code} Plan`,
+                                description: "",
+                                features: {},
+                              }
+                        );
+                        setPackageDialogOpen(true);
+                        setPackagesError(null);
+                        setPackageFormError(null);
+                      }}
+                    >
+                      Edit
+                    </Button>
+                  </div>
+                      <p className="text-xs uppercase tracking-wide text-slate-500">
+                        Code: {code}
+                      </p>
+                      <p className="text-sm text-slate-600">{pkg?.description || "No description"}</p>
+                    </CardHeader>
+                    <CardContent className="space-y-2">
+                      <p className="text-xs font-semibold text-slate-700">Features</p>
+                      <ul className="list-disc list-inside text-sm text-slate-700 space-y-1">
+                        {Array.isArray(pkg?.features?.feature_list) && pkg?.features?.feature_list.length
+                          ? pkg!.features.feature_list.map((f: any, idx: number) => (
+                              <li key={idx}>{String(f)}</li>
+                            ))
+                          : <li className="text-slate-500">No feature list</li>}
+                      </ul>
+                      <div className="grid grid-cols-2 gap-2 text-xs text-slate-600">
+                        {"trip_tracking_limit" in (pkg?.features ?? {}) && (
+                          <div>Trip tracking: {pkg?.features?.trip_tracking_limit ?? "—"}</div>
+                        )}
+                        {"documents_validation_limit" in (pkg?.features ?? {}) && (
+                          <div>Doc validation: {pkg?.features?.documents_validation_limit ?? "—"}</div>
+                        )}
+                        {"outside_trips_limit" in (pkg?.features ?? {}) && (
+                          <div>Outside trips: {pkg?.features?.outside_trips_limit ?? "—"}</div>
+                        )}
+                        {"trips_unlimited" in (pkg?.features ?? {}) && (
+                          <div>Trips unlimited: {pkg?.features?.trips_unlimited ? "Yes" : "No"}</div>
+                        )}
+                        {"loadboard_unlimited" in (pkg?.features ?? {}) && (
+                          <div>Loadboard unlimited: {pkg?.features?.loadboard_unlimited ? "Yes" : "No"}</div>
+                        )}
+                        {"truckboard_unlimited" in (pkg?.features ?? {}) && (
+                          <div>Truckboard unlimited: {pkg?.features?.truckboard_unlimited ? "Yes" : "No"}</div>
+                        )}
+                      </div>
+                    </CardContent>
+                  </Card>
+                );
+              })}
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
+      <Dialog open={packageDialogOpen} onOpenChange={setPackageDialogOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Edit Package</DialogTitle>
+            <DialogDescription>
+              Update name, description, and features. Code is fixed and packages cannot be deleted.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-3">
+            {packageFormError && (
+              <div className="text-xs text-rose-600">{packageFormError}</div>
+            )}
+            <div className="space-y-1">
+              <Label className="text-xs">Package Code</Label>
+              <Input value={editingPackage?.code ?? ""} disabled />
+            </div>
+            <div className="space-y-1">
+              <Label className="text-xs">Name</Label>
+              <Input
+                value={editingPackage?.name ?? ""}
+                onChange={(e) =>
+                  setEditingPackage((prev) =>
+                    prev ? { ...prev, name: e.target.value } : prev
+                  )
+                }
+              />
+            </div>
+            <div className="space-y-1">
+              <Label className="text-xs">Description</Label>
+              <Textarea
+                value={editingPackage?.description ?? ""}
+                onChange={(e) =>
+                  setEditingPackage((prev) =>
+                    prev ? { ...prev, description: e.target.value } : prev
+                  )
+                }
+              />
+            </div>
+            <div className="space-y-1">
+              <Label className="text-xs">Feature List (comma separated)</Label>
+              <Input
+                value={
+                  Array.isArray(editingPackage?.features?.feature_list)
+                    ? (editingPackage?.features?.feature_list as any[]).join(", ")
+                    : ""
+                }
+                onChange={(e) => {
+                  const parts = e.target.value
+                    .split(",")
+                    .map((p) => p.trim())
+                    .filter(Boolean);
+                  setEditingPackage((prev) =>
+                    prev
+                      ? {
+                          ...prev,
+                          features: { ...(prev.features || {}), feature_list: parts },
+                        }
+                      : prev
+                  );
+                }}
+              />
+            </div>
+            <div className="grid grid-cols-2 gap-2">
+              <div className="space-y-1">
+                <Label className="text-xs">Trip tracking limit</Label>
+                <Input
+                  type="number"
+                  value={editingPackage?.features?.trip_tracking_limit ?? ""}
+                  onChange={(e) =>
+                    setEditingPackage((prev) =>
+                      prev
+                        ? {
+                            ...prev,
+                            features: {
+                              ...(prev.features || {}),
+                              trip_tracking_limit:
+                                e.target.value === "" ? null : Number(e.target.value),
+                            },
+                          }
+                        : prev
+                    )
+                  }
+                />
+              </div>
+              <div className="space-y-1">
+                <Label className="text-xs">Doc validation limit</Label>
+                <Input
+                  type="number"
+                  value={editingPackage?.features?.documents_validation_limit ?? ""}
+                  onChange={(e) =>
+                    setEditingPackage((prev) =>
+                      prev
+                        ? {
+                            ...prev,
+                            features: {
+                              ...(prev.features || {}),
+                              documents_validation_limit:
+                                e.target.value === "" ? null : Number(e.target.value),
+                            },
+                          }
+                        : prev
+                    )
+                  }
+                />
+              </div>
+              <div className="space-y-1">
+                <Label className="text-xs">Outside trips limit</Label>
+                <Input
+                  type="number"
+                  value={editingPackage?.features?.outside_trips_limit ?? ""}
+                  onChange={(e) =>
+                    setEditingPackage((prev) =>
+                      prev
+                        ? {
+                            ...prev,
+                            features: {
+                              ...(prev.features || {}),
+                              outside_trips_limit:
+                                e.target.value === "" ? null : Number(e.target.value),
+                            },
+                          }
+                        : prev
+                    )
+                  }
+                />
+              </div>
+              <div className="space-y-1">
+                <Label className="text-xs">Trips unlimited</Label>
+                <Switch
+                  checked={Boolean(editingPackage?.features?.trips_unlimited)}
+                  onCheckedChange={(checked) =>
+                    setEditingPackage((prev) =>
+                      prev
+                        ? {
+                            ...prev,
+                            features: { ...(prev.features || {}), trips_unlimited: checked },
+                          }
+                        : prev
+                    )
+                  }
+                />
+              </div>
+              <div className="space-y-1">
+                <Label className="text-xs">Loadboard unlimited</Label>
+                <Switch
+                  checked={Boolean(editingPackage?.features?.loadboard_unlimited)}
+                  onCheckedChange={(checked) =>
+                    setEditingPackage((prev) =>
+                      prev
+                        ? {
+                            ...prev,
+                            features: { ...(prev.features || {}), loadboard_unlimited: checked },
+                          }
+                        : prev
+                    )
+                  }
+                />
+              </div>
+              <div className="space-y-1">
+                <Label className="text-xs">Truckboard unlimited</Label>
+                <Switch
+                  checked={Boolean(editingPackage?.features?.truckboard_unlimited)}
+                  onCheckedChange={(checked) =>
+                    setEditingPackage((prev) =>
+                      prev
+                        ? {
+                            ...prev,
+                            features: { ...(prev.features || {}), truckboard_unlimited: checked },
+                          }
+                        : prev
+                    )
+                  }
+                />
+              </div>
+            </div>
+          </div>
+          <DialogFooter className="gap-2">
+            <Button variant="outline" onClick={() => setPackageDialogOpen(false)}>
+              Cancel
+            </Button>
+            <Button
+              onClick={async () => {
+                if (!editingPackage) return;
+                setPackageFormError(null);
+                const trimmedName = (editingPackage.name ?? "").trim();
+                if (!trimmedName) {
+                  setPackageFormError("Name is required.");
+                  return;
+                }
+                if (editingPackage.code === "FREE") {
+                  const feats = editingPackage.features || {};
+                  const t = feats.trip_tracking_limit;
+                  const d = feats.documents_validation_limit;
+                  const o = feats.outside_trips_limit;
+                  if (
+                    t === undefined ||
+                    t === null ||
+                    Number(t) <= 0 ||
+                    d === undefined ||
+                    d === null ||
+                    Number(d) <= 0 ||
+                    o === undefined ||
+                    o === null ||
+                    Number(o) <= 0
+                  ) {
+                    setPackageFormError(
+                      "Free plan must include trip tracking, document validation, and outside trips limits greater than 0."
+                    );
+                    return;
+                  }
+                }
+                try {
+                  setPackageSaving(true);
+                  const updated = await updateIndividualPackage(editingPackage.code as any, {
+                    name: trimmedName,
+                    description: editingPackage.description,
+                    features: editingPackage.features,
+                  });
+                  setPackages((prev) => {
+                    const existingIdx = prev.findIndex((p) => p.code === updated.code);
+                    if (existingIdx >= 0) {
+                      const copy = [...prev];
+                      copy[existingIdx] = {
+                        code: updated.code,
+                        name: updated.name,
+                        description: updated.description,
+                        features: updated.features,
+                        id: updated.id,
+                      };
+                      return copy;
+                    }
+                    return [
+                      ...prev,
+                      {
+                        code: updated.code,
+                        name: updated.name,
+                        description: updated.description,
+                        features: updated.features,
+                        id: updated.id,
+                      },
+                    ];
+                  });
+                  toast.success(`Package ${updated.code} updated`);
+                  setPackageDialogOpen(false);
+                } catch (err: any) {
+                  toast.error(err?.message || "Failed to update package");
+                } finally {
+                  setPackageSaving(false);
+                }
+              }}
+              disabled={packageSaving || !editingPackage?.name}
+            >
+              {packageSaving ? "Saving…" : "Save"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
         <DialogContent>

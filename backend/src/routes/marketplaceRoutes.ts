@@ -310,6 +310,35 @@ router.post(
       if (!derivedHaulerId) {
         return res.status(400).json({ error: "hauler_id is required" });
       }
+      const haulerMetaResult = await pool.query(
+        `
+          SELECT h.hauler_type, h.free_trip_used, h.subscription_status, u.individual_plan_code
+          FROM haulers h
+          JOIN app_users u ON u.id = h.user_id
+          WHERE h.id = $1
+          LIMIT 1
+        `,
+        [derivedHaulerId]
+      );
+      if (!haulerMetaResult.rowCount) {
+        return res.status(400).json({ error: "Invalid hauler profile" });
+      }
+      try {
+        assertOfferSubscriptionEligibility(haulerMetaResult.rows[0]);
+      } catch (err: any) {
+        const status = err?.status ?? 500;
+        if (err?.code === "SUBSCRIPTION_REQUIRED") {
+          return res
+            .status(status)
+            .json({ error: "SUBSCRIPTION_REQUIRED", message: "Active subscription required to place offers after your free trip." });
+        }
+        if (err?.code === "PAYMENT_REQUIRED") {
+          return res
+            .status(status)
+            .json({ error: "PAYMENT_REQUIRED", message: "Payment required to use paid plan features." });
+        }
+        throw err;
+      }
       const load = await getLoadById(loadId);
       if (!load) {
         return res.status(404).json({ error: "Load not found" });
@@ -613,6 +642,31 @@ function isHaulerUser(user?: { user_type?: string | null }) {
 function isShipperUser(user?: { user_type?: string | null }) {
   const role = normalizeRole(user?.user_type);
   return role.startsWith("SHIPPER");
+}
+
+export function assertOfferSubscriptionEligibility(meta: {
+  hauler_type?: string | null;
+  free_trip_used?: boolean | null;
+  subscription_status?: string | null;
+  individual_plan_code?: string | null;
+}) {
+  const type = (meta.hauler_type ?? "company").toString().trim().toUpperCase();
+  if (type !== "INDIVIDUAL") return;
+  const planCode = (meta.individual_plan_code ?? "").toString().trim().toUpperCase();
+  const subscriptionStatus = (meta.subscription_status ?? "NONE").toString().trim().toUpperCase();
+  if (planCode === "PAID" && subscriptionStatus !== "ACTIVE") {
+    const err = new Error("PAYMENT_REQUIRED");
+    (err as any).status = 402;
+    (err as any).code = "PAYMENT_REQUIRED";
+    throw err;
+  }
+  const freeTripUsed = Boolean(meta.free_trip_used);
+  if (freeTripUsed && subscriptionStatus !== "ACTIVE") {
+    const err = new Error("SUBSCRIPTION_REQUIRED");
+    (err as any).status = 402;
+    (err as any).code = "SUBSCRIPTION_REQUIRED";
+    throw err;
+  }
 }
 
 async function resolveHaulerId(user: AuthUser): Promise<string | null> {
@@ -2090,7 +2144,8 @@ router.post(
       res.json(result);
     } catch (err: any) {
       console.error("acceptBooking error", err);
-      res.status(400).json({ error: err?.message ?? "Failed to accept booking" });
+      const status = err?.status ?? 400;
+      res.status(status).json({ error: err?.message ?? "Failed to accept booking" });
     }
   }
 );

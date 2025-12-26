@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { resolvePaymentModeSelection } from "../utils/paymentMode.ts";
-import { assertEscrowEnabled } from "../utils/escrowGuard.ts";
+import { resolvePaymentModeSelection } from "../utils/paymentMode";
+import { assertEscrowEnabled } from "../utils/escrowGuard";
 
 test("assertEscrowEnabled allows escrow trips", () => {
   assert.doesNotThrow(() =>

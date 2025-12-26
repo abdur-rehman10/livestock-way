@@ -5,6 +5,7 @@ import {
   getPaymentByTripId,
   releasePaymentForTrip,
 } from "../services/paymentsService";
+import { shouldConsumeFreeTrip } from "../services/marketplaceService";
 import { PoolClient } from "pg";
 import authRequired from "../middlewares/auth";
 import { requireRoles } from "../middlewares/rbac";
@@ -909,7 +910,7 @@ router.post(
 
     const tripCheck = await client.query(
       `
-        SELECT id, payment_mode
+        SELECT id, payment_mode, hauler_id
         FROM trips
         WHERE id = $1
       `,
@@ -922,6 +923,25 @@ router.post(
     }
     const tripRow = tripCheck.rows[0];
     const paymentMode = (tripRow.payment_mode || "").toUpperCase();
+    const haulerId = tripRow.hauler_id;
+
+    let haulerMeta: {
+      hauler_type?: string | null;
+      subscription_status?: string | null;
+      free_trip_used?: boolean | null;
+      free_trip_used_at?: string | null;
+    } | null = null;
+    if (haulerId) {
+      const metaResult = await client.query(
+        `
+          SELECT hauler_type, subscription_status, free_trip_used, free_trip_used_at
+          FROM haulers
+          WHERE id = $1
+        `,
+        [haulerId]
+      );
+      haulerMeta = metaResult.rows[0] ?? null;
+    }
 
     let directReceipt: any = null;
     try {
@@ -1004,6 +1024,27 @@ router.post(
       `UPDATE trips SET status = 'completed', updated_at = NOW() WHERE id = $1 RETURNING *`,
       [tripId]
     );
+
+    if (haulerMeta && haulerId) {
+      if (
+        shouldConsumeFreeTrip({
+          haulerType: haulerMeta.hauler_type ?? null,
+          subscriptionStatus: haulerMeta.subscription_status ?? null,
+          freeTripUsed: haulerMeta.free_trip_used ?? null,
+        })
+      ) {
+        await client.query(
+          `
+            UPDATE haulers
+            SET free_trip_used = TRUE,
+                free_trip_used_at = COALESCE(free_trip_used_at, NOW())
+            WHERE id = $1
+              AND free_trip_used = FALSE
+          `,
+          [haulerId]
+        );
+      }
+    }
 
     const authUserIdRaw = (req as any)?.user?.id;
     const releasedPayment = await releasePaymentForTrip(tripId, {

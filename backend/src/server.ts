@@ -18,6 +18,8 @@ import marketplaceRoutes from "./routes/marketplaceRoutes";
 import serviceRoutes from "./routes/serviceRoutes";
 import kycRoutes from "./routes/kycRoutes";
 import adminRoutes from "./routes/adminRoutes";
+import haulerRoutes from "./routes/haulerRoutes";
+import pricingRoutes from "./routes/pricingRoutes";
 import { initSocket } from "./socket";
 
 dotenv.config();
@@ -72,6 +74,8 @@ app.use("/api/marketplace", marketplaceRoutes);
 app.use("/api/services", serviceRoutes);
 app.use("/api/kyc", kycRoutes);
 app.use("/api/admin", adminRoutes);
+app.use("/api/hauler", haulerRoutes);
+app.use("/api/pricing", pricingRoutes);
 
 async function bootstrapSuperAdmin() {
   const email = process.env.SUPER_ADMIN_EMAIL || "admin@test.com";

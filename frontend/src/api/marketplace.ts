@@ -1,6 +1,7 @@
 import { API_BASE_URL } from "../lib/api";
 
 const MARKETPLACE_BASE = `${API_BASE_URL}/api/marketplace`;
+const HAULER_BASE = `${API_BASE_URL}/api/hauler`;
 
 type HttpMethod = "GET" | "POST" | "PATCH" | "DELETE";
 
@@ -37,6 +38,30 @@ async function marketplaceRequest<T>(
   if (!response.ok) {
     const message = await response.text().catch(() => "");
     throw new Error(message || `Marketplace request failed (${response.status})`);
+  }
+
+  if (response.status === 204) {
+    return null as T;
+  }
+
+  return (await response.json()) as T;
+}
+
+async function haulerRequest<T>(
+  path: string,
+  options: RequestInit & { method?: HttpMethod } = {}
+): Promise<T> {
+  const method = options.method ?? "GET";
+  const hasJsonBody = !!options.body && typeof options.body === "string";
+  const response = await fetch(`${HAULER_BASE}${path}`, {
+    ...options,
+    method,
+    headers: buildHeaders(method, options.headers, hasJsonBody),
+  });
+
+  if (!response.ok) {
+    const message = await response.text().catch(() => "");
+    throw new Error(message || `Hauler request failed (${response.status})`);
   }
 
   if (response.status === 204) {
@@ -232,6 +257,50 @@ export interface TruckChatSummary {
     capacity_headcount: number | null;
   };
   last_message: TruckChatMessage | null;
+}
+
+export type IndividualPackageCode = "FREE" | "PAID";
+
+export interface IndividualPackage {
+  id: string | number;
+  code: IndividualPackageCode;
+  name: string;
+  description: string | null;
+  features: {
+    feature_list?: string[];
+    trip_tracking_limit?: number;
+    documents_validation_limit?: number;
+    outside_trips_limit?: number;
+    trips_unlimited?: boolean;
+    [key: string]: any;
+  };
+}
+
+export interface IndividualPackagesResponse {
+  packages: IndividualPackage[];
+  paid_monthly_price: number | null;
+  paid_yearly_price: number | null;
+  currency: string | null;
+}
+
+export async function fetchPublicIndividualPackages(): Promise<IndividualPackagesResponse> {
+  const response = await fetch(`${API_BASE_URL}/api/pricing/individual-packages`, {
+    method: "GET",
+    headers: { Accept: "application/json" },
+  });
+  if (!response.ok) {
+    const message = await response.text().catch(() => "");
+    throw new Error(message || `Request failed (${response.status})`);
+  }
+  const payload = await response.json();
+  return {
+    packages: payload?.packages ?? [],
+    paid_monthly_price:
+      payload?.paid_monthly_price !== undefined ? payload.paid_monthly_price : null,
+    paid_yearly_price:
+      payload?.paid_yearly_price !== undefined ? payload.paid_yearly_price : null,
+    currency: payload?.currency ?? null,
+  };
 }
 
 export async function fetchLoadOffers(loadId: string, page = 1, pageSize = 20) {
@@ -546,5 +615,35 @@ export interface HaulerSummary {
 export async function fetchHaulerSummary(haulerId: string) {
   return marketplaceRequest<{ summary: HaulerSummary }>(
     `/haulers/${haulerId}/summary`
+  );
+}
+
+export type HaulerType = "INDIVIDUAL" | "COMPANY";
+
+export interface HaulerSubscriptionState {
+  hauler_type: HaulerType;
+  free_trip_used: boolean;
+  free_trip_used_at: string | null;
+  subscription_status: "NONE" | "ACTIVE" | "CANCELED" | "EXPIRED";
+  subscription_current_period_end: string | null;
+  current_individual_monthly_price: number | null;
+  monthly_price?: number | null;
+  yearly_price?: number | null;
+  billing_cycle?: "MONTHLY" | "YEARLY" | null;
+  individual_plan_code?: string | null;
+  note?: string;
+}
+
+export async function fetchHaulerSubscription() {
+  return haulerRequest<HaulerSubscriptionState>(`/subscription`);
+}
+
+export async function subscribeHauler(payload?: { billing_cycle?: "MONTHLY" | "YEARLY" }) {
+  return haulerRequest<HaulerSubscriptionState>(
+    `/subscription/subscribe`,
+    {
+      method: "POST",
+      body: JSON.stringify(payload ?? {}),
+    }
   );
 }
