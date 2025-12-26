@@ -35,10 +35,20 @@ type TruckNotesMeta = {
 };
 
 async function getHaulerMeta(haulerId: number) {
+  const hasHaulerType = await pool.query(
+    `
+      SELECT 1
+      FROM information_schema.columns
+      WHERE table_name = 'haulers'
+        AND column_name = 'hauler_type'
+      LIMIT 1
+    `
+  );
+  const selectHaulerType = hasHaulerType.rowCount > 0 ? "h.hauler_type" : "NULL::text";
   const { rows } = await pool.query(
     `
       SELECT
-        hauler_type,
+        ${selectHaulerType} AS hauler_type,
         (SELECT COUNT(*) FROM trucks t WHERE t.hauler_id = h.id AND t.status <> 'inactive')::int AS truck_count,
         (SELECT COUNT(*) FROM drivers d WHERE d.hauler_id = h.id)::int AS driver_count
       FROM haulers h
