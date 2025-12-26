@@ -218,6 +218,9 @@ export interface TruckAvailabilityRecord {
   capacity_weight_kg: number | null;
   allow_shared: boolean;
   notes: string | null;
+  post_link?: string | null;
+  external_contact_email?: string | null;
+  external_contact_phone?: string | null;
   origin_lat: number | null;
   origin_lng: number | null;
   destination_lat: number | null;
@@ -552,6 +555,9 @@ function mapTruckAvailabilityRow(row: any): TruckAvailabilityRecord {
         : Number(row.capacity_weight_kg),
     allow_shared: row.allow_shared ?? true,
     notes: row.notes ?? null,
+    post_link: row.post_link ?? null,
+    external_contact_email: row.external_contact_email ?? null,
+    external_contact_phone: row.external_contact_phone ?? null,
     origin_lat:
       row.origin_lat === null || row.origin_lat === undefined
         ? null
@@ -1085,12 +1091,15 @@ export async function getTruckAvailabilityById(id: string): Promise<TruckAvailab
         capacity_weight_kg,
         allow_shared,
         notes,
+        external_contact_email,
+        external_contact_phone,
         origin_lat,
         origin_lng,
         destination_lat,
         destination_lng,
         is_active,
         is_external,
+        post_link,
         created_at,
         updated_at
       FROM truck_availability
@@ -1147,12 +1156,15 @@ export async function listTruckAvailability(options: {
         capacity_weight_kg,
         allow_shared,
         notes,
+        external_contact_email,
+        external_contact_phone,
         origin_lat,
         origin_lng,
         destination_lat,
         destination_lng,
         is_active,
         is_external,
+        post_link,
         created_at,
         updated_at
       FROM truck_availability

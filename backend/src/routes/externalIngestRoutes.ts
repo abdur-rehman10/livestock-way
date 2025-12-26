@@ -115,16 +115,10 @@ router.post("/loads", async (req: Request, res: Response) => {
     const animalCount = parseNumeric(normalizeValue((payload as any).no_of_loads));
     const weightKg = parseWeightToKg(normalizeValue((payload as any).estimated_weight));
     const ratePerMile = parseNumeric(normalizeValue((payload as any).rate_per_mile));
-    const notes = buildNotes(
-      [
-        ["Poster", normalizeValue((payload as any).poster_name)],
-        ["Email", normalizeValue((payload as any).email)],
-        ["Contact", normalizeValue((payload as any).contact_no)],
-        ["Facebook", normalizeValue((payload as any).facebook_profile_link)],
-        ["Post Link", normalizeValue((payload as any).post_link)],
-      ],
-      normalizeValue((payload as any).comments) || null
-    );
+    const notes = normalizeValue((payload as any).comments) || null;
+    const contactEmail = normalizeValue((payload as any).email) || null;
+    const contactPhone = normalizeValue((payload as any).contact_no) || null;
+    const postLink = normalizeValue((payload as any).post_link) || null;
 
     const result = await pool.query(
       `
@@ -143,10 +137,13 @@ router.post("/loads", async (req: Request, res: Response) => {
           visibility,
           status,
           notes,
+          external_contact_email,
+          external_contact_phone,
+          post_link,
           is_external
         )
         VALUES (
-          $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,'USD','public','posted',$11,TRUE
+          $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,'USD','public','posted',$11,$12,$13,$14,TRUE
         )
         RETURNING id
       `,
@@ -162,6 +159,9 @@ router.post("/loads", async (req: Request, res: Response) => {
         pickupEnd,
         ratePerMile,
         notes,
+        contactEmail,
+        contactPhone,
+        postLink,
       ]
     );
 
@@ -196,21 +196,10 @@ router.post("/trucks", async (req: Request, res: Response) => {
       parseDate((payload as any).date_from) ||
       new Date().toISOString();
     const availableUntil = parseDate((payload as any).date_to);
-    const notes = buildNotes(
-      [
-        ["Poster", normalizeValue((payload as any).poster_name)],
-        ["Stops", normalizeValue((payload as any).stops_if_stop_is_menmtion_its_a_route)],
-        ["Trailer", normalizeValue((payload as any).type_of_trailer)],
-        ["Available Space", normalizeValue((payload as any).avaliable_space)],
-        ["Truck", normalizeValue((payload as any).truck_make_model)],
-        ["Truck Details", normalizeValue((payload as any).truck_number_and_details)],
-        ["Email", normalizeValue((payload as any).email)],
-        ["Contact", normalizeValue((payload as any).contact_no)],
-        ["Facebook", normalizeValue((payload as any).facebook_profile_link)],
-        ["Post Link", normalizeValue((payload as any).post_link)],
-      ],
-      normalizeValue((payload as any).comments) || null
-    );
+    const notes = normalizeValue((payload as any).comments) || null;
+    const contactEmail = normalizeValue((payload as any).email) || null;
+    const contactPhone = normalizeValue((payload as any).contact_no) || null;
+    const postLink = normalizeValue((payload as any).post_link) || null;
 
     const result = await pool.query(
       `
@@ -223,10 +212,13 @@ router.post("/trucks", async (req: Request, res: Response) => {
           available_until,
           allow_shared,
           notes,
+          external_contact_email,
+          external_contact_phone,
+          post_link,
           is_active,
           is_external
         )
-        VALUES ($1, NULL, $2, $3, $4, $5, TRUE, $6, TRUE, TRUE)
+        VALUES ($1, NULL, $2, $3, $4, $5, TRUE, $6, $7, $8, $9, TRUE, TRUE)
         RETURNING id
       `,
       [
@@ -236,6 +228,9 @@ router.post("/trucks", async (req: Request, res: Response) => {
         availableFrom,
         availableUntil,
         notes,
+        contactEmail,
+        contactPhone,
+        postLink,
       ]
     );
 

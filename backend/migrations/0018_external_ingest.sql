@@ -25,8 +25,24 @@ FROM app_users u
 WHERE u.email = 'external-shipper@livestockway.local'
   AND NOT EXISTS (SELECT 1 FROM shippers s WHERE s.user_id = u.id);
 
-INSERT INTO haulers (user_id, legal_name, dot_number, hauler_type)
-SELECT u.id, 'External Hauler', 'EXT-HAULER', 'company'
-FROM app_users u
-WHERE u.email = 'external-hauler@livestockway.local'
-  AND NOT EXISTS (SELECT 1 FROM haulers h WHERE h.user_id = u.id);
+DO $$
+BEGIN
+  IF EXISTS (
+    SELECT 1
+    FROM information_schema.columns
+    WHERE table_name = 'haulers'
+      AND column_name = 'hauler_type'
+  ) THEN
+    INSERT INTO haulers (user_id, legal_name, dot_number, hauler_type)
+    SELECT u.id, 'External Hauler', 'EXT-HAULER', 'company'
+    FROM app_users u
+    WHERE u.email = 'external-hauler@livestockway.local'
+      AND NOT EXISTS (SELECT 1 FROM haulers h WHERE h.user_id = u.id);
+  ELSE
+    INSERT INTO haulers (user_id, legal_name, dot_number)
+    SELECT u.id, 'External Hauler', 'EXT-HAULER'
+    FROM app_users u
+    WHERE u.email = 'external-hauler@livestockway.local'
+      AND NOT EXISTS (SELECT 1 FROM haulers h WHERE h.user_id = u.id);
+  END IF;
+END $$;

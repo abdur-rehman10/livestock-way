@@ -81,6 +81,7 @@ router.get("/", authRequired, async (req: Request, res: Response) => {
           estimated_weight_kg AS total_weight_kg,
           price_offer_amount AS budget_amount,
           is_external,
+          post_link,
           status,
           created_at
         FROM loads

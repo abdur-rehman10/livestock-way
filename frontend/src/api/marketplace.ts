@@ -169,6 +169,9 @@ export interface TruckAvailability {
   capacity_weight_kg: number | null;
   allow_shared: boolean;
   notes: string | null;
+  post_link?: string | null;
+  external_contact_email?: string | null;
+  external_contact_phone?: string | null;
   origin_lat: number | null;
   origin_lng: number | null;
   destination_lat: number | null;

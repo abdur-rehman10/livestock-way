@@ -131,6 +131,7 @@ export default function TruckBoard() {
   const [haulerTrucksLoading, setHaulerTrucksLoading] = useState(false);
   const [haulerTruckError, setHaulerTruckError] = useState<string | null>(null);
   const [postDialogOpen, setPostDialogOpen] = useState(false);
+  const [detailListing, setDetailListing] = useState<TruckAvailability | null>(null);
   const userRole = storage.get<string | null>(STORAGE_KEYS.USER_ROLE, null);
   const userId = storage.get<string | null>(STORAGE_KEYS.USER_ID, null);
   const [shipperLoads, setShipperLoads] = useState<LoadSummary[]>([]);
@@ -725,36 +726,6 @@ export default function TruckBoard() {
                   listing.destination_lat,
                   listing.destination_lng
                 );
-                const listingInterest = interestForm[listing.id] ?? { loadId: "", message: "" };
-                const selectedLoad = listingInterest.loadId
-                  ? selectableLoads.find((load) => String(load.id) === listingInterest.loadId)
-                  : undefined;
-                const selectedLoadBudget =
-                  selectedLoad?.offer_price != null
-                    ? (() => {
-                        const numericBudget = Number(selectedLoad.offer_price);
-                        return Number.isNaN(numericBudget)
-                          ? selectedLoad.offer_price
-                          : numericBudget.toLocaleString();
-                      })()
-                    : null;
-                const capacitySummary = [
-                  typeof listing.capacity_headcount === "number" && listing.capacity_headcount > 0
-                    ? `${listing.capacity_headcount} head`
-                    : null,
-                  typeof listing.capacity_weight_kg === "number" && listing.capacity_weight_kg > 0
-                    ? `${listing.capacity_weight_kg} kg`
-                    : null,
-                ]
-                  .filter(Boolean)
-                  .join(" • ") || "Not specified";
-                const key = listingInterest.loadId ? `${listing.id}-${listingInterest.loadId}` : "";
-                const requestDisabled =
-                  listing.is_external ||
-                  !listingInterest.loadId ||
-                  shipperLoadsLoading ||
-                  selectableLoads.length === 0 ||
-                  (!!key && requestedPairs.has(key));
                 return (
                   <div
                     key={listing.id}
@@ -801,97 +772,16 @@ export default function TruckBoard() {
                         </p>
                       )}
                     </div>
-                    {userRole === "shipper" && (
+                    {listing.is_external && (
                       <div className="flex flex-col gap-3 w-full md:max-w-sm md:pl-4 md:border-l md:border-dashed md:border-gray-200">
-                        <div className="rounded-lg border bg-muted/40 px-3 py-2 text-[11px] text-gray-600 space-y-1">
-                          <div className="flex items-center justify-between">
-                            <span className="text-xs font-semibold text-gray-900">Truck snapshot</span>
-                            <Badge
-                              variant={listing.allow_shared ? "outline" : "default"}
-                              className="text-[10px] uppercase tracking-wide"
-                            >
-                              {listing.allow_shared ? "Shared" : "Exclusive"}
-                            </Badge>
-                          </div>
-                          <div>
-                            Route:{" "}
-                            {listing.destination_location_text
-                              ? `${listing.origin_location_text} → ${listing.destination_location_text}`
-                              : listing.origin_location_text}
-                          </div>
-                          <div>Capacity: {capacitySummary}</div>
-                          <div>
-                            Available from {new Date(listing.available_from).toLocaleDateString()}
-                          </div>
-                          {listing.notes && <div>Notes: {listing.notes}</div>}
-                        </div>
-
-                        <div className="space-y-1">
-                          <Label className="text-xs uppercase tracking-wide text-gray-500">
-                            Attach one of your loads
-                          </Label>
-                          {shipperLoadsLoading ? (
-                            <p className="text-xs text-gray-500">Loading your loads…</p>
-                          ) : selectableLoads.length === 0 ? (
-                            <p className="text-xs text-gray-500">
-                              You do not have any open loads yet. Post a load first from the Loadboard.
-                            </p>
-                          ) : (
-                            <Select
-                              value={listingInterest.loadId || undefined}
-                              onValueChange={(value) => updateInterest(listing.id, "loadId", value)}
-                            >
-                              <SelectTrigger>
-                                <SelectValue placeholder="Select load" />
-                              </SelectTrigger>
-                              <SelectContent>
-                                {selectableLoads.map((load) => (
-                                  <SelectItem key={load.id} value={String(load.id)}>
-                                    {load.title || `Load #${load.id}`} · {load.pickup_location} →{" "}
-                                    {load.dropoff_location}
-                                  </SelectItem>
-                                ))}
-                              </SelectContent>
-                            </Select>
-                          )}
-                        </div>
-
-                        {selectedLoad && (
-                          <div className="rounded-md border px-3 py-2 text-[11px] text-gray-600 space-y-0.5">
-                            <div className="text-xs font-semibold text-gray-900">Selected load</div>
-                            <div>
-                              {selectedLoad.pickup_location} → {selectedLoad.dropoff_location}
-                            </div>
-                            <div>
-                              {selectedLoad.quantity} {selectedLoad.species}
-                            </div>
-                            {selectedLoadBudget && <div>Budget: ${selectedLoadBudget}</div>}
-                          </div>
-                        )}
-
-                        <Textarea
-                          placeholder="Message to hauler (optional)"
-                          value={listingInterest.message ?? ""}
-                          onChange={(e) => updateInterest(listing.id, "message", e.target.value)}
-                          rows={3}
-                        />
-                        <div className="flex gap-2">
+                        <div className="flex">
                           <Button
                             size="sm"
                             variant="outline"
-                            disabled={listing.is_external}
                             className="flex-1"
-                            onClick={() => handleStartChat(listing.id)}
+                            onClick={() => setDetailListing(listing)}
                           >
-                            Start Chat
-                          </Button>
-                          <Button
-                            size="sm"
-                            className="flex-1"
-                            disabled={requestDisabled}
-                            onClick={() => handleRequestBooking(listing.id)}
-                          >
-                            Request Booking
+                            View Details
                           </Button>
                         </div>
                       </div>
@@ -1215,6 +1105,98 @@ export default function TruckBoard() {
           }}
         />
       )}
+      <Dialog open={!!detailListing} onOpenChange={(open) => !open && setDetailListing(null)}>
+        <DialogContent className="max-w-2xl">
+          <DialogHeader>
+            <DialogTitle>Truck Listing Details</DialogTitle>
+          </DialogHeader>
+          {detailListing && (
+            <div className="space-y-3 text-sm text-gray-700">
+              <div>
+                <div className="text-xs uppercase text-gray-400">Route</div>
+                <div className="text-gray-900">
+                  {detailListing.origin_location_text}
+                  {detailListing.destination_location_text
+                    ? ` → ${detailListing.destination_location_text}`
+                    : ""}
+                </div>
+              </div>
+              <div className="grid md:grid-cols-2 gap-3">
+                <div>
+                  <div className="text-xs uppercase text-gray-400">Available From</div>
+                  <div className="text-gray-900">
+                    {new Date(detailListing.available_from).toLocaleString()}
+                  </div>
+                </div>
+                <div>
+                  <div className="text-xs uppercase text-gray-400">Available Until</div>
+                  <div className="text-gray-900">
+                    {detailListing.available_until
+                      ? new Date(detailListing.available_until).toLocaleString()
+                      : "—"}
+                  </div>
+                </div>
+                {detailListing.external_contact_email && (
+                  <div>
+                    <div className="text-xs uppercase text-gray-400">Email</div>
+                    <div className="text-gray-900 break-all">
+                      {detailListing.external_contact_email}
+                    </div>
+                  </div>
+                )}
+                {detailListing.external_contact_phone && (
+                  <div>
+                    <div className="text-xs uppercase text-gray-400">Contact</div>
+                    <div className="text-gray-900">
+                      {detailListing.external_contact_phone}
+                    </div>
+                  </div>
+                )}
+                <div>
+                  <div className="text-xs uppercase text-gray-400">Capacity</div>
+                  <div className="text-gray-900">
+                    {[
+                      typeof detailListing.capacity_headcount === "number" &&
+                      detailListing.capacity_headcount > 0
+                        ? `${detailListing.capacity_headcount} head`
+                        : null,
+                      typeof detailListing.capacity_weight_kg === "number" &&
+                      detailListing.capacity_weight_kg > 0
+                        ? `${detailListing.capacity_weight_kg} kg`
+                        : null,
+                    ]
+                      .filter(Boolean)
+                      .join(" • ") || "Not specified"}
+                  </div>
+                </div>
+                <div>
+                  <div className="text-xs uppercase text-gray-400">Shared</div>
+                  <div className="text-gray-900">
+                    {detailListing.allow_shared ? "Yes" : "No"}
+                  </div>
+                </div>
+              </div>
+              {detailListing.notes && (
+                <div>
+                  <div className="text-xs uppercase text-gray-400">Notes</div>
+                  <div className="text-gray-900 whitespace-pre-line">
+                    {detailListing.notes}
+                  </div>
+                </div>
+              )}
+              {detailListing.post_link && (
+                <Button
+                  variant="outline"
+                  className="w-full"
+                  onClick={() => window.open(detailListing.post_link!, "_blank")}
+                >
+                  Visit Post Link
+                </Button>
+              )}
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
