@@ -279,6 +279,10 @@ export default function SignupLogin({ preselectedRole, onAuth, onForgotPassword,
         onSelectChange={(code) => setSelectedPlan(code)}
         onContinue={handlePlanContinue}
         onBack={() => setSignupStep('info')}
+        onLoginTab={() => {
+          setMode('login');
+          setSignupStep('info');
+        }}
         continueDisabled={signupLoading}
         getCtaConfig={(plan) =>
           signupLoading ? { label: "Processing...", disabled: true } : {}
