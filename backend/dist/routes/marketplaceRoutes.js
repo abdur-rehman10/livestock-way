@@ -114,6 +114,15 @@ router.patch("/truck-board/:id", auth_1.default, async (req, res) => {
         if (!availability) {
             return res.status(404).json({ error: "Listing not found" });
         }
+        if (availability.is_external) {
+            return res.status(403).json({ error: "External listings are read-only." });
+        }
+        if (availability.is_external) {
+            return res.status(403).json({ error: "External listings are read-only." });
+        }
+        if (availability.is_external) {
+            return res.status(403).json({ error: "External listings are read-only." });
+        }
         const haulerId = await resolveHaulerId(authUser);
         if (!isSuperAdminUser(authUser) &&
             (!haulerId || availability.hauler_id !== haulerId)) {
@@ -231,6 +240,9 @@ router.post("/loads/:loadId/offers", auth_1.default, async (req, res) => {
         const load = await (0, marketplaceService_1.getLoadById)(loadId);
         if (!load) {
             return res.status(404).json({ error: "Load not found" });
+        }
+        if (load.is_external) {
+            return res.status(403).json({ error: "External loads are read-only and cannot receive offers." });
         }
         if (isShipperForLoad(authUser, load)) {
             return res.status(400).json({ error: "You cannot bid on your own load." });
@@ -1698,6 +1710,13 @@ router.post("/truck-board/:id/bookings", auth_1.default, async (req, res) => {
         const availabilityId = req.params.id;
         if (!availabilityId) {
             return res.status(400).json({ error: "Missing availability id" });
+        }
+        const availability = await (0, marketplaceService_1.getTruckAvailabilityById)(availabilityId);
+        if (!availability) {
+            return res.status(404).json({ error: "Listing not found" });
+        }
+        if (availability.is_external) {
+            return res.status(403).json({ error: "External listings are read-only." });
         }
         const booking = await (0, marketplaceService_1.createBookingForAvailability)({
             truckAvailabilityId: availabilityId,

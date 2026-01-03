@@ -10,8 +10,16 @@ export function useHaulerSubscription() {
   const [data, setData] = useState<HaulerSubscriptionState | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const role = storage.get<string | null>(STORAGE_KEYS.USER_ROLE, null);
+  const isHauler = (role ?? "").toLowerCase().startsWith("hauler");
 
   const refresh = async () => {
+    if (!isHauler) {
+      setData(null);
+      setError(null);
+      setLoading(false);
+      return;
+    }
     try {
       setLoading(true);
       setError(null);
@@ -30,9 +38,11 @@ export function useHaulerSubscription() {
   };
 
   useEffect(() => {
-    refresh();
+    if (isHauler) {
+      refresh();
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [isHauler]);
 
   const isIndividualHauler =
     (data?.hauler_type ?? "").toString().toUpperCase() === "INDIVIDUAL";

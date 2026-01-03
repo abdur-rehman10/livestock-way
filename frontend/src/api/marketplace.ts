@@ -107,6 +107,14 @@ export interface OfferMessage {
   created_at: string;
 }
 
+export interface HaulerOfferSummary {
+  load_id: string;
+  status: LoadOfferStatus;
+  offered_amount: string;
+  currency: string;
+  created_at: string;
+}
+
 export interface TripRecord {
   id: string;
   load_id: string;
@@ -315,6 +323,16 @@ export async function fetchLoadOffers(loadId: string, page = 1, pageSize = 20) {
   return marketplaceRequest<{ items: LoadOffer[]; total: number; page: number; pageSize: number }>(
     `/loads/${loadId}/offers?${query}`
   );
+}
+
+export async function fetchHaulerOfferSummaries() {
+  return marketplaceRequest<{ items: HaulerOfferSummary[] }>(
+    `/hauler/offers/summary`
+  );
+}
+
+export async function fetchShipperOfferCount() {
+  return marketplaceRequest<{ count: number }>(`/shipper/offers/count`);
 }
 
 export async function createLoadOfferRequest(loadId: string, payload: {

@@ -127,7 +127,7 @@ export default function WalletTab() {
     },
     RELEASED: {
       label: "Released",
-      badgeClass: "bg-emerald-50 text-emerald-700 border border-emerald-200",
+      badgeClass: "bg-primary-50 text-emerald-700 border border-emerald-200",
     },
     REFUNDED_TO_SHIPPER: {
       label: "Refunded",
@@ -289,7 +289,7 @@ export default function WalletTab() {
                         </td>
                       </tr>
                       {showRefundRow && splitRefund !== null && (
-                        <tr className="border-t border-gray-50 bg-emerald-50/40 text-[10px] text-emerald-800">
+                        <tr className="border-t border-gray-50 bg-primary-50/40 text-[10px] text-emerald-800">
                           <td className="px-4 py-2">
                             {p.split_resolved_at
                               ? new Date(p.split_resolved_at).toLocaleString()

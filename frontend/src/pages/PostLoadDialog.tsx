@@ -201,27 +201,28 @@ export function PostLoadDialog({ open = false, onOpenChange, initialData }: Post
 
   return (
     <Dialog open={open} onOpenChange={(value) => onOpenChange?.(value)}>
-      <DialogContent className="max-w-md max-h-[90vh] overflow-y-auto">
-        <DialogHeader>
-          <DialogTitle>Post a Load</DialogTitle>
-          <DialogDescription>
+<DialogContent className="!max-w-[50vw] max-h-[90vh] overflow-y-auto"  style={{ maxWidth: '60vw' }}> 
+        <DialogHeader className="pb-4">
+          <DialogTitle className="text-2xl">Post a Load</DialogTitle>
+          <DialogDescription className="text-base">
             Fill in the details below to post your livestock load and get matched with carriers
           </DialogDescription>
         </DialogHeader>
 
-        <form onSubmit={handleSubmit} className="space-y-4">
-          <div className="space-y-2">
-            <Label>Payment Mode</Label>
-            <div className="grid grid-cols-2 gap-2">
+        <form onSubmit={handleSubmit} className="space-y-6">
+          {/* Payment Mode */}
+          <div className="space-y-3">
+            <Label className="text-base font-semibold">Payment Mode</Label>
+            <div className="grid grid-cols-2 gap-4">
               <Button
                 type="button"
                 variant={paymentMode === "ESCROW" ? "default" : "outline"}
-                className="justify-start"
+                className="h-auto py-4 justify-start"
                 onClick={() => handleSelectPaymentMode("ESCROW")}
               >
                 <div className="text-left">
-                  <div className="font-semibold text-sm">Escrow (Recommended)</div>
-                  <div className="text-[11px] text-gray-200">
+                  <div className="font-semibold text-base mb-1">Escrow (Recommended)</div>
+                  <div className="text-xs opacity-90 leading-relaxed">
                     Funds held until delivery, disputes supported.
                   </div>
                 </div>
@@ -229,12 +230,12 @@ export function PostLoadDialog({ open = false, onOpenChange, initialData }: Post
               <Button
                 type="button"
                 variant={paymentMode === "DIRECT" ? "default" : "outline"}
-                className="justify-start"
+                className="h-auto py-4 justify-start"
                 onClick={() => handleSelectPaymentMode("DIRECT")}
               >
                 <div className="text-left">
-                  <div className="font-semibold text-sm">Direct Payment</div>
-                  <div className="text-[11px] text-gray-200">
+                  <div className="font-semibold text-base mb-1">Direct Payment</div>
+                  <div className="text-xs opacity-90 leading-relaxed">
                     Pay hauler directly; no escrow protections.
                   </div>
                 </div>
@@ -243,14 +244,14 @@ export function PostLoadDialog({ open = false, onOpenChange, initialData }: Post
           </div>
 
           {/* Species */}
-          <div className="space-y-2">
-            <Label htmlFor="species">Livestock Type</Label>
+          <div className="space-y-3">
+            <Label htmlFor="species" className="text-base font-semibold">Livestock Type</Label>
             <Select
               value={formData.species}
               onValueChange={(value) => setFormData({ ...formData, species: value })}
               required
             >
-              <SelectTrigger>
+              <SelectTrigger className="h-11">
                 <SelectValue placeholder="Select livestock type" />
               </SelectTrigger>
               <SelectContent>
@@ -264,24 +265,26 @@ export function PostLoadDialog({ open = false, onOpenChange, initialData }: Post
           </div>
 
           {/* Quantity and Weight */}
-          <div className="grid grid-cols-2 gap-3">
-            <div className="space-y-2">
-              <Label htmlFor="quantity">Quantity (Head)</Label>
+          <div className="grid grid-cols-2 gap-4">
+            <div className="space-y-3">
+              <Label htmlFor="quantity" className="text-base font-semibold">Quantity (Head)</Label>
               <Input
                 id="quantity"
                 type="number"
                 placeholder="50"
+                className="h-11"
                 value={formData.quantity}
                 onChange={(e) => setFormData({ ...formData, quantity: e.target.value })}
                 required
               />
             </div>
-            <div className="space-y-2">
-              <Label htmlFor="weight">Avg Weight (lbs)</Label>
+            <div className="space-y-3">
+              <Label htmlFor="weight" className="text-base font-semibold">Avg Weight (lbs)</Label>
               <Input
                 id="weight"
                 type="number"
                 placeholder="1200"
+                className="h-11"
                 value={formData.weight}
                 onChange={(e) => setFormData({ ...formData, weight: e.target.value })}
               />
@@ -289,8 +292,8 @@ export function PostLoadDialog({ open = false, onOpenChange, initialData }: Post
           </div>
 
           {/* Pickup Location */}
-          <div className="space-y-2">
-            <Label htmlFor="pickup">Pickup Location</Label>
+          <div className="space-y-3">
+            <Label htmlFor="pickup" className="text-base font-semibold">Pickup Location</Label>
             <AddressSearch
               value={pickupSearch}
               onChange={setPickupSearch}
@@ -298,10 +301,10 @@ export function PostLoadDialog({ open = false, onOpenChange, initialData }: Post
               disabled={isSubmitting}
             />
             <div className="relative">
-              <MapPin className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
+              <MapPin className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400" />
               <Input
                 id="pickup"
-                className="pl-10"
+                className="pl-10 h-11"
                 placeholder="Enter address or city"
                 value={formData.pickup}
                 onChange={(e) => setFormData({ ...formData, pickup: e.target.value })}
@@ -311,8 +314,8 @@ export function PostLoadDialog({ open = false, onOpenChange, initialData }: Post
           </div>
 
           {/* Dropoff Location */}
-          <div className="space-y-2">
-            <Label htmlFor="dropoff">Dropoff Location</Label>
+          <div className="space-y-3">
+            <Label htmlFor="dropoff" className="text-base font-semibold">Dropoff Location</Label>
             <AddressSearch
               value={dropoffSearch}
               onChange={setDropoffSearch}
@@ -320,10 +323,10 @@ export function PostLoadDialog({ open = false, onOpenChange, initialData }: Post
               disabled={isSubmitting}
             />
             <div className="relative">
-              <MapPin className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
+              <MapPin className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400" />
               <Input
                 id="dropoff"
-                className="pl-10"
+                className="pl-10 h-11"
                 placeholder="Enter address or city"
                 value={formData.dropoff}
                 onChange={(e) => setFormData({ ...formData, dropoff: e.target.value })}
@@ -333,15 +336,15 @@ export function PostLoadDialog({ open = false, onOpenChange, initialData }: Post
           </div>
 
           {/* Pickup Date */}
-          <div className="space-y-2">
-            <Label>Pickup Date</Label>
+          <div className="space-y-3">
+            <Label className="text-base font-semibold">Pickup Date</Label>
             <Popover>
               <PopoverTrigger asChild>
                 <Button
                   variant="outline"
-                  className="w-full justify-start text-left"
+                  className="w-full justify-start text-left h-11"
                 >
-                  <CalendarIcon className="mr-2 w-4 h-4" />
+                  <CalendarIcon className="mr-2 w-5 h-5" />
                   {date ? date.toLocaleDateString() : 'Select pickup date'}
                 </Button>
               </PopoverTrigger>
@@ -357,26 +360,27 @@ export function PostLoadDialog({ open = false, onOpenChange, initialData }: Post
           </div>
 
           {/* Offer Price */}
-          <div className="grid grid-cols-3 gap-3">
-            <div className="col-span-2 space-y-2">
-              <Label htmlFor="offerPrice">Offer Price</Label>
+          <div className="grid grid-cols-3 gap-4">
+            <div className="col-span-2 space-y-3">
+              <Label htmlFor="offerPrice" className="text-base font-semibold">Offer Price</Label>
               <Input
                 id="offerPrice"
                 type="number"
                 min="0"
                 step="0.01"
                 placeholder="Enter amount"
+                className="h-11"
                 value={formData.offerPrice}
                 onChange={(e) => setFormData({ ...formData, offerPrice: e.target.value })}
               />
             </div>
-            <div className="space-y-2">
-              <Label>Currency</Label>
+            <div className="space-y-3">
+              <Label className="text-base font-semibold">Currency</Label>
               <Select
                 value={formData.currency}
                 onValueChange={(value) => setFormData({ ...formData, currency: value })}
               >
-                <SelectTrigger>
+                <SelectTrigger className="h-11">
                   <SelectValue placeholder="Select currency" />
                 </SelectTrigger>
                 <SelectContent>
@@ -389,53 +393,59 @@ export function PostLoadDialog({ open = false, onOpenChange, initialData }: Post
           </div>
 
           {/* Visibility Control */}
-          <div className="space-y-3">
-            <Label>Load Visibility</Label>
+          <div className="space-y-4">
+            <Label className="text-base font-semibold">Load Visibility</Label>
             <Tabs 
               value={formData.visibility} 
               onValueChange={(value) => setFormData({ ...formData, visibility: value })}
               className="w-full"
             >
-              <TabsList className="grid w-full grid-cols-2">
-                <TabsTrigger value="public" className="flex items-center gap-2">
-                  <Globe className="w-4 h-4" />
+              <TabsList className="grid w-full grid-cols-2 h-12 p-1 bg-gray-100">
+                <TabsTrigger 
+                  value="public" 
+                  className="flex items-center gap-2 text-base data-[state=active]:bg-white data-[state=active]:shadow-sm"
+                >
+                  <Globe className="w-5 h-5" />
                   Public
                 </TabsTrigger>
-                <TabsTrigger value="private" className="flex items-center gap-2">
-                  <Lock className="w-4 h-4" />
+                <TabsTrigger 
+                  value="private" 
+                  className="flex items-center gap-2 text-base data-[state=active]:bg-white data-[state=active]:shadow-sm"
+                >
+                  <Lock className="w-5 h-5" />
                   Invite-Only
                 </TabsTrigger>
               </TabsList>
               
-              <TabsContent value="public" className="mt-3">
-                <div className="p-3 bg-blue-50 rounded-lg border border-blue-200">
-                  <p className="text-sm text-blue-800">
-                    <strong>Public:</strong> All verified carriers can see and bid on this load
+              <TabsContent value="public" className="mt-4">
+                <div className="p-4 bg-blue-50 rounded-lg border-2 border-blue-200">
+                  <p className="text-sm text-blue-900 leading-relaxed">
+                    <strong className="font-semibold">Public:</strong> All verified carriers can see and bid on this load
                   </p>
                 </div>
               </TabsContent>
               
-              <TabsContent value="private" className="mt-3 space-y-3">
-                <div className="p-3 bg-purple-50 rounded-lg border border-purple-200">
-                  <p className="text-sm text-purple-800">
-                    <strong>Private:</strong> Only invited carriers can see and bid on this load
+              <TabsContent value="private" className="mt-4 space-y-4">
+                <div className="p-4 bg-purple-50 rounded-lg border-2 border-purple-200">
+                  <p className="text-sm text-purple-900 leading-relaxed">
+                    <strong className="font-semibold">Private:</strong> Only invited carriers can see and bid on this load
                   </p>
                 </div>
 
                 {/* Invited Carriers */}
                 {invitedCarriers.length > 0 && (
-                  <div className="space-y-2">
-                    <Label>Invited Carriers ({invitedCarriers.length})</Label>
+                  <div className="space-y-3">
+                    <Label className="text-base font-semibold">Invited Carriers ({invitedCarriers.length})</Label>
                     <div className="flex flex-wrap gap-2">
                       {invitedCarriers.map(carrierId => {
                         const carrier = mockCarriers.find(c => c.id === carrierId);
                         return carrier ? (
-                          <Badge key={carrierId} variant="outline" className="pr-1">
+                          <Badge key={carrierId} variant="outline" className="pr-1 py-1.5 text-sm">
                             {carrier.name}
                             <button
                               type="button"
                               onClick={() => handleInviteCarrier(carrierId)}
-                              className="ml-2 hover:bg-gray-200 rounded-full p-0.5"
+                              className="ml-2 hover:bg-gray-200 rounded-full p-1"
                             >
                               <X className="w-3 h-3" />
                             </button>
@@ -447,24 +457,25 @@ export function PostLoadDialog({ open = false, onOpenChange, initialData }: Post
                 )}
 
                 {/* Carrier Search */}
-                <div className="space-y-2">
-                  <Label>Search and Invite Carriers</Label>
+                <div className="space-y-3">
+                  <Label className="text-base font-semibold">Search and Invite Carriers</Label>
                   <Input
                     placeholder="Search carriers..."
+                    className="h-11"
                     value={carrierSearch}
                     onChange={(e) => setCarrierSearch(e.target.value)}
                   />
-                  <div className="max-h-48 overflow-y-auto space-y-2 border rounded-lg p-2">
+                  <div className="max-h-56 overflow-y-auto space-y-2 border-2 rounded-lg p-3">
                     {filteredCarriers.map(carrier => (
                       <div
                         key={carrier.id}
-                        className="flex items-center justify-between p-2 hover:bg-gray-50 rounded cursor-pointer"
+                        className="flex items-center justify-between p-3 hover:bg-gray-50 rounded-lg cursor-pointer transition-colors"
                         onClick={() => handleInviteCarrier(carrier.id)}
                       >
                         <div className="flex items-center gap-3">
                           <Checkbox checked={invitedCarriers.includes(carrier.id)} />
                           <div>
-                            <p className="text-sm">{carrier.name}</p>
+                            <p className="text-sm font-medium">{carrier.name}</p>
                             <p className="text-xs text-gray-600">Rating: {carrier.rating} ⭐</p>
                           </div>
                         </div>
@@ -477,50 +488,55 @@ export function PostLoadDialog({ open = false, onOpenChange, initialData }: Post
           </div>
 
           {/* Special Requirements */}
-          <div className="space-y-2">
-            <Label htmlFor="requirements">Special Requirements (Optional)</Label>
+          <div className="space-y-3">
+            <Label htmlFor="requirements" className="text-base font-semibold">Special Requirements (Optional)</Label>
             <Textarea
               id="requirements"
               placeholder="e.g., Temperature controlled, hay required, rest stops needed"
-              rows={3}
+              rows={4}
+              className="resize-none"
               value={formData.specialRequirements}
               onChange={(e) => setFormData({ ...formData, specialRequirements: e.target.value })}
             />
           </div>
 
           {/* Price Estimate */}
-          <div className="bg-gray-50 rounded-lg p-4">
+          <div className="bg-gradient-to-br from-orange-50 to-orange-100 rounded-xl p-5 border-2 border-orange-200">
             <div className="flex items-center justify-between">
               <div>
-                <div className="text-sm text-gray-600 mb-1">Estimated Price</div>
-                <div className="text-2xl text-[#F97316]">{estimatedPrice}</div>
+                <div className="text-sm text-gray-700 mb-2 font-medium">Estimated Price</div>
+                <div className="text-3xl font-bold text-[#F97316]">{estimatedPrice}</div>
               </div>
-              <div className="text-xs text-gray-600 text-right">
+              <div className="text-xs text-gray-700 text-right bg-white/50 rounded-lg px-3 py-2">
                 Based on distance<br />and livestock type
               </div>
             </div>
           </div>
 
           {errorMessage && (
-            <div className="text-sm text-red-500">{errorMessage}</div>
+            <div className="p-3 bg-red-50 border-2 border-red-200 rounded-lg text-sm text-red-700">
+              {errorMessage}
+            </div>
           )}
           {successMessage && (
-            <div className="text-sm text-green-600">{successMessage}</div>
+            <div className="p-3 bg-green-50 border-2 border-green-200 rounded-lg text-sm text-green-700">
+              {successMessage}
+            </div>
           )}
 
           {/* Actions */}
-          <div className="flex gap-3 pt-4">
+          <div className="flex gap-4 pt-4">
             <Button
               type="button"
               variant="outline"
-              className="flex-1"
+              className="flex-1 h-12 text-base"
               onClick={() => onOpenChange?.(false)}
             >
               Cancel
             </Button>
             <Button
               type="submit"
-              className="flex-1 bg-[#F97316] hover:bg-[#ea580c]"
+              className="flex-1 h-12 text-base bg-[#F97316] hover:bg-[#ea580c] font-semibold"
               disabled={isSubmitting}
             >
               {isSubmitting ? 'Posting...' : 'Post Load'}
@@ -531,31 +547,32 @@ export function PostLoadDialog({ open = false, onOpenChange, initialData }: Post
 
       <Dialog open={directWarningOpen} onOpenChange={setDirectWarningOpen}>
         <DialogContent className="max-w-lg">
-          <div className="space-y-4">
-            <div className="space-y-1">
-              <h3 className="text-lg font-semibold text-gray-900">
+          <div className="space-y-5">
+            <div className="space-y-2">
+              <h3 className="text-xl font-semibold text-gray-900">
                 Direct payment is at your own risk
               </h3>
-              <p className="text-sm text-gray-600">
+              <p className="text-sm text-gray-600 leading-relaxed">
                 Paying the hauler directly means Livestock Way will not hold funds or mediate issues.
               </p>
             </div>
-            <ul className="list-disc pl-5 text-sm text-gray-700 space-y-1">
+            <ul className="list-disc pl-5 text-sm text-gray-700 space-y-2 leading-relaxed">
               <li>Livestock Way is not responsible for fraud, non-delivery, or payment issues.</li>
               <li>Disputes and escrow protections are disabled.</li>
               <li>Coordinate payment directly with the hauler.</li>
             </ul>
-            <label className="flex items-start gap-2 text-sm text-gray-800">
+            <label className="flex items-start gap-3 text-sm text-gray-800 cursor-pointer p-3 bg-gray-50 rounded-lg border">
               <Checkbox
                 checked={directDisclaimerAccepted}
                 onCheckedChange={(checked) => setDirectDisclaimerAccepted(!!checked)}
               />
-              <span>I understand and accept</span>
+              <span className="leading-relaxed">I understand and accept the risks of direct payment</span>
             </label>
-            <div className="flex justify-end gap-2">
+            <div className="flex justify-end gap-3 pt-2">
               <Button
                 type="button"
                 variant="outline"
+                className="h-11"
                 onClick={() => {
                   setDirectWarningOpen(false);
                   setDirectDisclaimerAccepted(false);
@@ -566,7 +583,7 @@ export function PostLoadDialog({ open = false, onOpenChange, initialData }: Post
               </Button>
               <Button
                 type="button"
-                className="bg-red-600 hover:bg-red-700"
+                className="bg-red-600 hover:bg-red-700 h-11 font-semibold"
                 disabled={!directDisclaimerAccepted}
                 onClick={confirmDirectPayment}
               >

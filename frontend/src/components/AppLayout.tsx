@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Link, NavLink, useNavigate, useLocation } from "react-router-dom";
 import { Button } from "./ui/button";
 import { Avatar, AvatarFallback } from "./ui/avatar";
@@ -33,6 +33,7 @@ import logo from "../assets/livestockway-logo.svg";
 import { storage, STORAGE_KEYS } from "../lib/storage";
 import { SubscriptionCTA } from "./SubscriptionCTA";
 import { useHaulerSubscription } from "../hooks/useHaulerSubscription";
+import { fetchBookings, fetchShipperOfferCount } from "../api/marketplace";
 
 interface AppLayoutProps {
   children: React.ReactNode;
@@ -43,6 +44,8 @@ interface AppLayoutProps {
 export function AppLayout({ children, userRole, onLogout }: AppLayoutProps) {
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
   const [showNotifications, setShowNotifications] = useState(false);
+  const [haulerBookingCount, setHaulerBookingCount] = useState(0);
+  const [shipperOfferCount, setShipperOfferCount] = useState(0);
   const navigate = useNavigate();
   const location = useLocation();
   const accountMode = storage.get<string>(STORAGE_KEYS.ACCOUNT_MODE, 'COMPANY');
@@ -63,6 +66,7 @@ export function AppLayout({ children, userRole, onLogout }: AppLayoutProps) {
       label: 'Hauler',
       routes: [
         { path: '/hauler/dashboard', icon: LayoutDashboard, label: 'Dashboard' },
+        { path: '/hauler/bookings', icon: Calendar, label: 'Bookings' },
         { path: '/hauler/loadboard', icon: Package, label: 'Loadboard' },
         { path: '/hauler/truck-board', icon: Truck, label: 'Truck Board' },
         { path: '/hauler/my-loads', icon: ClipboardList, label: 'My Loads' },
@@ -80,6 +84,7 @@ export function AppLayout({ children, userRole, onLogout }: AppLayoutProps) {
       routes: [
         { path: '/shipper/dashboard', icon: LayoutDashboard, label: 'Dashboard' },
         { path: '/shipper/my-loads', icon: Package, label: 'My Loads' },
+        { path: '/shipper/offers', icon: MessageSquare, label: 'Offers' },
         { path: '/shipper/truck-board', icon: Truck, label: 'Truck Board' },
         { path: '/shipper/trips', icon: MapPin, label: 'Track Shipments' },
         { path: '/shipper/payments', icon: DollarSign, label: 'Payments' },
@@ -124,6 +129,47 @@ export function AppLayout({ children, userRole, onLogout }: AppLayoutProps) {
       ],
     },
   };
+
+  useEffect(() => {
+    let isMounted = true;
+
+    const loadBookingsCount = async () => {
+      if (userRole !== 'hauler') return;
+      try {
+        const resp = await fetchBookings();
+        const requestedCount = resp.items.filter(
+          (booking) => (booking.status ?? '').toUpperCase() === 'REQUESTED'
+        ).length;
+        if (isMounted) setHaulerBookingCount(requestedCount);
+      } catch {
+        if (isMounted) setHaulerBookingCount(0);
+      }
+    };
+
+    loadBookingsCount();
+    return () => {
+      isMounted = false;
+    };
+  }, [userRole, location.pathname]);
+
+  useEffect(() => {
+    let isMounted = true;
+
+    const loadOfferCount = async () => {
+      if (userRole !== 'shipper') return;
+      try {
+        const resp = await fetchShipperOfferCount();
+        if (isMounted) setShipperOfferCount(Number(resp.count ?? 0));
+      } catch {
+        if (isMounted) setShipperOfferCount(0);
+      }
+    };
+
+    loadOfferCount();
+    return () => {
+      isMounted = false;
+    };
+  }, [userRole, location.pathname]);
 
   const config = roleConfig[userRole];
   const routes =
@@ -205,15 +251,23 @@ export function AppLayout({ children, userRole, onLogout }: AppLayoutProps) {
             <div className="space-y-1">
               {routes.map((route) => {
                 const Icon = route.icon;
+                const showBookingBadge =
+                  userRole === 'hauler' &&
+                  route.path === '/hauler/bookings' &&
+                  haulerBookingCount > 0;
+                const showOfferBadge =
+                  userRole === 'shipper' &&
+                  route.path === '/shipper/offers' &&
+                  shipperOfferCount > 0;
                 return (
                   <NavLink
                     key={route.path}
                     to={route.path}
                     className={({ isActive }) =>
                       [
-                        "flex items-center gap-3 px-3 py-2.5 rounded-lg transition-colors",
+                        "relative flex items-center gap-3 px-3 py-2.5 rounded-lg transition-colors",
                         isActive
-                          ? "bg-emerald-50 text-emerald-700"
+                          ? "bg-primary-50 text-emerald-700"
                           : "text-gray-600 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-800",
                         !isSidebarOpen && "justify-center",
                       ].join(" ")
@@ -222,6 +276,22 @@ export function AppLayout({ children, userRole, onLogout }: AppLayoutProps) {
                   >
                     <Icon className="w-5 h-5 flex-shrink-0" />
                     {isSidebarOpen && <span>{route.label}</span>}
+                    {showBookingBadge &&
+                      (isSidebarOpen ? (
+                        <span className="ml-auto rounded-full bg-primary-500 px-2 py-0.5 text-xs font-semibold text-white">
+                          {haulerBookingCount}
+                        </span>
+                      ) : (
+                        <span className="absolute right-2 top-2 h-2 w-2 rounded-full bg-primary-500" />
+                      ))}
+                    {showOfferBadge &&
+                      (isSidebarOpen ? (
+                        <span className="ml-auto rounded-full bg-blue-500 px-2 py-0.5 text-xs font-semibold text-white">
+                          {shipperOfferCount}
+                        </span>
+                      ) : (
+                        <span className="absolute right-2 top-2 h-2 w-2 rounded-full bg-blue-500" />
+                      ))}
                   </NavLink>
                 );
               })}

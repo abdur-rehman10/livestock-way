@@ -36,6 +36,7 @@ export interface Load {
   direct_payment_disclaimer_accepted_at?: string | null;
   direct_payment_disclaimer_version?: string | null;
   is_external?: boolean;
+  offer_count?: number;
 }
 
 export interface CreateLoadPayload {
@@ -130,6 +131,35 @@ export async function assignLoad(
   }
   const json = await response.json();
   return json.data as Load;
+}
+
+export async function deleteLoad(loadId: number): Promise<void> {
+  const response = await fetch(`${API_BASE_URL}/api/loads/${loadId}`, {
+    method: "DELETE",
+    headers: getAuthHeaders(),
+  });
+  if (!response.ok) {
+    const errorText = await response.text().catch(() => "");
+    throw new Error(
+      `Failed to delete load (status ${response.status}): ${errorText}`
+    );
+  }
+}
+
+export async function updateLoadStatus(loadId: number, status: "posted" | "cancelled") {
+  const response = await fetch(`${API_BASE_URL}/api/loads/${loadId}/status`, {
+    method: "PATCH",
+    headers: getAuthHeaders({ "Content-Type": "application/json" }),
+    body: JSON.stringify({ status }),
+  });
+  if (!response.ok) {
+    const errorText = await response.text().catch(() => "");
+    throw new Error(
+      `Failed to update load status (status ${response.status}): ${errorText}`
+    );
+  }
+  const json = await response.json();
+  return json.data as Pick<Load, "id" | "status">;
 }
 
 export async function startLoad(loadId: number): Promise<Load> {

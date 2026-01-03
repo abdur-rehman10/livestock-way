@@ -59,6 +59,7 @@ export interface LoadRecord {
     currency: string | null;
     asking_amount: string | null;
     awarded_offer_id: string | null;
+    is_external?: boolean;
     assigned_to_user_id?: string | null;
     payment_mode?: PaymentMode;
     direct_payment_disclaimer_accepted_at?: string | null;
@@ -94,11 +95,15 @@ export interface TruckAvailabilityRecord {
     capacity_weight_kg: number | null;
     allow_shared: boolean;
     notes: string | null;
+    post_link?: string | null;
+    external_contact_email?: string | null;
+    external_contact_phone?: string | null;
     origin_lat: number | null;
     origin_lng: number | null;
     destination_lat: number | null;
     destination_lng: number | null;
     is_active: boolean;
+    is_external?: boolean;
     created_at: string;
     updated_at: string;
 }
@@ -231,6 +236,7 @@ type LoadRow = {
     currency: string | null;
     asking_amount: string | null;
     awarded_offer_id: string | null;
+    is_external?: boolean | null;
     payment_mode?: string | null;
     direct_payment_disclaimer_accepted_at?: string | null;
     direct_payment_disclaimer_version?: string | null;

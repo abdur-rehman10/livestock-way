@@ -72,7 +72,7 @@ export default function HaulerSubscription() {
                 <Badge
                   className={
                     isActive
-                      ? "bg-emerald-100 text-emerald-800"
+                      ? "bg-primary-100 text-emerald-800"
                       : "bg-slate-100 text-slate-700"
                   }
                 >

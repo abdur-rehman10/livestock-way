@@ -78,6 +78,8 @@ router.get("/", auth_1.default, async (req, res) => {
           pickup_window_end AS pickup_date_to,
           estimated_weight_kg AS total_weight_kg,
           price_offer_amount AS budget_amount,
+          is_external,
+          post_link,
           status,
           created_at
         FROM loads
@@ -97,6 +99,7 @@ router.get("/", auth_1.default, async (req, res) => {
           capacity_weight_kg,
           status,
           notes,
+          is_external,
           created_at
         FROM trucks
         WHERE status = 'active'
@@ -113,6 +116,7 @@ router.get("/", auth_1.default, async (req, res) => {
                     capacity_weight_kg: row.capacity_weight_kg,
                     species_supported: meta.species_supported ?? null,
                     status: row.status,
+                    is_external: row.is_external ?? false,
                     created_at: row.created_at,
                 };
             });

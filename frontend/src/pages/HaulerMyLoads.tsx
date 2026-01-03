@@ -471,7 +471,7 @@ useEffect(() => {
       <div className="rounded-3xl border border-slate-100 bg-white px-6 py-4 shadow-sm">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div className="flex items-center gap-3">
-            <span className="inline-flex h-12 w-12 items-center justify-center rounded-2xl bg-emerald-50 text-emerald-600">
+            <span className="inline-flex h-12 w-12 items-center justify-center rounded-2xl bg-primary-50 text-emerald-600">
               <ClipboardList className="h-5 w-5" />
             </span>
             <div>

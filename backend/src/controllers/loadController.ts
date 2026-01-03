@@ -105,8 +105,11 @@ export async function getLoads(req: Request, res: Response) {
         awarded_offer_id,
         payment_mode,
         direct_payment_disclaimer_accepted_at,
-        direct_payment_disclaimer_version
+        direct_payment_disclaimer_version,
+        COALESCE(load_offer_counts.offer_count, 0) AS offer_count
       FROM loads
+      LEFT JOIN load_offer_counts
+        ON load_offer_counts.load_id = loads.id
       WHERE is_deleted = FALSE
     `;
 
@@ -771,6 +774,143 @@ export async function assignLoad(req: Request, res: Response) {
     });
   } finally {
     client.release();
+  }
+}
+
+// DELETE /api/loads/:id
+export async function deleteLoad(req: Request, res: Response) {
+  try {
+    const authReq = req as AuthenticatedRequest;
+    const userId = authReq.user?.id ? Number(authReq.user.id) : null;
+    if (!userId) {
+      return res.status(401).json({ status: "ERROR", message: "Unauthorized" });
+    }
+
+    const loadId = Number(req.params.id);
+    if (!loadId || Number.isNaN(loadId)) {
+      return res.status(400).json({ status: "ERROR", message: "Invalid load id" });
+    }
+
+    const shipperId = await ensureShipperProfile(userId);
+    const loadResult = await pool.query(
+      `
+        SELECT id, shipper_id, status
+        FROM loads
+        WHERE id = $1 AND is_deleted = FALSE
+        LIMIT 1
+      `,
+      [loadId]
+    );
+    if (!loadResult.rowCount) {
+      return res.status(404).json({ status: "ERROR", message: "Load not found" });
+    }
+
+    const loadRow = loadResult.rows[0];
+    if (Number(loadRow.shipper_id) !== Number(shipperId)) {
+      return res.status(403).json({ status: "ERROR", message: "Forbidden" });
+    }
+
+    const status = String(loadRow.status ?? "").toLowerCase();
+    if (!["posted", "draft", "cancelled"].includes(status)) {
+      return res.status(400).json({
+        status: "ERROR",
+        message: "Load cannot be deleted after booking or trip start",
+      });
+    }
+
+    await pool.query(
+      `
+        UPDATE loads
+        SET is_deleted = TRUE,
+            deleted_at = NOW()
+        WHERE id = $1
+      `,
+      [loadId]
+    );
+
+    return res.status(200).json({ status: "OK" });
+  } catch (error) {
+    console.error("Error deleting load:", error);
+    return res.status(500).json({
+      status: "ERROR",
+      message: "Failed to delete load",
+    });
+  }
+}
+
+// PATCH /api/loads/:id/status
+export async function updateLoadStatus(req: Request, res: Response) {
+  try {
+    const authReq = req as AuthenticatedRequest;
+    const userId = authReq.user?.id ? Number(authReq.user.id) : null;
+    if (!userId) {
+      return res.status(401).json({ status: "ERROR", message: "Unauthorized" });
+    }
+
+    const loadId = Number(req.params.id);
+    if (!loadId || Number.isNaN(loadId)) {
+      return res.status(400).json({ status: "ERROR", message: "Invalid load id" });
+    }
+
+    const nextStatus = String(req.body?.status ?? "").toLowerCase();
+    if (!["posted", "cancelled", "draft"].includes(nextStatus)) {
+      return res.status(400).json({
+        status: "ERROR",
+        message: "Status must be posted or cancelled",
+      });
+    }
+
+    const shipperId = await ensureShipperProfile(userId);
+    const loadResult = await pool.query(
+      `
+        SELECT id, shipper_id, status, is_external
+        FROM loads
+        WHERE id = $1 AND is_deleted = FALSE
+        LIMIT 1
+      `,
+      [loadId]
+    );
+    if (!loadResult.rowCount) {
+      return res.status(404).json({ status: "ERROR", message: "Load not found" });
+    }
+
+    const loadRow = loadResult.rows[0];
+    if (Number(loadRow.shipper_id) !== Number(shipperId)) {
+      return res.status(403).json({ status: "ERROR", message: "Forbidden" });
+    }
+    if (loadRow.is_external) {
+      return res.status(403).json({
+        status: "ERROR",
+        message: "External loads cannot be updated",
+      });
+    }
+
+    const currentStatus = String(loadRow.status ?? "").toLowerCase();
+    if (!["posted", "cancelled", "draft"].includes(currentStatus)) {
+      return res.status(400).json({
+        status: "ERROR",
+        message: "Load status cannot be changed after booking or trip start",
+      });
+    }
+
+    const updateResult = await pool.query(
+      `
+        UPDATE loads
+        SET status = $2,
+            updated_at = NOW()
+        WHERE id = $1
+        RETURNING id, status
+      `,
+      [loadId, nextStatus]
+    );
+
+    return res.status(200).json({ status: "OK", data: updateResult.rows[0] });
+  } catch (error) {
+    console.error("Error updating load status:", error);
+    return res.status(500).json({
+      status: "ERROR",
+      message: "Failed to update load status",
+    });
   }
 }
 

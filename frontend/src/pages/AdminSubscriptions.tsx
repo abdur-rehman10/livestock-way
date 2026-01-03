@@ -216,7 +216,7 @@ export default function AdminSubscriptions() {
                             <Badge
                               className={
                                 (row.subscription_status ?? "").toUpperCase() === "ACTIVE"
-                                  ? "bg-emerald-100 text-emerald-800"
+                                  ? "bg-primary-100 text-emerald-800"
                                   : "bg-slate-100 text-slate-700"
                               }
                             >

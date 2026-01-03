@@ -153,7 +153,7 @@ const TripChat: React.FC = () => {
             <p>No messages yet. Start the conversation.</p>
             <button
               type="button"
-              className="rounded-md border border-emerald-200 px-3 py-1.5 text-[11px] font-medium text-emerald-700 hover:bg-emerald-50"
+              className="rounded-md border border-emerald-200 px-3 py-1.5 text-[11px] font-medium text-emerald-700 hover:bg-primary-50"
               onClick={() => messageInputRef.current?.focus()}
             >
               Start chatting
@@ -208,7 +208,7 @@ const TripChat: React.FC = () => {
           <button
             type="submit"
             disabled={sending || !offerId}
-            className="rounded-md bg-emerald-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-emerald-700 disabled:opacity-60"
+            className="rounded-md bg-primary-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-primary-700 disabled:opacity-60"
           >
             {sending ? "Sending…" : "Send"}
           </button>

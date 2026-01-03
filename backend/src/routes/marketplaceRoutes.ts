@@ -437,6 +437,73 @@ router.get(
   }
 );
 
+router.get(
+  "/hauler/offers/summary",
+  authRequired,
+  async (req, res) => {
+    try {
+      const authUser = getAuthUser(req);
+      if (!isHaulerUser(authUser)) {
+        return res.status(403).json({ error: "Only haulers can access offers" });
+      }
+      const haulerId = await resolveHaulerId(authUser);
+      if (!haulerId) {
+        return res.status(400).json({ error: "Invalid hauler profile" });
+      }
+      const result = await pool.query(
+        `
+          SELECT DISTINCT ON (load_id)
+            load_id::text AS load_id,
+            status,
+            offered_amount,
+            currency,
+            created_at
+          FROM load_offers
+          WHERE hauler_id = $1
+          ORDER BY load_id, created_at DESC
+        `,
+        [haulerId]
+      );
+      res.json({ items: result.rows });
+    } catch (err) {
+      console.error("hauler offer summary error", err);
+      res.status(500).json({ error: "Failed to load offer summary" });
+    }
+  }
+);
+
+router.get(
+  "/shipper/offers/count",
+  authRequired,
+  async (req, res) => {
+    try {
+      const authUser = getAuthUser(req);
+      if (!isShipperUser(authUser)) {
+        return res.status(403).json({ error: "Only shippers can access offers" });
+      }
+      const shipperId = await resolveShipperId(authUser);
+      if (!shipperId) {
+        return res.status(400).json({ error: "Invalid shipper profile" });
+      }
+      const result = await pool.query(
+        `
+          SELECT COUNT(*)::int AS count
+          FROM load_offers lo
+          JOIN loads l ON l.id = lo.load_id
+          WHERE l.shipper_id = $1
+            AND l.is_deleted = FALSE
+            AND lo.status = 'PENDING'
+        `,
+        [shipperId]
+      );
+      res.json({ count: result.rows[0]?.count ?? 0 });
+    } catch (err) {
+      console.error("shipper offer count error", err);
+      res.status(500).json({ error: "Failed to load offer count" });
+    }
+  }
+);
+
 router.post(
   "/load-offers/:offerId/withdraw",
   authRequired,

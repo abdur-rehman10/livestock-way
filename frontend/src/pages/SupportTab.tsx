@@ -306,7 +306,7 @@ export default function SupportTab() {
                         t.status === "open"
                           ? "bg-orange-50 text-orange-700 border border-orange-200"
                           : t.status === "resolved"
-                          ? "bg-emerald-50 text-emerald-700 border border-emerald-200"
+                          ? "bg-primary-50 text-emerald-700 border border-emerald-200"
                           : "bg-gray-50 text-gray-600 border border-gray-200"
                       }`}
                     >

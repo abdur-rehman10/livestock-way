@@ -3,6 +3,8 @@ import {
   getLoads,
   getLoadById,
   createLoad,
+  deleteLoad,
+  updateLoadStatus,
   assignLoad,
   startLoad,
   completeLoad,
@@ -52,6 +54,24 @@ router.post(
   requireRoles(["hauler", "driver"]),
   auditRequest("load:complete", (req) => `load:${req.params.id}`),
   completeLoad
+);
+
+// DELETE /api/loads/:id
+router.delete(
+  "/:id",
+  authRequired,
+  requireRoles(["shipper"]),
+  auditRequest("load:delete", (req) => `load:${req.params.id}`),
+  deleteLoad
+);
+
+// PATCH /api/loads/:id/status
+router.patch(
+  "/:id/status",
+  authRequired,
+  requireRoles(["shipper"]),
+  auditRequest("load:status", (req) => `load:${req.params.id}`),
+  updateLoadStatus
 );
 
 router.use("/:id/messages", tripMessageRoutes);

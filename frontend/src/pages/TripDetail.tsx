@@ -67,7 +67,7 @@ const statusColor: Record<string, string> = {
   open: "bg-gray-100 text-gray-700",
   assigned: "bg-amber-100 text-amber-800",
   in_transit: "bg-sky-100 text-sky-800",
-  delivered: "bg-emerald-100 text-emerald-800",
+  delivered: "bg-primary-100 text-emerald-800",
 };
 
 const resolveEpodUrl = (url?: string | null) => {
@@ -994,7 +994,7 @@ export function HaulerTripView() {
                 marketplacePayment?.status === "ESCROW_FUNDED" && (
                   <Button
                     size="sm"
-                    className="bg-emerald-600 text-white"
+                    className="bg-primary-600 text-white"
                     onClick={handleConfirmDelivery}
                     disabled={tripActionLoading}
                   >
@@ -1066,7 +1066,7 @@ export function HaulerTripView() {
                     className={[
                       "absolute -left-[9px] flex h-3 w-3 items-center justify-center rounded-full border",
                       isDone
-                        ? "border-emerald-500 bg-emerald-500"
+                        ? "border-emerald-500 bg-primary-500"
                         : isActive
                           ? "border-emerald-500 bg-white"
                           : "border-gray-300 bg-white",
@@ -1087,7 +1087,7 @@ export function HaulerTripView() {
                         {event.label}
                       </span>
                       {!event.at && isActive && (
-                        <span className="rounded-full bg-emerald-50 px-2 py-[1px] text-[10px] font-medium text-emerald-700">
+                        <span className="rounded-full bg-primary-50 px-2 py-[1px] text-[10px] font-medium text-emerald-700">
                           current
                         </span>
                       )}
@@ -1264,7 +1264,7 @@ export function HaulerTripView() {
             <button
               type="button"
               onClick={() => navigate(`${trackingBase}/trips/${load.id}/tracking`)}
-              className="inline-flex items-center rounded-md border border-emerald-200 px-3 py-1.5 text-[11px] font-medium text-emerald-800 hover:bg-emerald-50"
+              className="inline-flex items-center rounded-md border border-emerald-200 px-3 py-1.5 text-[11px] font-medium text-emerald-800 hover:bg-primary-50"
             >
               View tracking
             </button>
@@ -1288,7 +1288,7 @@ export function HaulerTripView() {
             className={
               resolvedPaymentMode === "DIRECT"
                 ? "bg-amber-50 text-amber-800 border border-amber-200"
-                : "bg-emerald-50 text-emerald-800 border border-emerald-200"
+                : "bg-primary-50 text-emerald-800 border border-emerald-200"
             }
           >
             Payment: {resolvedPaymentMode === "DIRECT" ? "Direct" : "Escrow"}
@@ -1878,7 +1878,7 @@ export function ShipperTripView() {
                   className={
                     paymentMode === "DIRECT"
                       ? "bg-amber-50 text-amber-800 border border-amber-200"
-                      : "bg-emerald-50 text-emerald-800 border border-emerald-200"
+                      : "bg-primary-50 text-emerald-800 border border-emerald-200"
                   }
                 >
                   Payment: {paymentMode === "DIRECT" ? "Direct" : "Escrow"}

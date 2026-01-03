@@ -76,8 +76,12 @@ async function getLoads(req, res) {
         dropoff_location_text AS dropoff_location,
         pickup_window_start AS pickup_date,
         price_offer_amount AS offer_price,
+        post_link,
+        external_contact_email,
+        external_contact_phone,
         status,
         notes AS description,
+        is_external,
         created_at,
         assigned_to_user_id AS assigned_to,
         assigned_at,
@@ -353,6 +357,7 @@ async function assignLoad(req, res) {
         price_currency,
         pickup_window_end,
         distance_km,
+        is_external,
         assigned_to_user_id
       FROM loads
       WHERE id = $1
@@ -366,6 +371,13 @@ async function assignLoad(req, res) {
             });
         }
         const loadRow = loadResult.rows[0];
+        if (loadRow.is_external) {
+            await client.query("ROLLBACK");
+            return res.status(403).json({
+                status: "ERROR",
+                message: "External loads are read-only and cannot be assigned",
+            });
+        }
         const shipperUserResult = await client.query("SELECT user_id FROM shippers WHERE id = $1", [loadRow.shipper_id]);
         const shipperUserId = shipperUserResult.rowCount
             ? Number(shipperUserResult.rows[0].user_id)
@@ -637,7 +649,7 @@ async function startLoad(req, res) {
       UPDATE loads
       SET status = 'in_transit',
           started_at = NOW()
-      WHERE id = $1 AND status = 'matched'
+      WHERE id = $1 AND status = 'matched' AND is_external = FALSE
       RETURNING
         id,
         title,
@@ -688,7 +700,7 @@ async function completeLoad(req, res) {
       SET status = 'completed',
           completed_at = NOW(),
           epod_url = COALESCE($2, epod_url)
-      WHERE id = $1 AND status = 'in_transit'
+      WHERE id = $1 AND status = 'in_transit' AND is_external = FALSE
       RETURNING
         id,
         title,

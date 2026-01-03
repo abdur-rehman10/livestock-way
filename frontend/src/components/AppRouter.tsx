@@ -25,6 +25,7 @@ import TripDetail from '../pages/TripDetail';
 import { TripsTab } from '../pages/TripsTab';
 import TripTracking from '../pages/TripTracking';
 import TripChat from '../pages/TripChat';
+import HaulerBookingsTab from '../pages/HaulerBookingsTab';
 import SuperAdminLogin from '../pages/SuperAdminLogin';
 import { ExpensesTab } from '../pages/ExpensesTab';
 import SupportTab from '../pages/SupportTab';
@@ -42,6 +43,7 @@ import AdminPricing from '../pages/AdminPricing';
 import HaulerSubscription from '../pages/HaulerSubscription';
 import AdminSubscriptions from '../pages/AdminSubscriptions';
 import HaulerPayment from '../pages/HaulerPayment';
+import ShipperOffersTab from '../pages/ShipperOffersTab';
 
 type UserRole = 'shipper' | 'driver' | 'hauler' | 'stakeholder' | 'super-admin' | null;
 type LandingRole = 'hauler' | 'shipper' | 'stakeholder';
@@ -255,6 +257,7 @@ export function AppRouter({ showKeyboardShortcuts, onKeyboardShortcutsToggle }: 
               <AppLayout userRole="hauler" onLogout={handleLogout}>
                 <Routes>
                   <Route path="dashboard" element={<HaulerDashboard onLogout={handleLogout} />} />
+                  <Route path="bookings" element={<HaulerBookingsTab />} />
                   <Route path="my-loads" element={<HaulerMyLoads />} />
                   <Route path="loadboard" element={<Loadboard />} />
                   <Route path="truck-board" element={<TruckBoard />} />
@@ -290,6 +293,7 @@ export function AppRouter({ showKeyboardShortcuts, onKeyboardShortcutsToggle }: 
                 <Routes>
                   <Route path="dashboard" element={<ShipperDashboard onLogout={handleLogout} onRoleSwitch={handleRoleSwitch} />} />
                   <Route path="my-loads" element={<MyLoadsTab />} />
+                  <Route path="offers" element={<ShipperOffersTab />} />
                   <Route path="loadboard" element={<Navigate to="/shipper/dashboard" replace />} />
                   <Route path="truck-board" element={<TruckBoard />} />
                   <Route path="trips" element={<TripsTab onViewTrip={() => toast.info('Trip view coming soon')} />} />

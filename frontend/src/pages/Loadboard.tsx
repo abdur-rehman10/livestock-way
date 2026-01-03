@@ -40,6 +40,12 @@ import {
   List,
   Save,
   X,
+  MapPin,
+  Navigation,
+  Calendar,
+  User,
+  Building2,
+  Info,
 } from "lucide-react";
 import { toast } from "sonner";
 import { filterLoads, searchFilter } from "../lib/filter-utils";
@@ -61,6 +67,8 @@ import {
   postOfferMessage,
   type LoadOffer,
   type OfferMessage,
+  fetchHaulerOfferSummaries,
+  type HaulerOfferSummary,
   subscribeHauler,
 } from "../api/marketplace";
 import { useHaulerSubscription } from "../hooks/useHaulerSubscription";
@@ -149,6 +157,7 @@ export function Loadboard() {
   const [loads, setLoads] = useState<ApiLoad[]>([]);
   const [isLoading, setIsLoading] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);
+  const [haulerOffers, setHaulerOffers] = useState<Record<string, HaulerOfferSummary>>({});
   const [subscriptionDialogOpen, setSubscriptionDialogOpen] = useState(false);
   const [oneTimeUpgradeOpen, setOneTimeUpgradeOpen] = useState(false);
   const [subscriptionSaving, setSubscriptionSaving] = useState(false);
@@ -333,6 +342,31 @@ type LoadboardFilters = {
         ) {
           setHaulerChatAllowed(true);
         }
+        setHaulerOffers((prev) => ({
+          ...prev,
+          [String(offer.load_id)]: {
+            load_id: String(offer.load_id),
+            status: offer.status,
+            offered_amount: offer.offered_amount,
+            currency: offer.currency,
+            created_at: offer.created_at,
+          },
+        }));
+      }
+    );
+    const unsubscribeOfferCreated = subscribeToSocketEvent(
+      SOCKET_EVENTS.OFFER_CREATED,
+      ({ offer }) => {
+        setHaulerOffers((prev) => ({
+          ...prev,
+          [String(offer.load_id)]: {
+            load_id: String(offer.load_id),
+            status: offer.status,
+            offered_amount: offer.offered_amount,
+            currency: offer.currency,
+            created_at: offer.created_at,
+          },
+        }));
       }
     );
     return () => {
@@ -340,6 +374,7 @@ type LoadboardFilters = {
       unsubscribeLoadUpdated();
       unsubscribeOfferMessage();
       unsubscribeOfferUpdated();
+      unsubscribeOfferCreated();
     };
   }, []);
 
@@ -612,22 +647,37 @@ const loadUserOffer = async (load: Load, options: { silent?: boolean } = {}) => 
 
         const data = await fetchLoads();
 
-        if (isMounted) {
-          setLoads(data);
-        }
-      } catch (err: any) {
+    if (isMounted) {
+      setLoads(data);
+    }
+  } catch (err: any) {
         console.error("Failed to fetch loads:", err);
         if (isMounted) {
           setError("Failed to load loads. Please try again.");
-        }
-      } finally {
-        if (isMounted) {
-          setIsLoading(false);
-        }
-      }
     }
+  } finally {
+    if (isMounted) {
+      setIsLoading(false);
+    }
+  }
+}
 
     loadData();
+    if (currentHaulerId) {
+      fetchHaulerOfferSummaries()
+        .then((resp) => {
+          const next: Record<string, HaulerOfferSummary> = {};
+          resp.items.forEach((item) => {
+            if (item.load_id) {
+              next[String(item.load_id)] = item;
+            }
+          });
+          setHaulerOffers(next);
+        })
+        .catch(() => {
+          setHaulerOffers({});
+        });
+    }
 
     return () => {
       isMounted = false;
@@ -957,18 +1007,11 @@ const loadUserOffer = async (load: Load, options: { silent?: boolean } = {}) => 
                             </Badge>
                           </div>
                         )}
-                        {!load.isExternal && load.paymentMode && (
-                          <div className="mt-2">
-                            <Badge
-                              variant="secondary"
-                              className={
-                                load.paymentMode === "DIRECT"
-                                  ? "bg-amber-50 text-amber-800 border border-amber-200"
-                                  : "bg-emerald-50 text-emerald-800 border border-emerald-200"
-                              }
-                            >
-                              Payment: {load.paymentMode === "DIRECT" ? "Direct" : "Escrow"}
-                            </Badge>
+                        {haulerOffers[String(load.rawId)] && !load.isExternal && (
+                          <div className="mt-1 text-xs text-blue-700">
+                            Your offer: ${haulerOffers[String(load.rawId)].offered_amount}{" "}
+                            {haulerOffers[String(load.rawId)].currency} ·{" "}
+                            {haulerOffers[String(load.rawId)].status.toLowerCase()}
                           </div>
                         )}
                       </div>
@@ -987,14 +1030,23 @@ const loadUserOffer = async (load: Load, options: { silent?: boolean } = {}) => 
                       {!load.isExternal && (
                         <>
                           <div className="relative flex flex-col gap-2">
-                            <Button
-                              size="sm"
-                              variant="outline"
-                              onClick={() => handleOfferClick(load)}
-                              disabled={offerBlocked}
-                            >
-                              {offerBlocked ? "Offers Disabled" : "Place Offer"}
-                            </Button>
+                           
+                              {offerBlocked
+                                ? "Offers Disabled"
+                                : haulerOffers[String(load.rawId)]
+                                  ? 
+                                    <div className="mt-2">
+                                      <Badge className="bg-primary text-white border border-primary-200">
+                                        Offer placed
+                                      </Badge>
+                                    </div>
+                                  :  <Button
+                                  size="sm"
+                                  variant="outline"
+                                  onClick={() => handleOfferClick(load)}
+                                  disabled={offerBlocked}
+                                >Place Offer</Button>}
+                            
                             {offerBlocked && (
                               <>
                                 <div

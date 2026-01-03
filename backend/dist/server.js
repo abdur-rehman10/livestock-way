@@ -26,6 +26,7 @@ const kycRoutes_1 = __importDefault(require("./routes/kycRoutes"));
 const adminRoutes_1 = __importDefault(require("./routes/adminRoutes"));
 const haulerRoutes_1 = __importDefault(require("./routes/haulerRoutes"));
 const pricingRoutes_1 = __importDefault(require("./routes/pricingRoutes"));
+const externalIngestRoutes_1 = __importDefault(require("./routes/externalIngestRoutes"));
 const socket_1 = require("./socket");
 dotenv_1.default.config();
 const app = (0, express_1.default)();
@@ -75,6 +76,7 @@ app.use("/api/kyc", kycRoutes_1.default);
 app.use("/api/admin", adminRoutes_1.default);
 app.use("/api/hauler", haulerRoutes_1.default);
 app.use("/api/pricing", pricingRoutes_1.default);
+app.use("/api/external", externalIngestRoutes_1.default);
 async function bootstrapSuperAdmin() {
     const email = process.env.SUPER_ADMIN_EMAIL || "admin@test.com";
     const password = process.env.SUPER_ADMIN_PASSWORD || "Test12345!";

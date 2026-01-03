@@ -46,7 +46,7 @@ function getToneClasses(tone: "info" | "warning" | "muted") {
   }
   if (tone === "info") {
     return {
-      card: "border-emerald-200 bg-emerald-50",
+      card: "border-emerald-200 bg-primary-50",
       text: "text-emerald-900",
       badge: "bg-white text-emerald-900 border-emerald-200",
       button: "border-emerald-300 text-emerald-900 hover:bg-white",

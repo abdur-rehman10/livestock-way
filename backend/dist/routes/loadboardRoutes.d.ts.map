@@ -1,1 +1,1 @@
-{"version":3,"file":"loadboardRoutes.d.ts","sourceRoot":"","sources":["../../src/routes/loadboardRoutes.ts"],"names":[],"mappings":"AAIA,QAAA,MAAM,MAAM,4CAAW,CAAC;AAwCxB,wBAAgB,qBAAqB,CAAC,IAAI,CAAC,EAAE;IAAE,SAAS,CAAC,EAAE,MAAM,GAAG,IAAI,CAAA;CAAE,QAOzE;AAkGD,eAAe,MAAM,CAAC"}
+{"version":3,"file":"loadboardRoutes.d.ts","sourceRoot":"","sources":["../../src/routes/loadboardRoutes.ts"],"names":[],"mappings":"AAIA,QAAA,MAAM,MAAM,4CAAW,CAAC;AAwCxB,wBAAgB,qBAAqB,CAAC,IAAI,CAAC,EAAE;IAAE,SAAS,CAAC,EAAE,MAAM,GAAG,IAAI,CAAA;CAAE,QAOzE;AAsGD,eAAe,MAAM,CAAC"}

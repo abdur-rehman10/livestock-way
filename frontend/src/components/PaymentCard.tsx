@@ -25,7 +25,7 @@ const STATUS_META: Record<
   },
   RELEASED: {
     label: "Released",
-    badgeClass: "bg-emerald-50 text-emerald-700 border border-emerald-200",
+    badgeClass: "bg-primary-50 text-emerald-700 border border-emerald-200",
     description: "Escrow released to the hauler.",
   },
 };

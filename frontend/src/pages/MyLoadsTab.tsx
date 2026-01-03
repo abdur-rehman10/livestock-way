@@ -5,6 +5,8 @@ import {
   type LoadSummary,
   API_BASE_URL,
   fetchPaymentsForUser,
+  deleteLoad,
+  updateLoadStatus,
 } from "../lib/api";
 import type { Payment } from "../lib/types";
 import { storage, STORAGE_KEYS } from "../lib/storage";
@@ -12,6 +14,9 @@ import { formatLoadStatusLabel } from "../lib/status";
 import { Button } from "../components/ui/button";
 import { Badge } from "../components/ui/badge";
 import { Label } from "../components/ui/label";
+import { Card } from "../components/ui/card";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "../components/ui/tabs";
+import { Eye, MessageSquare, Power, PowerOff, TrendingUp } from "lucide-react";
 import {
   Dialog,
   DialogContent,
@@ -32,6 +37,8 @@ import {
   fetchTripDisputes,
   cancelDispute,
   fetchTripByLoadId as fetchMarketplaceTripByLoad,
+  fetchLoadOffers,
+  type LoadOffer,
   type DisputeRecord,
   type TripEnvelope,
 } from "../api/marketplace";
@@ -60,7 +67,7 @@ const paymentStatusMeta: Record<
   },
   RELEASED_TO_HAULER: {
     label: "Released",
-    badgeClass: "bg-emerald-50 text-emerald-700 border border-emerald-200",
+    badgeClass: "bg-primary-50 text-emerald-700 border border-emerald-200",
   },
   REFUNDED_TO_SHIPPER: {
     label: "Refunded",
@@ -87,6 +94,8 @@ export default function MyLoadsTab() {
   const [error, setError] = useState<string | null>(null);
   const [payments, setPayments] = useState<Record<number, Payment>>({});
   const [fundingLoadId, setFundingLoadId] = useState<number | null>(null);
+  const [deletingLoadId, setDeletingLoadId] = useState<number | null>(null);
+  const [statusUpdatingId, setStatusUpdatingId] = useState<number | null>(null);
   const navigate = useNavigate();
   const shipperId = storage.get<string | null>(STORAGE_KEYS.USER_ID, null);
   const loadsRef = useRef<LoadSummary[]>([]);
@@ -97,6 +106,14 @@ export default function MyLoadsTab() {
   disputes: DisputeRecord[];
   loading: boolean;
 }>({ open: false, loadId: null, tripId: null, disputes: [], loading: false });
+  const [offersDialog, setOffersDialog] = useState<{
+    open: boolean;
+    loadId: number | null;
+    offers: LoadOffer[];
+    total: number;
+    loading: boolean;
+    error: string | null;
+  }>({ open: false, loadId: null, offers: [], total: 0, loading: false, error: null });
 const [disputeForm, setDisputeForm] = useState({
   reason_code: "",
   description: "",
@@ -174,6 +191,32 @@ const tripContextCache = useRef<Record<number, TripEnvelope | null>>({});
     };
   }, [shipperId, refresh]);
 
+  useEffect(() => {
+    if (!shipperId) return;
+    const unsubscribeCreated = subscribeToSocketEvent(
+      SOCKET_EVENTS.OFFER_CREATED,
+      ({ offer }) => {
+        const loadId = Number(offer.load_id);
+        if (loadsRef.current.some((existing) => Number(existing.id) === loadId)) {
+          refresh();
+        }
+      }
+    );
+    const unsubscribeUpdated = subscribeToSocketEvent(
+      SOCKET_EVENTS.OFFER_UPDATED,
+      ({ offer }) => {
+        const loadId = Number(offer.load_id);
+        if (loadsRef.current.some((existing) => Number(existing.id) === loadId)) {
+          refresh();
+        }
+      }
+    );
+    return () => {
+      unsubscribeCreated();
+      unsubscribeUpdated();
+    };
+  }, [shipperId, refresh]);
+
   const getTripContext = useCallback(
     async (loadId: number) => {
       if (!tripContextCache.current[loadId]) {
@@ -245,6 +288,61 @@ const tripContextCache = useRef<Record<number, TripEnvelope | null>>({});
     } catch (err: any) {
       setDisputeDialog((prev) => ({ ...prev, loading: false }));
       toast.error(err?.message ?? "Failed to load disputes");
+    }
+  };
+
+  const openOffersDialog = async (loadId: number) => {
+    setOffersDialog({
+      open: true,
+      loadId,
+      offers: [],
+      total: 0,
+      loading: true,
+      error: null,
+    });
+    try {
+      const resp = await fetchLoadOffers(String(loadId), 1, 50);
+      setOffersDialog((prev) => ({
+        ...prev,
+        offers: resp.items ?? [],
+        total: resp.total ?? 0,
+        loading: false,
+      }));
+    } catch (err: any) {
+      setOffersDialog((prev) => ({
+        ...prev,
+        loading: false,
+        error: err?.message ?? "Failed to load offers",
+      }));
+    }
+  };
+
+  const handleDeleteLoad = async (loadId: number) => {
+    if (!window.confirm("Delete this load? This cannot be undone.")) {
+      return;
+    }
+    try {
+      setDeletingLoadId(loadId);
+      await deleteLoad(loadId);
+      toast.success("Load deleted.");
+      refresh();
+    } catch (err: any) {
+      toast.error(err?.message ?? "Failed to delete load");
+    } finally {
+      setDeletingLoadId(null);
+    }
+  };
+
+  const handleToggleLoadStatus = async (loadId: number, makeLive: boolean) => {
+    try {
+      setStatusUpdatingId(loadId);
+      await updateLoadStatus(loadId, makeLive ? "posted" : "cancelled");
+      toast.success(makeLive ? "Load set to live." : "Load set to offline.");
+      refresh();
+    } catch (err: any) {
+      toast.error(err?.message ?? "Failed to update load status");
+    } finally {
+      setStatusUpdatingId(null);
     }
   };
 
@@ -378,155 +476,338 @@ useEffect(() => {
     );
   }
 
+  const liveLoads = loads.filter((load) => load.status !== "cancelled");
+  const offlineLoads = loads.filter((load) => load.status === "cancelled");
+  const totalViews = loads.reduce(
+    (sum, load) => sum + Number((load as any)?.views ?? 0),
+    0
+  );
+  const totalContacts = loads.reduce(
+    (sum, load) => sum + Number((load as any)?.contacts ?? 0),
+    0
+  );
+
+  const renderLoadCard = (load: LoadSummary) => {
+    const payment = payments[load.id];
+    const loadIsDirect = (load as any)?.payment_mode === "DIRECT";
+    const isLive = load.status === "posted";
+    const statusLabel = formatLoadStatusLabel(load.status);
+    const loadViews = Number((load as any)?.views ?? 0);
+    const loadContacts = Number((load as any)?.contacts ?? 0);
+    const offerCount = Number((load as any)?.offer_count ?? 0);
+    const canToggleStatus = ["posted", "cancelled", "draft"].includes(load.status);
+
+    return (
+      <Card key={load.id} className="p-4 hover:shadow-md transition-shadow">
+        <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
+          <div className="flex-1 min-w-0">
+            <div className="flex flex-wrap items-center gap-2">
+              <h3 className="text-base font-semibold text-gray-900 truncate">
+                {load.title || `${load.species ?? "Livestock"} Transport`}
+              </h3>
+              <Badge
+                className="px-2 py-0.5 text-xs"
+                style={
+                  isLive
+                    ? { backgroundColor: "#53ca97", color: "white" }
+                    : load.status === "cancelled" || load.status === "draft"
+                      ? { backgroundColor: "#9ca3af", color: "white" }
+                      : { backgroundColor: "#e5e7eb", color: "#374151" }
+                }
+              >
+                {isLive ? (
+                  <>
+                    <Power className="w-3 h-3 mr-1" />
+                    Live
+                  </>
+                ) : load.status === "cancelled" || load.status === "draft" ? (
+                  <>
+                    <PowerOff className="w-3 h-3 mr-1" />
+                    Offline
+                  </>
+                ) : (
+                  statusLabel
+                )}
+              </Badge>
+              <Badge variant="secondary" className="text-xs">
+                Offers: {offerCount}
+              </Badge>
+            </div>
+
+            <p className="mt-2 text-sm text-gray-600">
+              {load.pickup_location ?? "—"} → {load.dropoff_location ?? "—"}
+            </p>
+            <p className="text-sm text-gray-500">
+              {load.species ?? "Livestock"} · {load.quantity ?? "?"} head
+            </p>
+            <p className="text-xs text-gray-500 mt-2">
+              Posted {load.created_at ? new Date(load.created_at).toLocaleDateString() : "—"}
+            </p>
+            <p className="text-xs text-gray-500 mt-1">Status: {statusLabel}</p>
+
+            <div className="mt-3 flex flex-wrap items-center gap-2">
+              {payment ? (
+                <span
+                  className={[
+                    "inline-flex rounded-full px-2 py-[1px] text-[10px] font-medium",
+                    paymentStatusMeta[payment.status]?.badgeClass ||
+                      "bg-gray-100 text-gray-600 border border-gray-200",
+                  ].join(" ")}
+                >
+                  {paymentStatusMeta[payment.status]?.label || payment.status}
+                </span>
+              ) : (
+                <span className="text-[11px] text-gray-400">No escrow</span>
+              )}
+              {loadIsDirect && (
+                <span className="text-[11px] text-gray-500">
+                  Direct payment (escrow disabled)
+                </span>
+              )}
+            </div>
+
+            <div className="mt-4 flex flex-wrap gap-2">
+              <Button size="sm" variant="outline" className="text-xs" asChild>
+                <Link to={`/shipper/trips/${load.id}`}>View Trip</Link>
+              </Button>
+              <Button
+                size="sm"
+                variant="outline"
+                className="text-xs"
+                onClick={() => openOffersDialog(load.id)}
+              >
+                View Offers ({offerCount})
+              </Button>
+              {canToggleStatus && (
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className="text-xs"
+                  onClick={() => handleToggleLoadStatus(load.id, !isLive)}
+                  disabled={statusUpdatingId === load.id}
+                >
+                  {statusUpdatingId === load.id
+                    ? "Updating…"
+                    : isLive
+                      ? "Set Offline"
+                      : "Set Live"}
+                </Button>
+              )}
+              <Button
+                size="sm"
+                className="bg-[#F97316] hover:bg-[#ea580c] text-white text-xs"
+                onClick={() => navigate(`/shipper/trips/${load.id}/tracking`)}
+              >
+                Track
+              </Button>
+              {(() => {
+                const isDirect =
+                  loadIsDirect ||
+                  payment?.payment_mode === "DIRECT" ||
+                  payment?.is_escrow === false ||
+                  (payment?.status || "").toUpperCase() === "NOT_APPLICABLE";
+                return (
+                  !isDirect &&
+                  payment?.status === "AWAITING_FUNDING" && (
+                    <Button
+                      size="sm"
+                      variant="secondary"
+                      className="text-xs"
+                      onClick={() => handleFundEscrow(load.id)}
+                      disabled={fundingLoadId === load.id}
+                    >
+                      {fundingLoadId === load.id ? "Funding…" : "Fund Escrow"}
+                    </Button>
+                  )
+                );
+              })()}
+              {(() => {
+                const isDirect =
+                  loadIsDirect ||
+                  payment?.payment_mode === "DIRECT" ||
+                  payment?.is_escrow === false ||
+                  (payment?.status || "").toUpperCase() === "NOT_APPLICABLE";
+                return (
+                  payment?.trip_id &&
+                  !isDirect && (
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      className="text-xs"
+                      onClick={() => openDisputeDialog(load.id)}
+                    >
+                      Dispute
+                    </Button>
+                  )
+                );
+              })()}
+              {resolveEpodUrl(load.epod_url) && (
+                <Button size="sm" variant="outline" className="text-xs" asChild>
+                  <a
+                    href={resolveEpodUrl(load.epod_url) ?? "#"}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                  >
+                    View ePOD
+                  </a>
+                </Button>
+              )}
+              <Button
+                size="sm"
+                variant="outline"
+                className="text-xs text-red-600 hover:text-red-700"
+                onClick={() => handleDeleteLoad(load.id)}
+                disabled={deletingLoadId === load.id}
+              >
+                {deletingLoadId === load.id ? "Deleting…" : "Delete"}
+              </Button>
+              {(() => {
+                const isDirect =
+                  loadIsDirect ||
+                  payment?.payment_mode === "DIRECT" ||
+                  payment?.is_escrow === false ||
+                  (payment?.status || "").toUpperCase() === "NOT_APPLICABLE";
+                return (
+                  isDirect && (
+                    <span className="text-[11px] text-gray-500">
+                      Disputes disabled for Direct Payment
+                    </span>
+                  )
+                );
+              })()}
+            </div>
+          </div>
+        </div>
+      </Card>
+    );
+  };
+
   return (
-    <div className="p-4 space-y-4">
+    <div className="p-6 space-y-6">
       <div>
-        <h1 className="text-lg font-semibold text-gray-900">My Loads</h1>
+        <h1 className="text-lg font-semibold text-gray-900">My Listings</h1>
         <p className="text-xs text-gray-500">
-          These are all loads you’ve posted as a shipper.
+          Manage your active and offline load listings.
         </p>
       </div>
 
-      <div className="overflow-hidden rounded-lg border border-gray-200 bg-white">
-        <table className="min-w-full text-xs">
-          <thead className="bg-gray-50">
-            <tr className="text-left text-[11px] font-semibold text-gray-500">
-              <th className="px-4 py-2">ID</th>
-              <th className="px-4 py-2">Route</th>
-              <th className="px-4 py-2">Livestock</th>
-              <th className="px-4 py-2">Status</th>
-              <th className="px-4 py-2">Escrow</th>
-              <th className="px-4 py-2">Assigned to</th>
-              <th className="px-4 py-2">Created</th>
-              <th className="px-4 py-2">Actions</th>
-            </tr>
-          </thead>
-          <tbody>
-            {loads.map((load) => {
-              const payment = payments[load.id];
-              const loadIsDirect = (load as any)?.payment_mode === "DIRECT";
-
-              return (
-                <tr key={load.id} className="border-t border-gray-100">
-                  <td className="px-4 py-2 font-medium text-gray-900">#{load.id}</td>
-                  <td className="px-4 py-2 text-gray-700">
-                    {load.pickup_location ?? "—"} → {load.dropoff_location ?? "—"}
-                  </td>
-                  <td className="px-4 py-2 text-gray-700">
-                    {load.species ?? "Livestock"} · {load.quantity ?? "?"} head
-                  </td>
-                  <td className="px-4 py-2">
-                    <Badge className="capitalize">
-                      {formatLoadStatusLabel(load.status)}
-                    </Badge>
-                  </td>
-                  <td className="px-4 py-2">
-                    {payment ? (
-                      <span
-                        className={[
-                          "inline-flex rounded-full px-2 py-[1px] text-[10px] font-medium",
-                          paymentStatusMeta[payment.status]?.badgeClass ||
-                            "bg-gray-100 text-gray-600 border border-gray-200",
-                        ].join(" ")}
-                      >
-                        {paymentStatusMeta[payment.status]?.label || payment.status}
-                      </span>
-                    ) : (
-                      <span className="text-gray-400 text-[11px]">No escrow</span>
-                    )}
-                  </td>
-                  <td className="px-4 py-2 text-gray-700">
-                    {load.assigned_to || "—"}
-                  </td>
-                  <td className="px-4 py-2 text-gray-500">
-                    {load.created_at ? new Date(load.created_at).toLocaleString() : "—"}
-                  </td>
-                  <td className="px-4 py-2">
-                    <div className="flex flex-wrap gap-2 justify-end">
-                      <Button size="sm" variant="outline" className="text-xs" asChild>
-                        <Link to={`/shipper/trips/${load.id}`}>View Trip</Link>
-                      </Button>
-                      <Button
-                        size="sm"
-                        className="bg-[#F97316] hover:bg-[#ea580c] text-white text-xs"
-                        onClick={() => navigate(`/shipper/trips/${load.id}/tracking`)}
-                      >
-                        Track
-                      </Button>
-                      {(() => {
-                        const isDirect =
-                          loadIsDirect ||
-                          payment?.payment_mode === "DIRECT" ||
-                          payment?.is_escrow === false ||
-                          (payment?.status || "").toUpperCase() === "NOT_APPLICABLE";
-                        return (
-                          !isDirect &&
-                          payment?.status === "AWAITING_FUNDING" && (
-                            <Button
-                              size="sm"
-                              variant="secondary"
-                              className="text-xs"
-                              onClick={() => handleFundEscrow(load.id)}
-                              disabled={fundingLoadId === load.id}
-                            >
-                              {fundingLoadId === load.id ? "Funding…" : "Fund Escrow"}
-                            </Button>
-                          )
-                        );
-                      })()}
-                      {(() => {
-                        const isDirect =
-                          loadIsDirect ||
-                          payment?.payment_mode === "DIRECT" ||
-                          payment?.is_escrow === false ||
-                          (payment?.status || "").toUpperCase() === "NOT_APPLICABLE";
-                        return (
-                          payment?.trip_id &&
-                          !isDirect && (
-                            <Button
-                              size="sm"
-                              variant="outline"
-                              className="text-xs"
-                              onClick={() => openDisputeDialog(load.id)}
-                            >
-                              Dispute
-                            </Button>
-                          )
-                        );
-                      })()}
-                      {(() => {
-                        const isDirect =
-                          loadIsDirect ||
-                          payment?.payment_mode === "DIRECT" ||
-                          payment?.is_escrow === false ||
-                          (payment?.status || "").toUpperCase() === "NOT_APPLICABLE";
-                        return (
-                          isDirect && (
-                            <span className="text-[11px] text-gray-600">
-                              Disputes disabled for Direct Payment
-                            </span>
-                          )
-                        );
-                      })()}
-                      {resolveEpodUrl(load.epod_url) && (
-                        <Button size="sm" variant="outline" className="text-xs" asChild>
-                          <a
-                            href={resolveEpodUrl(load.epod_url) ?? "#"}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                          >
-                            View ePOD
-                          </a>
-                        </Button>
-                      )}
-                    </div>
-                  </td>
-                </tr>
-              );
-            })}
-          </tbody>
-        </table>
+      <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+        <Card className="p-4 hover:shadow-lg transition-shadow cursor-pointer">
+          <div className="flex items-center gap-2 mb-2">
+            <TrendingUp className="w-5 h-5" style={{ color: "#53ca97" }} />
+            <h3 className="text-sm">Total Listings</h3>
+          </div>
+          <p className="text-3xl" style={{ color: "#53ca97" }}>
+            {loads.length}
+          </p>
+        </Card>
+        <Card className="p-4 hover:shadow-lg transition-shadow cursor-pointer">
+          <div className="flex items-center gap-2 mb-2">
+            <Power className="w-5 h-5 text-green-500" />
+            <h3 className="text-sm">Live</h3>
+          </div>
+          <p className="text-3xl text-green-600">{liveLoads.length}</p>
+        </Card>
+        <Card className="p-4 hover:shadow-lg transition-shadow cursor-pointer">
+          <div className="flex items-center gap-2 mb-2">
+            <Eye className="w-5 h-5 text-blue-500" />
+            <h3 className="text-sm">Total Views</h3>
+          </div>
+          <p className="text-3xl text-blue-600">{totalViews}</p>
+        </Card>
+        <Card className="p-4 hover:shadow-lg transition-shadow cursor-pointer">
+          <div className="flex items-center gap-2 mb-2">
+            <MessageSquare className="w-5 h-5 text-purple-500" />
+            <h3 className="text-sm">Total Contacts</h3>
+          </div>
+          <p className="text-3xl text-purple-600">{totalContacts}</p>
+        </Card>
       </div>
+
+      <Tabs defaultValue="all" className="w-full">
+        <TabsList className="mb-6 w-full md:w-auto">
+          <TabsTrigger value="all">All ({loads.length})</TabsTrigger>
+          <TabsTrigger value="live">Live ({liveLoads.length})</TabsTrigger>
+          <TabsTrigger value="offline">Offline ({offlineLoads.length})</TabsTrigger>
+        </TabsList>
+
+        <TabsContent value="all" className="space-y-4">
+          {loads.length ? (
+            loads.map(renderLoadCard)
+          ) : (
+            <Card className="p-8 text-center">
+              <p className="text-gray-500">No listings found</p>
+            </Card>
+          )}
+        </TabsContent>
+        <TabsContent value="live" className="space-y-4">
+          {liveLoads.length ? (
+            liveLoads.map(renderLoadCard)
+          ) : (
+            <Card className="p-8 text-center">
+              <p className="text-gray-500">No live listings</p>
+            </Card>
+          )}
+        </TabsContent>
+        <TabsContent value="offline" className="space-y-4">
+          {offlineLoads.length ? (
+            offlineLoads.map(renderLoadCard)
+          ) : (
+            <Card className="p-8 text-center">
+              <p className="text-gray-500">No offline listings</p>
+            </Card>
+          )}
+        </TabsContent>
+      </Tabs>
+
+      <Dialog
+        open={offersDialog.open}
+        onOpenChange={(open) =>
+          setOffersDialog((prev) => ({ ...prev, open, error: null }))
+        }
+      >
+        <DialogContent className="max-w-3xl">
+          <DialogHeader>
+            <DialogTitle>
+              Offers for Load #{offersDialog.loadId}
+              {offersDialog.total ? ` (${offersDialog.total})` : ""}
+            </DialogTitle>
+          </DialogHeader>
+          {offersDialog.loading ? (
+            <p className="text-sm text-gray-500">Loading offers…</p>
+          ) : offersDialog.error ? (
+            <p className="text-sm text-red-600">{offersDialog.error}</p>
+          ) : offersDialog.offers.length === 0 ? (
+            <p className="text-sm text-gray-500">No offers yet.</p>
+          ) : (
+            <div className="space-y-3">
+              {offersDialog.offers.map((offer) => (
+                <div
+                  key={offer.id}
+                  className="rounded-lg border border-gray-200 p-3 text-sm"
+                >
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <div className="font-semibold text-gray-900">
+                      ${offer.offered_amount} {offer.currency}
+                    </div>
+                    <Badge className="text-xs capitalize">
+                      {offer.status.toLowerCase()}
+                    </Badge>
+                  </div>
+                  {offer.message && (
+                    <p className="mt-2 text-xs text-gray-600">{offer.message}</p>
+                  )}
+                  <p className="mt-2 text-xs text-gray-500">
+                    {offer.created_at
+                      ? new Date(offer.created_at).toLocaleString()
+                      : "—"}
+                  </p>
+                </div>
+              ))}
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
 
       <Dialog
         open={disputeDialog.open}

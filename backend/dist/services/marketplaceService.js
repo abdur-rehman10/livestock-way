@@ -312,6 +312,7 @@ function shouldConsumeFreeTrip(meta) {
 function mapLoadRow(row) {
     return {
         ...row,
+        is_external: row.is_external ?? false,
         status: mapLoadStatusFromDb(row.status),
         payment_mode: row.payment_mode === "DIRECT" ? "DIRECT" : "ESCROW",
         direct_payment_disclaimer_accepted_at: row.direct_payment_disclaimer_accepted_at ?? null,
@@ -360,6 +361,9 @@ function mapTruckAvailabilityRow(row) {
             : Number(row.capacity_weight_kg),
         allow_shared: row.allow_shared ?? true,
         notes: row.notes ?? null,
+        post_link: row.post_link ?? null,
+        external_contact_email: row.external_contact_email ?? null,
+        external_contact_phone: row.external_contact_phone ?? null,
         origin_lat: row.origin_lat === null || row.origin_lat === undefined
             ? null
             : Number(row.origin_lat),
@@ -373,6 +377,7 @@ function mapTruckAvailabilityRow(row) {
             ? null
             : Number(row.destination_lng),
         is_active: row.is_active ?? true,
+        is_external: row.is_external ?? false,
         created_at: row.created_at,
         updated_at: row.updated_at,
     };
@@ -673,6 +678,7 @@ async function getLoadById(loadId) {
              l.asking_amount::text AS asking_amount,
              l.awarded_offer_id::text AS awarded_offer_id,
              l.assigned_to_user_id::text AS assigned_to_user_id,
+             l.is_external,
              l.payment_mode,
              l.direct_payment_disclaimer_accepted_at,
              l.direct_payment_disclaimer_version
@@ -776,11 +782,15 @@ async function getTruckAvailabilityById(id) {
         capacity_weight_kg,
         allow_shared,
         notes,
+        external_contact_email,
+        external_contact_phone,
         origin_lat,
         origin_lng,
         destination_lat,
         destination_lng,
         is_active,
+        is_external,
+        post_link,
         created_at,
         updated_at
       FROM truck_availability
@@ -828,11 +838,15 @@ async function listTruckAvailability(options = {}) {
         capacity_weight_kg,
         allow_shared,
         notes,
+        external_contact_email,
+        external_contact_phone,
         origin_lat,
         origin_lng,
         destination_lat,
         destination_lng,
         is_active,
+        is_external,
+        post_link,
         created_at,
         updated_at
       FROM truck_availability
