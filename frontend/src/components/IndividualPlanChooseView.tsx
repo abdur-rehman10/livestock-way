@@ -76,7 +76,6 @@ export default function IndividualPlanChooseView({
   getCtaConfig,
 }: IndividualPlanChooseViewProps) {
   const [selectedCode, setSelectedCode] = useState<PlanCode>(defaultSelected);
-  const [activeTab, setActiveTab] = useState("signup");
 
   const selectedPlan = PLANS.find((p) => p.code === selectedCode) ?? PLANS[0];
 
@@ -88,14 +87,6 @@ export default function IndividualPlanChooseView({
   const handleContinue = () => {
     onContinue?.(selectedCode);
   };
-
-  const handleTabChange = (tab: string) => {
-    setActiveTab(tab);
-    if (tab === "signin" && onLoginTab) {
-      onLoginTab();
-    }
-  };
-
   const isEmbedded = variant === "embedded";
   const ctaConfig = getCtaConfig?.(selectedPlan.code) ?? {};
   const ctaLabel =

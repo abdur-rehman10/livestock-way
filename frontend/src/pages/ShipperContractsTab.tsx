@@ -216,12 +216,44 @@ export default function ShipperContractsTab() {
           onGenerate={(data) => handleSave(data, true)}
           onSaveDraft={(data) => handleSave(data, false)}
           contractInfo={
-            (selectedContract.contract_payload as ContractFormData)?.contractInfo
+            (() => {
+              const payload = selectedContract.contract_payload as ContractFormData | undefined;
+              const info = payload?.contractInfo;
+              if (!info) return undefined;
+              // Ensure all required fields are present, otherwise return undefined
+              if (
+                info.haulerName &&
+                info.route?.origin &&
+                info.route?.destination &&
+                info.animalType &&
+                info.headCount !== undefined &&
+                info.headCount !== null
+              ) {
+                const price = selectedContract.price_amount 
+                  ? Number(selectedContract.price_amount) 
+                  : (typeof (payload as any)?.price === 'number' ? (payload as any).price : 0);
+                const priceType = selectedContract.price_type === 'per-mile' 
+                  ? 'per-mile' 
+                  : 'total';
+                return {
+                  haulerName: info.haulerName,
+                  route: {
+                    origin: info.route.origin,
+                    destination: info.route.destination,
+                  },
+                  animalType: info.animalType,
+                  headCount: info.headCount,
+                  price,
+                  priceType: priceType as 'per-mile' | 'total',
+                };
+              }
+              return undefined;
+            })()
           }
           initialData={{
             ...(selectedContract.contract_payload ?? {}),
             priceAmount: selectedContract.price_amount ?? "",
-            priceType: selectedContract.price_type ?? "total",
+            priceType: (selectedContract.price_type === 'per-mile' ? 'per-mile' : 'total') as 'per-mile' | 'total',
           }}
         />
       )}
