@@ -70,6 +70,15 @@ import {
   listBookingsForShipper,
   respondToBooking,
   BookingStatus,
+  createContract,
+  updateContract,
+  listContractsForHauler,
+  listContractsForShipper,
+  getContractById,
+  markContractSent,
+  acceptContract,
+  rejectContract,
+  ContractStatus,
   listDriversForHauler,
   listVehiclesForHauler,
 } from "../services/marketplaceService";
@@ -453,11 +462,17 @@ router.get(
       const result = await pool.query(
         `
           SELECT DISTINCT ON (load_id)
+            id::text AS offer_id,
             load_id::text AS load_id,
             status,
             offered_amount,
             currency,
-            created_at
+            created_at,
+            (
+              SELECT MAX(lom.created_at)
+              FROM load_offer_messages lom
+              WHERE lom.offer_id = load_offers.id
+            ) AS last_message_at
           FROM load_offers
           WHERE hauler_id = $1
           ORDER BY load_id, created_at DESC
@@ -2133,6 +2148,278 @@ router.get(
     } catch (err) {
       console.error("list truck chat messages error", err);
       res.status(500).json({ error: "Failed to load messages" });
+    }
+  }
+);
+
+router.get(
+  "/contracts",
+  authRequired,
+  async (req, res) => {
+    try {
+      const authUser = getAuthUser(req);
+      const loadId = req.query?.load_id ? String(req.query.load_id) : undefined;
+      const offerId = req.query?.offer_id ? String(req.query.offer_id) : undefined;
+      const status = req.query?.status ? String(req.query.status) : undefined;
+      const filters: { loadId?: string; offerId?: string; status?: ContractStatus } = {};
+      if (loadId) filters.loadId = loadId;
+      if (offerId) filters.offerId = offerId;
+      if (status && ["DRAFT", "SENT", "ACCEPTED", "REJECTED", "LOCKED"].includes(status)) {
+        filters.status = status as ContractStatus;
+      }
+      if (isHaulerUser(authUser)) {
+        const haulerIdResolved = await resolveHaulerId(authUser);
+        if (!haulerIdResolved) {
+          return res.status(400).json({ error: "Unable to resolve hauler profile" });
+        }
+        const items = await listContractsForHauler(haulerIdResolved, filters);
+        return res.json({ items });
+      }
+      if (isShipperUser(authUser)) {
+        const shipperIdResolved = await resolveShipperId(authUser);
+        if (!shipperIdResolved) {
+          return res.status(400).json({ error: "Unable to resolve shipper profile" });
+        }
+        const items = await listContractsForShipper(shipperIdResolved, filters);
+        return res.json({ items });
+      }
+      if (isSuperAdminUser(authUser)) {
+        return res.json({ items: [] });
+      }
+      res.status(403).json({ error: "Forbidden" });
+    } catch (err) {
+      console.error("listContracts error", err);
+      res.status(500).json({ error: "Failed to load contracts" });
+    }
+  }
+);
+
+router.get(
+  "/contracts/:contractId",
+  authRequired,
+  async (req, res) => {
+    try {
+      const authUser = getAuthUser(req);
+      const contractId = req.params.contractId;
+      if (!contractId) {
+        return res.status(400).json({ error: "Missing contract id" });
+      }
+      const contract = await getContractById(contractId);
+      if (!contract) {
+        return res.status(404).json({ error: "Contract not found" });
+      }
+      if (isShipperUser(authUser)) {
+        const shipperId = await resolveShipperId(authUser);
+        if (!shipperId || shipperId !== contract.shipper_id) {
+          return res.status(403).json({ error: "Forbidden" });
+        }
+        return res.json({ contract });
+      }
+      if (isHaulerUser(authUser)) {
+        const haulerId = await resolveHaulerId(authUser);
+        if (!haulerId || haulerId !== contract.hauler_id) {
+          return res.status(403).json({ error: "Forbidden" });
+        }
+        return res.json({ contract });
+      }
+      if (isSuperAdminUser(authUser)) {
+        return res.json({ contract });
+      }
+      res.status(403).json({ error: "Forbidden" });
+    } catch (err) {
+      console.error("getContract error", err);
+      res.status(500).json({ error: "Failed to load contract" });
+    }
+  }
+);
+
+router.post(
+  "/contracts",
+  authRequired,
+  async (req, res) => {
+    try {
+      const authUser = getAuthUser(req);
+      if (!isShipperUser(authUser)) {
+        return res.status(403).json({ error: "Only shippers can create contracts" });
+      }
+      const shipperIdResolved = await resolveShipperId(authUser);
+      if (!shipperIdResolved) {
+        return res.status(400).json({ error: "Unable to resolve shipper profile" });
+      }
+      const loadId = req.body?.load_id ? String(req.body.load_id) : null;
+      const offerId = req.body?.offer_id ? String(req.body.offer_id) : null;
+      if (!loadId || !offerId) {
+        return res.status(400).json({ error: "load_id and offer_id are required" });
+      }
+      const load = await getLoadById(loadId);
+      if (!load) {
+        return res.status(404).json({ error: "Load not found" });
+      }
+      if (!isShipperForLoad(authUser, load)) {
+        return res.status(403).json({ error: "Forbidden" });
+      }
+      const offer = await getLoadOfferById(offerId);
+      if (!offer || offer.load_id !== loadId) {
+        return res.status(404).json({ error: "Offer not found for load" });
+      }
+      const status = req.body?.status === "SENT" ? "SENT" : "DRAFT";
+      const contract = await createContract({
+        loadId,
+        offerId,
+        shipperId: shipperIdResolved,
+        haulerId: offer.hauler_id,
+        status,
+        priceAmount:
+          req.body?.price_amount !== undefined ? Number(req.body.price_amount) : null,
+        priceType: req.body?.price_type ?? null,
+        paymentMethod: req.body?.payment_method ?? null,
+        paymentSchedule: req.body?.payment_schedule ?? null,
+        contractPayload: req.body?.contract_payload ?? {},
+        createdByUserId: String(authUser.id ?? ""),
+      });
+      return res.status(201).json({ contract });
+    } catch (err: any) {
+      console.error("createContract error", err);
+      res.status(400).json({ error: err?.message ?? "Failed to create contract" });
+    }
+  }
+);
+
+router.patch(
+  "/contracts/:contractId",
+  authRequired,
+  async (req, res) => {
+    try {
+      const authUser = getAuthUser(req);
+      if (!isShipperUser(authUser)) {
+        return res.status(403).json({ error: "Only shippers can edit contracts" });
+      }
+      const contractId = req.params.contractId;
+      if (!contractId) {
+        return res.status(400).json({ error: "Missing contract id" });
+      }
+      const contract = await getContractById(contractId);
+      if (!contract) {
+        return res.status(404).json({ error: "Contract not found" });
+      }
+      const shipperId = await resolveShipperId(authUser);
+      if (!shipperId || contract.shipper_id !== shipperId) {
+        return res.status(403).json({ error: "Forbidden" });
+      }
+      const updated = await updateContract({
+        contractId,
+        priceAmount:
+          req.body?.price_amount !== undefined ? Number(req.body.price_amount) : null,
+        priceType: req.body?.price_type ?? null,
+        paymentMethod: req.body?.payment_method ?? null,
+        paymentSchedule: req.body?.payment_schedule ?? null,
+        contractPayload: req.body?.contract_payload ?? undefined,
+        updatedByUserId: String(authUser.id ?? ""),
+      });
+      res.json({ contract: updated });
+    } catch (err: any) {
+      console.error("updateContract error", err);
+      res.status(400).json({ error: err?.message ?? "Failed to update contract" });
+    }
+  }
+);
+
+router.post(
+  "/contracts/:contractId/send",
+  authRequired,
+  async (req, res) => {
+    try {
+      const authUser = getAuthUser(req);
+      if (!isShipperUser(authUser)) {
+        return res.status(403).json({ error: "Only shippers can send contracts" });
+      }
+      const contractId = req.params.contractId;
+      if (!contractId) {
+        return res.status(400).json({ error: "Missing contract id" });
+      }
+      const contract = await getContractById(contractId);
+      if (!contract) {
+        return res.status(404).json({ error: "Contract not found" });
+      }
+      const shipperId = await resolveShipperId(authUser);
+      if (!shipperId || contract.shipper_id !== shipperId) {
+        return res.status(403).json({ error: "Forbidden" });
+      }
+      const updated = await markContractSent({
+        contractId,
+        updatedByUserId: String(authUser.id ?? ""),
+      });
+      res.json({ contract: updated });
+    } catch (err: any) {
+      console.error("sendContract error", err);
+      res.status(400).json({ error: err?.message ?? "Failed to send contract" });
+    }
+  }
+);
+
+router.post(
+  "/contracts/:contractId/accept",
+  authRequired,
+  async (req, res) => {
+    try {
+      const authUser = getAuthUser(req);
+      if (!isHaulerUser(authUser)) {
+        return res.status(403).json({ error: "Only haulers can accept contracts" });
+      }
+      const contractId = req.params.contractId;
+      if (!contractId) {
+        return res.status(400).json({ error: "Missing contract id" });
+      }
+      const contract = await getContractById(contractId);
+      if (!contract) {
+        return res.status(404).json({ error: "Contract not found" });
+      }
+      const haulerId = await resolveHaulerId(authUser);
+      if (!haulerId || contract.hauler_id !== haulerId) {
+        return res.status(403).json({ error: "Forbidden" });
+      }
+      const result = await acceptContract({
+        contractId,
+        actingUserId: String(authUser.id ?? ""),
+      });
+      await emitBookingSideEffects(result);
+      res.json(result);
+    } catch (err: any) {
+      console.error("acceptContract error", err);
+      res.status(400).json({ error: err?.message ?? "Failed to accept contract" });
+    }
+  }
+);
+
+router.post(
+  "/contracts/:contractId/reject",
+  authRequired,
+  async (req, res) => {
+    try {
+      const authUser = getAuthUser(req);
+      if (!isHaulerUser(authUser)) {
+        return res.status(403).json({ error: "Only haulers can reject contracts" });
+      }
+      const contractId = req.params.contractId;
+      if (!contractId) {
+        return res.status(400).json({ error: "Missing contract id" });
+      }
+      const contract = await getContractById(contractId);
+      if (!contract) {
+        return res.status(404).json({ error: "Contract not found" });
+      }
+      const haulerId = await resolveHaulerId(authUser);
+      if (!haulerId || contract.hauler_id !== haulerId) {
+        return res.status(403).json({ error: "Forbidden" });
+      }
+      const updated = await rejectContract({
+        contractId,
+        actingUserId: String(authUser.id ?? ""),
+      });
+      res.json({ contract: updated });
+    } catch (err: any) {
+      console.error("rejectContract error", err);
+      res.status(400).json({ error: err?.message ?? "Failed to reject contract" });
     }
   }
 );

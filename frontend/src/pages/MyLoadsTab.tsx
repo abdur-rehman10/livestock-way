@@ -1,4 +1,3 @@
-/* eslint-disable @typescript-eslint/no-explicit-any */
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import {
@@ -80,6 +79,14 @@ const paymentStatusMeta: Record<
   },
 };
 
+type LoadStatus = LoadSummary["status"] | "posted" | "cancelled" | "draft";
+
+type ShipperLoadSummary = Omit<LoadSummary, "status"> & {
+  status: LoadStatus;
+  views?: number;
+  contacts?: number;
+  offer_count?: number;
+};
 
 function resolveEpodUrl(url?: string | null) {
   if (!url) return null;
@@ -89,8 +96,15 @@ function resolveEpodUrl(url?: string | null) {
   return `${API_BASE_URL}${url}`;
 }
 
+function getErrorMessage(error: unknown, fallback: string) {
+  if (error instanceof Error && error.message.trim()) {
+    return error.message;
+  }
+  return fallback;
+}
+
 export default function MyLoadsTab() {
-  const [loads, setLoads] = useState<LoadSummary[]>([]);
+  const [loads, setLoads] = useState<ShipperLoadSummary[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [payments, setPayments] = useState<Record<number, Payment>>({});
@@ -99,14 +113,14 @@ export default function MyLoadsTab() {
   const [statusUpdatingId, setStatusUpdatingId] = useState<number | null>(null);
   const navigate = useNavigate();
   const shipperId = storage.get<string | null>(STORAGE_KEYS.USER_ID, null);
-  const loadsRef = useRef<LoadSummary[]>([]);
+  const loadsRef = useRef<ShipperLoadSummary[]>([]);
   const [disputeDialog, setDisputeDialog] = useState<{
     open: boolean;
     loadId: number | null;
     tripId: number | null;
-  disputes: DisputeRecord[];
-  loading: boolean;
-}>({ open: false, loadId: null, tripId: null, disputes: [], loading: false });
+    disputes: DisputeRecord[];
+    loading: boolean;
+  }>({ open: false, loadId: null, tripId: null, disputes: [], loading: false });
   const [offersDialog, setOffersDialog] = useState<{
     open: boolean;
     loadId: number | null;
@@ -115,18 +129,18 @@ export default function MyLoadsTab() {
     loading: boolean;
     error: string | null;
   }>({ open: false, loadId: null, offers: [], total: 0, loading: false, error: null });
-const [disputeForm, setDisputeForm] = useState({
-  reason_code: "",
-  description: "",
-  requested_action: "",
-});
-const [selectedDisputeId, setSelectedDisputeId] = useState<string | null>(null);
-const [disputeMessages, setDisputeMessages] = useState<DisputeMessage[]>([]);
-const [disputeMessagesLoading, setDisputeMessagesLoading] = useState(false);
-const [disputeMessageError, setDisputeMessageError] = useState<string | null>(null);
-const [disputeMessageDraft, setDisputeMessageDraft] = useState("");
-const [disputeMessageSending, setDisputeMessageSending] = useState(false);
-const tripContextCache = useRef<Record<number, TripEnvelope | null>>({});
+  const [disputeForm, setDisputeForm] = useState({
+    reason_code: "",
+    description: "",
+    requested_action: "",
+  });
+  const [selectedDisputeId, setSelectedDisputeId] = useState<string | null>(null);
+  const [disputeMessages, setDisputeMessages] = useState<DisputeMessage[]>([]);
+  const [disputeMessagesLoading, setDisputeMessagesLoading] = useState(false);
+  const [disputeMessageError, setDisputeMessageError] = useState<string | null>(null);
+  const [disputeMessageDraft, setDisputeMessageDraft] = useState("");
+  const [disputeMessageSending, setDisputeMessageSending] = useState(false);
+  const tripContextCache = useRef<Record<number, TripEnvelope | null>>({});
 
   const resetTripCache = useCallback(() => {
     tripContextCache.current = {};
@@ -153,9 +167,9 @@ const tripContextCache = useRef<Record<number, TripEnvelope | null>>({});
         }
       });
       setPayments(map);
-    } catch (err: any) {
+    } catch (err: unknown) {
       console.error("Error loading shipper loads", err);
-      setError(err?.message || "Failed to load your trips.");
+      setError(getErrorMessage(err, "Failed to load your trips."));
     } finally {
       setLoading(false);
       resetTripCache();
@@ -254,8 +268,8 @@ const tripContextCache = useRef<Record<number, TripEnvelope | null>>({});
         toast.success("Escrow funded successfully.");
         tripContextCache.current[loadId] = await fetchMarketplaceTripByLoad(loadId);
         refresh();
-      } catch (err: any) {
-        toast.error(err?.message ?? "Failed to fund escrow.");
+      } catch (err: unknown) {
+        toast.error(getErrorMessage(err, "Failed to fund escrow."));
       } finally {
         setFundingLoadId(null);
       }
@@ -270,11 +284,10 @@ const tripContextCache = useRef<Record<number, TripEnvelope | null>>({});
       toast.error("Trip not ready for disputes yet.");
       return;
     }
-      const payment = context?.payment ?? payments[loadId];
-      setDisputeDialog({
-        open: true,
-        loadId,
-        tripId: Number(tripId),
+    setDisputeDialog({
+      open: true,
+      loadId,
+      tripId: Number(tripId),
       disputes: [],
       loading: true,
     });
@@ -286,9 +299,9 @@ const tripContextCache = useRef<Record<number, TripEnvelope | null>>({});
     try {
       const resp = await fetchTripDisputes(tripId);
       setDisputeDialog((prev) => ({ ...prev, disputes: resp.items, loading: false }));
-    } catch (err: any) {
+    } catch (err: unknown) {
       setDisputeDialog((prev) => ({ ...prev, loading: false }));
-      toast.error(err?.message ?? "Failed to load disputes");
+      toast.error(getErrorMessage(err, "Failed to load disputes"));
     }
   };
 
@@ -309,11 +322,11 @@ const tripContextCache = useRef<Record<number, TripEnvelope | null>>({});
         total: resp.total ?? 0,
         loading: false,
       }));
-    } catch (err: any) {
+    } catch (err: unknown) {
       setOffersDialog((prev) => ({
         ...prev,
         loading: false,
-        error: err?.message ?? "Failed to load offers",
+        error: getErrorMessage(err, "Failed to load offers"),
       }));
     }
   };
@@ -327,8 +340,8 @@ const tripContextCache = useRef<Record<number, TripEnvelope | null>>({});
       await deleteLoad(loadId);
       toast.success("Load deleted.");
       refresh();
-    } catch (err: any) {
-      toast.error(err?.message ?? "Failed to delete load");
+    } catch (err: unknown) {
+      toast.error(getErrorMessage(err, "Failed to delete load"));
     } finally {
       setDeletingLoadId(null);
     }
@@ -340,8 +353,8 @@ const tripContextCache = useRef<Record<number, TripEnvelope | null>>({});
       await updateLoadStatus(loadId, makeLive ? "posted" : "cancelled");
       toast.success(makeLive ? "Load set to live." : "Load set to offline.");
       refresh();
-    } catch (err: any) {
-      toast.error(err?.message ?? "Failed to update load status");
+    } catch (err: unknown) {
+      toast.error(getErrorMessage(err, "Failed to update load status"));
     } finally {
       setStatusUpdatingId(null);
     }
@@ -357,94 +370,94 @@ const tripContextCache = useRef<Record<number, TripEnvelope | null>>({});
       toast.success("Dispute submitted.");
       setDisputeDialog((prev) => ({ ...prev, open: false }));
       refresh();
-    } catch (err: any) {
-      toast.error(err?.message ?? "Failed to submit dispute");
+    } catch (err: unknown) {
+      toast.error(getErrorMessage(err, "Failed to submit dispute"));
     }
   };
 
-const cancelExistingDispute = async (disputeId: string) => {
-  try {
-    await cancelDispute(disputeId);
-    toast.success("Dispute cancelled.");
-    if (disputeDialog.tripId) {
-      const resp = await fetchTripDisputes(disputeDialog.tripId);
-      setDisputeDialog((prev) => ({ ...prev, disputes: resp.items }));
+  const cancelExistingDispute = async (disputeId: string) => {
+    try {
+      await cancelDispute(disputeId);
+      toast.success("Dispute cancelled.");
+      if (disputeDialog.tripId) {
+        const resp = await fetchTripDisputes(disputeDialog.tripId);
+        setDisputeDialog((prev) => ({ ...prev, disputes: resp.items }));
+      }
+    } catch (err: unknown) {
+      toast.error(getErrorMessage(err, "Failed to cancel dispute"));
     }
-  } catch (err: any) {
-    toast.error(err?.message ?? "Failed to cancel dispute");
-  }
-};
+  };
 
-const loadDisputeMessages = useCallback(async (disputeId: string) => {
-  setDisputeMessagesLoading(true);
-  setDisputeMessageError(null);
-  try {
-    const resp = await fetchDisputeMessages(disputeId);
-    setDisputeMessages(resp.items ?? []);
-  } catch (err: any) {
-    setDisputeMessageError(err?.message ?? "Failed to load messages");
-  } finally {
-    setDisputeMessagesLoading(false);
-  }
-}, []);
-
-const handleSelectDispute = useCallback(
-  (disputeId: string) => {
-    setSelectedDisputeId(disputeId);
-    loadDisputeMessages(disputeId);
-  },
-  [loadDisputeMessages]
-);
-
-const filteredDisputeMessages = useMemo(
-  () => filterMessagesForPerspective(disputeMessages, "shipper"),
-  [disputeMessages]
-);
-
-const handleSendDisputeMessage = async () => {
-  if (!selectedDisputeId || !disputeMessageDraft.trim()) return;
-  try {
-    setDisputeMessageSending(true);
-    await sendDisputeMessage(selectedDisputeId, { text: disputeMessageDraft.trim() });
-    setDisputeMessageDraft("");
-    await loadDisputeMessages(selectedDisputeId);
-  } catch (err: any) {
-    setDisputeMessageError(err?.message ?? "Failed to send message");
-  } finally {
-    setDisputeMessageSending(false);
-  }
-};
-
-useEffect(() => {
-  if (!disputeDialog.open) {
-    setSelectedDisputeId(null);
-    setDisputeMessages([]);
-    setDisputeMessageDraft("");
+  const loadDisputeMessages = useCallback(async (disputeId: string) => {
+    setDisputeMessagesLoading(true);
     setDisputeMessageError(null);
-    setDisputeMessagesLoading(false);
-    return;
-  }
-}, [disputeDialog.open]);
+    try {
+      const resp = await fetchDisputeMessages(disputeId);
+      setDisputeMessages(resp.items ?? []);
+    } catch (err: unknown) {
+      setDisputeMessageError(getErrorMessage(err, "Failed to load messages"));
+    } finally {
+      setDisputeMessagesLoading(false);
+    }
+  }, []);
 
-useEffect(() => {
-  if (!disputeDialog.open) return;
-  if (disputeDialog.disputes.length === 0) {
-    setSelectedDisputeId(null);
-    setDisputeMessages([]);
-    return;
-  }
-  // preserve existing selection if still available
-  if (
-    selectedDisputeId &&
-    disputeDialog.disputes.some((d) => d.id === selectedDisputeId)
-  ) {
-    return;
-  }
-  const firstDispute = disputeDialog.disputes[0];
-  setSelectedDisputeId(firstDispute.id);
-  loadDisputeMessages(firstDispute.id);
-  setDisputeMessageDraft("");
-}, [disputeDialog.disputes, disputeDialog.open, loadDisputeMessages, selectedDisputeId]);
+  const handleSelectDispute = useCallback(
+    (disputeId: string) => {
+      setSelectedDisputeId(disputeId);
+      loadDisputeMessages(disputeId);
+    },
+    [loadDisputeMessages]
+  );
+
+  const filteredDisputeMessages = useMemo(
+    () => filterMessagesForPerspective(disputeMessages, "shipper"),
+    [disputeMessages]
+  );
+
+  const handleSendDisputeMessage = async () => {
+    if (!selectedDisputeId || !disputeMessageDraft.trim()) return;
+    try {
+      setDisputeMessageSending(true);
+      await sendDisputeMessage(selectedDisputeId, { text: disputeMessageDraft.trim() });
+      setDisputeMessageDraft("");
+      await loadDisputeMessages(selectedDisputeId);
+    } catch (err: unknown) {
+      setDisputeMessageError(getErrorMessage(err, "Failed to send message"));
+    } finally {
+      setDisputeMessageSending(false);
+    }
+  };
+
+  useEffect(() => {
+    if (!disputeDialog.open) {
+      setSelectedDisputeId(null);
+      setDisputeMessages([]);
+      setDisputeMessageDraft("");
+      setDisputeMessageError(null);
+      setDisputeMessagesLoading(false);
+      return;
+    }
+  }, [disputeDialog.open]);
+
+  useEffect(() => {
+    if (!disputeDialog.open) return;
+    if (disputeDialog.disputes.length === 0) {
+      setSelectedDisputeId(null);
+      setDisputeMessages([]);
+      return;
+    }
+    // preserve existing selection if still available
+    if (
+      selectedDisputeId &&
+      disputeDialog.disputes.some((d) => d.id === selectedDisputeId)
+    ) {
+      return;
+    }
+    const firstDispute = disputeDialog.disputes[0];
+    setSelectedDisputeId(firstDispute.id);
+    loadDisputeMessages(firstDispute.id);
+    setDisputeMessageDraft("");
+  }, [disputeDialog.disputes, disputeDialog.open, loadDisputeMessages, selectedDisputeId]);
 
   if (loading) {
     return (
@@ -477,24 +490,24 @@ useEffect(() => {
     );
   }
 
-  const liveLoads = loads.filter((load) => (load.status as string) !== "cancelled");
-  const offlineLoads = loads.filter((load) => (load.status as string) === "cancelled");
+  const liveLoads = loads.filter((load) => load.status !== "cancelled");
+  const offlineLoads = loads.filter((load) => load.status === "cancelled");
   const totalViews = loads.reduce(
-    (sum, load) => sum + Number((load as any)?.views ?? 0),
+    (sum, load) => sum + Number(load.views ?? 0),
     0
   );
   const totalContacts = loads.reduce(
-    (sum, load) => sum + Number((load as any)?.contacts ?? 0),
+    (sum, load) => sum + Number(load.contacts ?? 0),
     0
   );
 
-  const renderLoadCard = (load: LoadSummary) => {
+  const renderLoadCard = (load: ShipperLoadSummary) => {
     const payment = payments[load.id];
-    const loadIsDirect = (load as any)?.payment_mode === "DIRECT";
-    const isLive = (load.status as string) === "posted";
+    const loadIsDirect = load.payment_mode === "DIRECT";
+    const isLive = load.status === "posted";
     const statusLabel = formatLoadStatusLabel(load.status);
-    const offerCount = Number((load as any)?.offer_count ?? 0);
-    const canToggleStatus = ["posted", "cancelled", "draft"].includes(load.status as string);
+    const offerCount = Number(load.offer_count ?? 0);
+    const canToggleStatus = ["posted", "cancelled", "draft"].includes(load.status);
 
     return (
       <Card key={load.id} className="p-4 hover:shadow-md transition-shadow">
@@ -509,7 +522,7 @@ useEffect(() => {
                 style={
                   isLive
                     ? { backgroundColor: "#53ca97", color: "white" }
-                    : (load.status as string) === "cancelled" || (load.status as string) === "draft"
+                    : load.status === "cancelled" || load.status === "draft"
                       ? { backgroundColor: "#9ca3af", color: "white" }
                       : { backgroundColor: "#e5e7eb", color: "#374151" }
                 }
@@ -519,7 +532,7 @@ useEffect(() => {
                     <Power className="w-3 h-3 mr-1" />
                     Live
                   </>
-                ) : (load.status as string) === "cancelled" || (load.status as string) === "draft" ? (
+                ) : load.status === "cancelled" || load.status === "draft" ? (
                   <>
                     <PowerOff className="w-3 h-3 mr-1" />
                     Offline

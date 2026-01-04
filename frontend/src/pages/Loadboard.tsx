@@ -46,6 +46,7 @@ import {
   User,
   Building2,
   Info,
+  MessageCircle,
 } from "lucide-react";
 import { toast } from "sonner";
 import { filterLoads, searchFilter } from "../lib/filter-utils";
@@ -169,6 +170,18 @@ export function Loadboard() {
   const [searchQuery, setSearchQuery] = useState('');
   const [saveFilterName, setSaveFilterName] = useState('');
   const currentHaulerId = appStorage.get<string | null>(STORAGE_KEYS.USER_ID, null);
+  const HAULER_OFFER_LAST_SEEN_KEY = "haulerOfferLastSeen";
+  const [offerLastSeen, setOfferLastSeen] = useState<Record<string, string>>(() => {
+    if (typeof window === "undefined") return {};
+    const stored = window.localStorage.getItem(HAULER_OFFER_LAST_SEEN_KEY);
+    if (!stored) return {};
+    try {
+      const parsed = JSON.parse(stored);
+      return typeof parsed === "object" && parsed ? parsed : {};
+    } catch {
+      return {};
+    }
+  });
   const navigate = useNavigate();
   const isEditingOffer = !!offerDialogExistingOffer;
   const activeOfferIdRef = useRef<string | null>(null);
@@ -179,6 +192,19 @@ export function Loadboard() {
   useEffect(() => {
     haulerChatAllowedRef.current = haulerChatAllowed;
   }, [haulerChatAllowed]);
+
+  const updateOfferLastSeen = (offerId: string, timestamp: string) => {
+    setOfferLastSeen((prev) => {
+      const next = { ...prev, [offerId]: timestamp };
+      if (typeof window !== "undefined") {
+        window.localStorage.setItem(
+          HAULER_OFFER_LAST_SEEN_KEY,
+          JSON.stringify(next)
+        );
+      }
+      return next;
+    });
+  };
 
   useEffect(() => {
     if (subscriptionLoading) return;
@@ -310,6 +336,21 @@ type LoadboardFilters = {
       SOCKET_EVENTS.OFFER_MESSAGE,
       ({ message }) => {
         if (message.offer_id !== activeOfferIdRef.current) {
+          setHaulerOffers((prev) => {
+            const entry = Object.entries(prev).find(
+              ([, summary]) => summary.offer_id === message.offer_id
+            );
+            if (!entry) return prev;
+            const [loadId, summary] = entry;
+            return {
+              ...prev,
+              [loadId]: {
+                ...summary,
+                offer_id: message.offer_id,
+                last_message_at: message.created_at,
+              },
+            };
+          });
           return;
         }
         setHaulerChatMessages((prev) => {
@@ -318,6 +359,7 @@ type LoadboardFilters = {
           }
           return [...prev, message];
         });
+        updateOfferLastSeen(message.offer_id, message.created_at);
         if (
           !haulerChatAllowedRef.current &&
           typeof message.sender_role === "string" &&
@@ -346,10 +388,12 @@ type LoadboardFilters = {
           ...prev,
           [String(offer.load_id)]: {
             load_id: String(offer.load_id),
+            offer_id: String(offer.id),
             status: offer.status,
             offered_amount: offer.offered_amount,
             currency: offer.currency,
             created_at: offer.created_at,
+            last_message_at: prev[String(offer.load_id)]?.last_message_at ?? null,
           },
         }));
       }
@@ -361,10 +405,12 @@ type LoadboardFilters = {
           ...prev,
           [String(offer.load_id)]: {
             load_id: String(offer.load_id),
+            offer_id: String(offer.id),
             status: offer.status,
             offered_amount: offer.offered_amount,
             currency: offer.currency,
             created_at: offer.created_at,
+            last_message_at: prev[String(offer.load_id)]?.last_message_at ?? null,
           },
         }));
       }
@@ -589,6 +635,11 @@ const loadUserOffer = async (load: Load, options: { silent?: boolean } = {}) => 
       setActiveHaulerOffer(offer);
       setHaulerChatMessages(messagesResp.items);
       setHaulerChatAllowed(true);
+      const latestMessageAt =
+        messagesResp.items.length > 0
+          ? messagesResp.items[messagesResp.items.length - 1].created_at
+          : new Date().toISOString();
+      updateOfferLastSeen(offer.id, latestMessageAt);
 
       const poll = setInterval(async () => {
         try {
@@ -633,6 +684,7 @@ const loadUserOffer = async (load: Load, options: { silent?: boolean } = {}) => 
       });
       setHaulerChatMessages((prev) => [...prev, message]);
       setHaulerChatDraft("");
+      updateOfferLastSeen(activeHaulerOffer.id, message.created_at);
     } catch (err: any) {
       toast.error(err?.message ?? "Failed to send message.");
     }
@@ -733,6 +785,17 @@ const loadUserOffer = async (load: Load, options: { silent?: boolean } = {}) => 
   });
 
   const loadsToDisplay = filteredLoads;
+
+  const hasUnreadForLoad = (loadId: string) => {
+    const summary = haulerOffers[loadId];
+    if (!summary?.offer_id || !summary?.last_message_at) return false;
+    const lastSeen = offerLastSeen[summary.offer_id];
+    if (!lastSeen) return true;
+    return (
+      new Date(summary.last_message_at).getTime() >
+      new Date(lastSeen).getTime()
+    );
+  };
 
   const handleClearFilters = () => {
     const previousFilters = { ...filters };
@@ -1079,9 +1142,16 @@ const loadUserOffer = async (load: Load, options: { silent?: boolean } = {}) => 
                           <Button
                             size="sm"
                             variant="outline"
+                            className="relative gap-2"
                             onClick={() => openHaulerChat(load)}
                           >
+                            <MessageCircle className="h-4 w-4" />
                             Chat
+                            {hasUnreadForLoad(String(load.rawId ?? load.id)) && (
+                              <span className="absolute -right-1 -top-1 flex h-4 min-w-[16px] items-center justify-center rounded-full bg-primary px-1 text-[10px] font-semibold text-white shadow">
+                                New
+                              </span>
+                            )}
                           </Button>
                         </>
                       )}

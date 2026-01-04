@@ -44,6 +44,7 @@ import HaulerSubscription from '../pages/HaulerSubscription';
 import AdminSubscriptions from '../pages/AdminSubscriptions';
 import HaulerPayment from '../pages/HaulerPayment';
 import ShipperOffersTab from '../pages/ShipperOffersTab';
+import ShipperContractsTab from '../pages/ShipperContractsTab';
 
 type UserRole = 'shipper' | 'driver' | 'hauler' | 'stakeholder' | 'super-admin' | null;
 type LandingRole = 'hauler' | 'shipper' | 'stakeholder';
@@ -294,6 +295,7 @@ export function AppRouter({ showKeyboardShortcuts, onKeyboardShortcutsToggle }: 
                   <Route path="dashboard" element={<ShipperDashboard onLogout={handleLogout} onRoleSwitch={handleRoleSwitch} />} />
                   <Route path="my-loads" element={<MyLoadsTab />} />
                   <Route path="offers" element={<ShipperOffersTab />} />
+                  <Route path="contracts" element={<ShipperContractsTab />} />
                   <Route path="loadboard" element={<Navigate to="/shipper/dashboard" replace />} />
                   <Route path="truck-board" element={<TruckBoard />} />
                   <Route path="trips" element={<TripsTab onViewTrip={() => toast.info('Trip view coming soon')} />} />

@@ -108,11 +108,13 @@ export interface OfferMessage {
 }
 
 export interface HaulerOfferSummary {
+  offer_id?: string | null;
   load_id: string;
   status: LoadOfferStatus;
   offered_amount: string;
   currency: string;
   created_at: string;
+  last_message_at?: string | null;
 }
 
 export interface TripRecord {
@@ -211,6 +213,100 @@ export interface TruckAvailability {
   destination_lng: number | null;
   is_active?: boolean;
   is_external?: boolean;
+}
+
+export type ContractStatus = "DRAFT" | "SENT" | "ACCEPTED" | "REJECTED" | "LOCKED";
+
+export interface ContractRecord {
+  id: string;
+  load_id: string;
+  offer_id: string | null;
+  booking_id: string | null;
+  shipper_id: string;
+  hauler_id: string;
+  status: ContractStatus;
+  price_amount: string | null;
+  price_type: string | null;
+  payment_method: string | null;
+  payment_schedule: string | null;
+  contract_payload: Record<string, unknown>;
+  sent_at: string | null;
+  accepted_at: string | null;
+  rejected_at: string | null;
+  locked_at: string | null;
+  created_by_user_id: string;
+  updated_by_user_id: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export async function fetchContracts(filters: {
+  load_id?: string;
+  offer_id?: string;
+  status?: ContractStatus;
+} = {}) {
+  const params = new URLSearchParams();
+  if (filters.load_id) params.set("load_id", filters.load_id);
+  if (filters.offer_id) params.set("offer_id", filters.offer_id);
+  if (filters.status) params.set("status", filters.status);
+  const suffix = params.toString() ? `?${params.toString()}` : "";
+  return marketplaceRequest<{ items: ContractRecord[] }>(`/contracts${suffix}`);
+}
+
+export async function fetchContract(contractId: string) {
+  return marketplaceRequest<{ contract: ContractRecord }>(`/contracts/${contractId}`);
+}
+
+export async function createContract(payload: {
+  load_id: string;
+  offer_id: string;
+  status?: "DRAFT" | "SENT";
+  price_amount?: number | null;
+  price_type?: string | null;
+  payment_method?: string | null;
+  payment_schedule?: string | null;
+  contract_payload?: Record<string, unknown>;
+}) {
+  return marketplaceRequest<{ contract: ContractRecord }>(`/contracts`, {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+export async function updateContract(contractId: string, payload: {
+  price_amount?: number | null;
+  price_type?: string | null;
+  payment_method?: string | null;
+  payment_schedule?: string | null;
+  contract_payload?: Record<string, unknown>;
+}) {
+  return marketplaceRequest<{ contract: ContractRecord }>(`/contracts/${contractId}`, {
+    method: "PATCH",
+    body: JSON.stringify(payload),
+  });
+}
+
+export async function sendContract(contractId: string) {
+  return marketplaceRequest<{ contract: ContractRecord }>(`/contracts/${contractId}/send`, {
+    method: "POST",
+  });
+}
+
+export async function acceptContract(contractId: string) {
+  return marketplaceRequest<{
+    contract: ContractRecord;
+    booking: LoadBooking;
+    trip?: TripRecord;
+    payment?: PaymentRecord;
+  }>(`/contracts/${contractId}/accept`, {
+    method: "POST",
+  });
+}
+
+export async function rejectContract(contractId: string) {
+  return marketplaceRequest<{ contract: ContractRecord }>(`/contracts/${contractId}/reject`, {
+    method: "POST",
+  });
 }
 
 export interface LoadBooking {

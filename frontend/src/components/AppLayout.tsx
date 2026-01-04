@@ -33,7 +33,12 @@ import logo from "../assets/livestockway-logo.svg";
 import { storage, STORAGE_KEYS } from "../lib/storage";
 import { SubscriptionCTA } from "./SubscriptionCTA";
 import { useHaulerSubscription } from "../hooks/useHaulerSubscription";
-import { fetchBookings, fetchShipperOfferCount } from "../api/marketplace";
+import {
+  fetchBookings,
+  fetchContracts,
+  fetchShipperOfferCount,
+  fetchHaulerOfferSummaries,
+} from "../api/marketplace";
 
 interface AppLayoutProps {
   children: React.ReactNode;
@@ -45,7 +50,9 @@ export function AppLayout({ children, userRole, onLogout }: AppLayoutProps) {
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
   const [showNotifications, setShowNotifications] = useState(false);
   const [haulerBookingCount, setHaulerBookingCount] = useState(0);
+  const [haulerUnreadCount, setHaulerUnreadCount] = useState(0);
   const [shipperOfferCount, setShipperOfferCount] = useState(0);
+  const [shipperContractCount, setShipperContractCount] = useState(0);
   const navigate = useNavigate();
   const location = useLocation();
   const accountMode = storage.get<string>(STORAGE_KEYS.ACCOUNT_MODE, 'COMPANY');
@@ -85,6 +92,7 @@ export function AppLayout({ children, userRole, onLogout }: AppLayoutProps) {
         { path: '/shipper/dashboard', icon: LayoutDashboard, label: 'Dashboard' },
         { path: '/shipper/my-loads', icon: Package, label: 'My Loads' },
         { path: '/shipper/offers', icon: MessageSquare, label: 'Offers' },
+        { path: '/shipper/contracts', icon: FileText, label: 'Contracts' },
         { path: '/shipper/truck-board', icon: Truck, label: 'Truck Board' },
         { path: '/shipper/trips', icon: MapPin, label: 'Track Shipments' },
         { path: '/shipper/payments', icon: DollarSign, label: 'Payments' },
@@ -133,14 +141,63 @@ export function AppLayout({ children, userRole, onLogout }: AppLayoutProps) {
   useEffect(() => {
     let isMounted = true;
 
+    const loadHaulerUnreadCount = async () => {
+      if (userRole !== 'hauler') return;
+      try {
+        const resp = await fetchHaulerOfferSummaries();
+        const stored =
+          typeof window !== "undefined"
+            ? window.localStorage.getItem("haulerOfferLastSeen")
+            : null;
+        let lastSeenMap: Record<string, string> = {};
+        if (stored) {
+          try {
+            const parsed = JSON.parse(stored);
+            if (parsed && typeof parsed === "object") {
+              lastSeenMap = parsed;
+            }
+          } catch {
+            lastSeenMap = {};
+          }
+        }
+        const unreadCount = resp.items.filter((item) => {
+          if (!item.offer_id || !item.last_message_at) return false;
+          const lastSeen = lastSeenMap[item.offer_id];
+          if (!lastSeen) return true;
+          return (
+            new Date(item.last_message_at).getTime() >
+            new Date(lastSeen).getTime()
+          );
+        }).length;
+        if (isMounted) setHaulerUnreadCount(unreadCount);
+      } catch {
+        if (isMounted) setHaulerUnreadCount(0);
+      }
+    };
+
+    loadHaulerUnreadCount();
+    return () => {
+      isMounted = false;
+    };
+  }, [userRole, location.pathname]);
+
+  useEffect(() => {
+    let isMounted = true;
+
     const loadBookingsCount = async () => {
       if (userRole !== 'hauler') return;
       try {
-        const resp = await fetchBookings();
-        const requestedCount = resp.items.filter(
+        const [bookingResp, contractResp] = await Promise.all([
+          fetchBookings(),
+          fetchContracts(),
+        ]);
+        const requestedCount = bookingResp.items.filter(
           (booking) => (booking.status ?? '').toUpperCase() === 'REQUESTED'
         ).length;
-        if (isMounted) setHaulerBookingCount(requestedCount);
+        const contractCount = contractResp.items.filter(
+          (contract) => (contract.status ?? '').toUpperCase() === 'SENT'
+        ).length;
+        if (isMounted) setHaulerBookingCount(requestedCount + contractCount);
       } catch {
         if (isMounted) setHaulerBookingCount(0);
       }
@@ -166,6 +223,28 @@ export function AppLayout({ children, userRole, onLogout }: AppLayoutProps) {
     };
 
     loadOfferCount();
+    return () => {
+      isMounted = false;
+    };
+  }, [userRole, location.pathname]);
+
+  useEffect(() => {
+    let isMounted = true;
+
+    const loadContractCount = async () => {
+      if (userRole !== 'shipper') return;
+      try {
+        const resp = await fetchContracts();
+        const count = resp.items.filter((contract) =>
+          ['DRAFT', 'SENT'].includes((contract.status ?? '').toUpperCase())
+        ).length;
+        if (isMounted) setShipperContractCount(count);
+      } catch {
+        if (isMounted) setShipperContractCount(0);
+      }
+    };
+
+    loadContractCount();
     return () => {
       isMounted = false;
     };
@@ -255,10 +334,18 @@ export function AppLayout({ children, userRole, onLogout }: AppLayoutProps) {
                   userRole === 'hauler' &&
                   route.path === '/hauler/bookings' &&
                   haulerBookingCount > 0;
+                const showLoadboardBadge =
+                  userRole === 'hauler' &&
+                  route.path === '/hauler/loadboard' &&
+                  haulerUnreadCount > 0;
                 const showOfferBadge =
                   userRole === 'shipper' &&
                   route.path === '/shipper/offers' &&
                   shipperOfferCount > 0;
+                const showContractBadge =
+                  userRole === 'shipper' &&
+                  route.path === '/shipper/contracts' &&
+                  shipperContractCount > 0;
                 return (
                   <NavLink
                     key={route.path}
@@ -278,11 +365,19 @@ export function AppLayout({ children, userRole, onLogout }: AppLayoutProps) {
                     {isSidebarOpen && <span>{route.label}</span>}
                     {showBookingBadge &&
                       (isSidebarOpen ? (
-                        <span className="ml-auto rounded-full bg-primary-500 px-2 py-0.5 text-xs font-semibold text-white">
+                        <span className="ml-auto rounded-full bg-primary px-2 py-0.5 text-xs font-semibold text-white">
                           {haulerBookingCount}
                         </span>
                       ) : (
-                        <span className="absolute right-2 top-2 h-2 w-2 rounded-full bg-primary-500" />
+                        <span className="absolute right-2 top-2 h-2 w-2 rounded-full bg-primary" />
+                      ))}
+                    {showLoadboardBadge &&
+                      (isSidebarOpen ? (
+                        <span className="ml-auto rounded-full bg-primary px-2 py-0.5 text-xs font-semibold text-white">
+                          {haulerUnreadCount}
+                        </span>
+                      ) : (
+                        <span className="absolute right-2 top-2 h-2 w-2 rounded-full bg-primary" />
                       ))}
                     {showOfferBadge &&
                       (isSidebarOpen ? (
@@ -291,6 +386,14 @@ export function AppLayout({ children, userRole, onLogout }: AppLayoutProps) {
                         </span>
                       ) : (
                         <span className="absolute right-2 top-2 h-2 w-2 rounded-full bg-blue-500" />
+                      ))}
+                    {showContractBadge &&
+                      (isSidebarOpen ? (
+                        <span className="ml-auto rounded-full bg-primary px-2 py-0.5 text-xs font-semibold text-white">
+                          {shipperContractCount}
+                        </span>
+                      ) : (
+                        <span className="absolute right-2 top-2 h-2 w-2 rounded-full bg-primary" />
                       ))}
                   </NavLink>
                 );

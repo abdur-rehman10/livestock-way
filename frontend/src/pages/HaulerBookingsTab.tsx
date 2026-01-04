@@ -37,6 +37,10 @@ import {
   fetchBookings,
   respondToBooking,
   type LoadBooking,
+  fetchContracts,
+  acceptContract,
+  rejectContract,
+  type ContractRecord,
   fetchTripByLoadId as fetchMarketplaceTripByLoad,
   startMarketplaceTrip,
   markMarketplaceTripDelivered,
@@ -59,10 +63,13 @@ export default function HaulerBookingsTab() {
   const navigate = useNavigate();
   const [bookings, setBookings] = useState<LoadBooking[]>([]);
   const [selectedBookingId, setSelectedBookingId] = useState<string | null>(null);
+  const [contracts, setContracts] = useState<ContractRecord[]>([]);
+  const [selectedContractId, setSelectedContractId] = useState<string | null>(null);
   const [selectedLoad, setSelectedLoad] = useState<Load | null>(null);
   const [selectedLoadLoading, setSelectedLoadLoading] = useState(false);
   const [loading, setLoading] = useState(false);
   const [busyId, setBusyId] = useState<string | null>(null);
+  const [contractBusyId, setContractBusyId] = useState<string | null>(null);
   const [actionBusyId, setActionBusyId] = useState<number | null>(null);
   const [blockDialogOpen, setBlockDialogOpen] = useState(false);
   const [blockDialogMessage, setBlockDialogMessage] = useState(
@@ -99,15 +106,22 @@ export default function HaulerBookingsTab() {
   const [directReceivedAt, setDirectReceivedAt] = useState("");
   const [directError, setDirectError] = useState<string | null>(null);
   const [directSubmitting, setDirectSubmitting] = useState(false);
+  const [contractViewOpen, setContractViewOpen] = useState(false);
+  const [contractViewStep, setContractViewStep] = useState(1);
   const tripContextCache = useRef<Record<number, TripEnvelope | null>>({});
 
   const refresh = async () => {
     try {
       setLoading(true);
-      const resp = await fetchBookings();
-      setBookings(resp.items);
-    } catch (err: any) {
-      toast.error(err?.message ?? "Failed to load bookings");
+      const [bookingsResp, contractsResp] = await Promise.all([
+        fetchBookings(),
+        fetchContracts(),
+      ]);
+      setBookings(bookingsResp.items);
+      setContracts(contractsResp.items);
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : "Failed to load bookings";
+      toast.error(message);
     } finally {
       setLoading(false);
     }
@@ -118,25 +132,57 @@ export default function HaulerBookingsTab() {
   }, []);
 
   useEffect(() => {
-    if (bookings.length === 0) {
+    if (bookings.length === 0 && contracts.length === 0) {
       setSelectedBookingId(null);
+      setSelectedContractId(null);
       return;
     }
-    if (!selectedBookingId) {
-      setSelectedBookingId(bookings[0].id);
+    if (!selectedBookingId && !selectedContractId) {
+      if (contracts.length) {
+        setSelectedContractId(contracts[0].id);
+      } else if (bookings.length) {
+        setSelectedBookingId(bookings[0].id);
+      }
       return;
     }
-    if (!bookings.some((booking) => booking.id === selectedBookingId)) {
-      setSelectedBookingId(bookings[0].id);
+    if (selectedContractId && !contracts.some((c) => c.id === selectedContractId)) {
+      setSelectedContractId(contracts[0]?.id ?? null);
     }
-  }, [bookings, selectedBookingId]);
+    if (selectedBookingId && !bookings.some((b) => b.id === selectedBookingId)) {
+      setSelectedBookingId(bookings[0]?.id ?? null);
+    }
+  }, [bookings, contracts, selectedBookingId, selectedContractId]);
 
   const selectedBooking = useMemo(
     () => bookings.find((booking) => booking.id === selectedBookingId) || null,
     [bookings, selectedBookingId]
   );
+  const selectedContract = useMemo(
+    () => contracts.find((contract) => contract.id === selectedContractId) || null,
+    [contracts, selectedContractId]
+  );
+  const contractPayload =
+    selectedContract?.contract_payload as Record<string, unknown> | undefined;
+  const contractInfo = contractPayload?.contractInfo as
+    | {
+        haulerName?: string;
+        route?: { origin?: string; destination?: string };
+        animalType?: string;
+        headCount?: number;
+        price?: number;
+        priceType?: string;
+      }
+    | undefined;
+  const priceUnit =
+    (selectedContract?.price_type ?? contractInfo?.priceType) === "per-mile"
+      ? "/mile"
+      : "";
 
   useEffect(() => {
+    if (selectedContract) {
+      setSelectedLoad(null);
+      return;
+    }
     if (!selectedBooking?.load_id) {
       setSelectedLoad(null);
       return;
@@ -149,12 +195,18 @@ export default function HaulerBookingsTab() {
     setSelectedLoadLoading(true);
     fetchLoadById(loadId)
       .then((load) => setSelectedLoad(load))
-      .catch((err: any) => {
-        toast.error(err?.message ?? "Failed to load booking details.");
+      .catch((err: unknown) => {
+        const message = err instanceof Error ? err.message : "Failed to load booking details.";
+        toast.error(message);
         setSelectedLoad(null);
       })
       .finally(() => setSelectedLoadLoading(false));
-  }, [selectedBooking]);
+  }, [selectedBooking, selectedContract]);
+
+  useEffect(() => {
+    if (!contractViewOpen) return;
+    setContractViewStep(1);
+  }, [contractViewOpen, selectedContractId]);
 
   const getTripContext = useCallback(async (loadId: number) => {
     if (!tripContextCache.current[loadId]) {
@@ -184,8 +236,9 @@ export default function HaulerBookingsTab() {
       }
       toast.success("Trip started");
       await refresh();
-    } catch (err: any) {
-      toast.error(err?.message ?? "Failed to start trip");
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : "Failed to start trip";
+      toast.error(message);
     } finally {
       setActionBusyId(null);
     }
@@ -196,9 +249,9 @@ export default function HaulerBookingsTab() {
       setActionBusyId(loadId);
       const context = await getTripContext(loadId);
       const mode =
-        (context?.trip as any)?.payment_mode ||
-        (context?.load as any)?.payment_mode ||
-        (context?.payment as any)?.payment_mode;
+        (context?.trip as { payment_mode?: string } | undefined)?.payment_mode ||
+        (context?.load as { payment_mode?: string } | undefined)?.payment_mode ||
+        (context?.payment as { payment_mode?: string } | undefined)?.payment_mode;
       if (context?.trip?.id) {
         if (mode === "DIRECT") {
           setDirectDialog({ open: true, tripId: Number(context.trip.id), loadId });
@@ -217,8 +270,9 @@ export default function HaulerBookingsTab() {
       }
       toast.success("Load marked as delivered");
       await refresh();
-    } catch (err: any) {
-      toast.error(err?.message ?? "Failed to mark as delivered");
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : "Failed to mark as delivered";
+      toast.error(message);
     } finally {
       setActionBusyId(null);
     }
@@ -286,8 +340,9 @@ export default function HaulerBookingsTab() {
       }
       await refresh();
       resetDirectDialog();
-    } catch (err: any) {
-      setDirectError(err?.message ?? "Failed to submit direct payment receipt.");
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : "Failed to submit direct payment receipt.";
+      setDirectError(message);
     } finally {
       setDirectSubmitting(false);
       setActionBusyId(null);
@@ -302,9 +357,9 @@ export default function HaulerBookingsTab() {
       return;
     }
     const mode =
-      (context?.trip as any)?.payment_mode ||
-      (context?.load as any)?.payment_mode ||
-      (context?.payment as any)?.payment_mode;
+      (context?.trip as { payment_mode?: string } | undefined)?.payment_mode ||
+      (context?.load as { payment_mode?: string } | undefined)?.payment_mode ||
+      (context?.payment as { payment_mode?: string } | undefined)?.payment_mode;
     if (mode === "DIRECT") {
       toast.error("Disputes disabled for Direct Payment trips.");
       return;
@@ -323,9 +378,10 @@ export default function HaulerBookingsTab() {
         disputes: resp.items,
         loading: false,
       }));
-    } catch (err: any) {
+    } catch (err: unknown) {
       setDisputeDialog((prev) => ({ ...prev, loading: false }));
-      toast.error(err?.message ?? "Failed to load disputes.");
+      const message = err instanceof Error ? err.message : "Failed to load disputes.";
+      toast.error(message);
     }
   };
 
@@ -335,8 +391,9 @@ export default function HaulerBookingsTab() {
     try {
       const resp = await fetchDisputeMessages(disputeId);
       setDisputeMessages(resp.items ?? []);
-    } catch (err: any) {
-      setDisputeMessageError(err?.message ?? "Failed to load messages");
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : "Failed to load messages";
+      setDisputeMessageError(message);
     } finally {
       setDisputeMessagesLoading(false);
     }
@@ -362,8 +419,9 @@ export default function HaulerBookingsTab() {
       await sendDisputeMessage(selectedDisputeId, { text: disputeMessageDraft.trim() });
       setDisputeMessageDraft("");
       await loadDisputeMessages(selectedDisputeId);
-    } catch (err: any) {
-      setDisputeMessageError(err?.message ?? "Failed to send message");
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : "Failed to send message";
+      setDisputeMessageError(message);
     } finally {
       setDisputeMessageSending(false);
     }
@@ -404,8 +462,8 @@ export default function HaulerBookingsTab() {
       await respondToBooking(bookingId, action);
       toast.success(action === "accept" ? "Booking accepted" : "Booking rejected");
       refresh();
-    } catch (err: any) {
-      const rawMessage: string = err?.message ?? "Failed to update booking";
+    } catch (err: unknown) {
+      const rawMessage: string = err instanceof Error ? err.message : "Failed to update booking";
       const normalized = rawMessage.toLowerCase();
       if (
         normalized.includes("free trip already used") ||
@@ -430,6 +488,25 @@ export default function HaulerBookingsTab() {
     }
   };
 
+  const handleContractAction = async (contractId: string, action: "accept" | "reject") => {
+    try {
+      setContractBusyId(contractId);
+      if (action === "accept") {
+        await acceptContract(contractId);
+        toast.success("Contract accepted.");
+      } else {
+        await rejectContract(contractId);
+        toast.success("Contract rejected.");
+      }
+      await refresh();
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : `Failed to ${action} contract`;
+      toast.error(message);
+    } finally {
+      setContractBusyId(null);
+    }
+  };
+
   if (loading) {
     return <div className="p-4 text-sm text-gray-500">Loading bookings…</div>;
   }
@@ -440,25 +517,194 @@ export default function HaulerBookingsTab() {
         <div>
           <h1 className="text-xl font-semibold text-gray-900">Booking Requests</h1>
           <p className="text-sm text-gray-500">
-            Review incoming booking requests from shippers.
+            Review incoming contracts and booking requests from shippers.
           </p>
         </div>
         <Badge variant="secondary" className="bg-emerald-50 text-emerald-700">
-          Requests: {bookings.length}
+          Requests: {bookings.length + contracts.length}
         </Badge>
       </div>
 
       <div className="grid gap-6 md:grid-cols-[minmax(0,320px)_minmax(0,1fr)]">
-        <Card className="h-full">
+        <Card>
           <CardHeader className="pb-3">
-            <CardTitle className="text-base">Booking Details</CardTitle>
+            <CardTitle className="text-base">Requests</CardTitle>
           </CardHeader>
           <CardContent className="pt-0">
-            {!selectedBooking ? (
+            {contracts.length === 0 && bookings.length === 0 ? (
+              <div className="rounded-2xl border border-dashed border-gray-200 p-6 text-sm text-gray-500">
+                No contract or booking requests yet.
+              </div>
+            ) : (
+              <ScrollArea className="h-[420px] pr-2">
+                <div className="space-y-4">
+                  <div>
+                    <p className="text-xs font-semibold uppercase tracking-wide text-gray-500">
+                      Contracts
+                    </p>
+                    <div className="mt-2 space-y-2">
+                      {contracts.length === 0 ? (
+                        <p className="text-xs text-gray-500">No contracts waiting.</p>
+                      ) : (
+                        contracts.map((contract) => {
+                          const isActive = selectedContractId === contract.id;
+                          return (
+                            <button
+                              key={contract.id}
+                              type="button"
+                              onClick={() => {
+                                setSelectedContractId(contract.id);
+                                setSelectedBookingId(null);
+                              }}
+                              className={[
+                                "w-full rounded-2xl border p-3 text-left text-sm transition",
+                                isActive
+                                  ? "border-primary bg-primary/10 shadow-sm ring-1 ring-primary/30"
+                                  : "border-gray-200 hover:bg-gray-50",
+                              ].join(" ")}
+                            >
+                              <div className="flex items-center justify-between gap-2">
+                                <div>
+                                  <p className="font-semibold text-gray-900">
+                                    Contract #{contract.id}
+                                  </p>
+                                  <p className="text-[11px] text-gray-500">
+                                    Load #{contract.load_id}
+                                  </p>
+                                </div>
+                                <Badge variant="secondary" className="text-[10px] uppercase">
+                                  {contract.status}
+                                </Badge>
+                              </div>
+                            </button>
+                          );
+                        })
+                      )}
+                    </div>
+                  </div>
+
+                  <div>
+                    <p className="text-xs font-semibold uppercase tracking-wide text-gray-500">
+                      Bookings
+                    </p>
+                    <div className="mt-2 space-y-2">
+                      {bookings.length === 0 ? (
+                        <p className="text-xs text-gray-500">No booking requests yet.</p>
+                      ) : (
+                        bookings.map((booking) => {
+                          const isActive = selectedBookingId === booking.id;
+                          return (
+                            <button
+                              key={booking.id}
+                              type="button"
+                              onClick={() => {
+                                setSelectedBookingId(booking.id);
+                                setSelectedContractId(null);
+                              }}
+                              className={[
+                                "w-full rounded-2xl border p-3 text-left text-sm transition",
+                                isActive
+                                  ? "border-emerald-200 bg-emerald-50 text-gray-900"
+                                  : "border-gray-200 hover:bg-gray-50",
+                              ].join(" ")}
+                            >
+                              <div className="flex items-center justify-between gap-2">
+                                <div>
+                                  <p className="font-semibold text-gray-900">
+                                    Load #{booking.load_id}
+                                  </p>
+                                  <p className="text-[11px] text-gray-500">
+                                    Booking #{booking.id}
+                                  </p>
+                                </div>
+                                <Badge variant="secondary" className="text-[10px] uppercase">
+                                  {booking.status}
+                                </Badge>
+                              </div>
+                            </button>
+                          );
+                        })
+                      )}
+                    </div>
+                  </div>
+                </div>
+              </ScrollArea>
+            )}
+          </CardContent>
+        </Card>
+
+        <Card className="h-full">
+          <CardHeader className="pb-3">
+            <CardTitle className="text-base">
+              {selectedContract ? "Contract Details" : "Booking Details"}
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="pt-0">
+            {!selectedContract && !selectedBooking ? (
               <div className="rounded-2xl border border-dashed border-gray-200 p-6 text-sm text-gray-500">
                 Select a request to view the full details.
               </div>
-            ) : (
+            ) : selectedContract ? (
+              <div className="space-y-4">
+                <div className="rounded-2xl border border-gray-200 bg-gray-50 p-4">
+                  <div className="flex items-start justify-between gap-3">
+                    <div>
+                      <p className="text-lg font-semibold text-gray-900">
+                        Contract #{selectedContract.id}
+                      </p>
+                      <p className="text-sm text-gray-500">
+                        Load #{selectedContract.load_id}
+                      </p>
+                    </div>
+                    <Badge className="capitalize">{selectedContract.status.toLowerCase()}</Badge>
+                  </div>
+                  <div className="mt-3 text-xs text-gray-600 space-y-1">
+                    <div>
+                      Price:{" "}
+                      {selectedContract.price_amount
+                        ? `$${selectedContract.price_amount}`
+                        : "—"}{" "}
+                      {selectedContract.price_type === "per-mile" ? "/mile" : ""}
+                    </div>
+                    <div>Payment method: {selectedContract.payment_method ?? "—"}</div>
+                    <div>Payment schedule: {selectedContract.payment_schedule ?? "—"}</div>
+                  </div>
+                </div>
+
+                <Button
+                  variant="outline"
+                  className="w-fit"
+                  onClick={() => setContractViewOpen(true)}
+                >
+                  View Full Contract
+                </Button>
+
+                {selectedContract.status === "SENT" && (
+                  <div className="flex flex-wrap gap-2">
+                    <Button
+                      variant="outline"
+                      disabled={contractBusyId === selectedContract.id}
+                      onClick={() => handleContractAction(selectedContract.id, "reject")}
+                    >
+                      Reject
+                    </Button>
+                    <Button
+                      className="bg-[#29CA8D]"
+                      disabled={contractBusyId === selectedContract.id}
+                      onClick={() => handleContractAction(selectedContract.id, "accept")}
+                    >
+                      {contractBusyId === selectedContract.id ? "Processing…" : "Accept"}
+                    </Button>
+                  </div>
+                )}
+
+                {selectedContract.status === "ACCEPTED" && (
+                  <div className="rounded-2xl border border-emerald-200 bg-emerald-50 p-4 text-sm text-emerald-700">
+                    Contract accepted. Trip actions are available in your bookings list.
+                  </div>
+                )}
+              </div>
+            ) : selectedBooking ? (
               <div className="space-y-4">
                 {selectedLoadLoading && (
                   <p className="text-sm text-gray-500">Loading load details…</p>
@@ -630,6 +876,10 @@ export default function HaulerBookingsTab() {
                   </div>
                 )}
               </div>
+            ) : (
+              <div className="rounded-2xl border border-dashed border-gray-200 p-6 text-sm text-gray-500">
+                Select a request to view the full details.
+              </div>
             )}
           </CardContent>
         </Card>
@@ -645,6 +895,326 @@ export default function HaulerBookingsTab() {
             <Button onClick={() => setBlockDialogOpen(false)} className="bg-[#29CA8D] hover:bg-[#24b67d]">
               OK
             </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={contractViewOpen} onOpenChange={setContractViewOpen}>
+        <DialogContent className="max-w-2xl max-h-[60vh] p-0 overflow-y-scroll" style={{maxHeight:'70vh',maxWidth:'60vw',overflow:'scroll'}}>
+          <div className="flex flex-col">
+            {/* Fixed Header */}
+        <div className="border-b px-6 py-4 flex-shrink-0">
+          <DialogHeader>
+            <div className="flex items-start justify-between gap-4">
+              <div>
+                <DialogTitle className="text-xl">Contract #{selectedContract?.id}</DialogTitle>
+                <DialogDescription className="mt-1">
+                  Review all submitted contract terms and trip requirements.
+                </DialogDescription>
+              </div>
+            </div>
+          </DialogHeader>
+        </div>
+            {!selectedContract ? (
+              <div className="p-6">
+                <p className="text-sm text-gray-500">No contract selected.</p>
+              </div>
+            ) : (
+              <div className="flex min-h-0 flex-1 flex-col gap-4 p-6">
+              <div className="px-6 pt-5 pb-3 border-b bg-gray-50/50 flex-shrink-0">
+          <div className="flex items-center justify-between mb-4">
+            <div>
+              <p className="text-sm font-semibold text-gray-900">Contract Summary</p>
+              <p className="text-xs text-gray-500 mt-0.5">
+                Load #{selectedContract.load_id} • Status {selectedContract.status.toLowerCase()}
+            <Badge className="ml-2 capitalize">{selectedContract.status.toLowerCase()}</Badge>
+              </p>
+            </div>
+            {selectedContract?.status === "SENT" && (
+                <div className="flex gap-2">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    disabled={contractBusyId === selectedContract.id}
+                    onClick={() => handleContractAction(selectedContract.id, "reject")}
+                  >
+                    Reject
+                  </Button>
+                  <Button
+                    size="sm"
+                    className="bg-[#29CA8D] hover:bg-[#24b67f]"
+                    disabled={contractBusyId === selectedContract.id}
+                    onClick={() => handleContractAction(selectedContract.id, "accept")}
+                  >
+                    {contractBusyId === selectedContract.id ? "Processing…" : "Accept"}
+                  </Button>
+                </div>
+              )}
+          </div>
+          
+          {/* Step Tabs */}
+          <div className="flex gap-2 overflow-x-auto pb-1">
+            {[
+              { step: 1, title: "Basic Info & Payment", short: "Basic Info" },
+              { step: 2, title: "Trip Details & Welfare", short: "Trip Details" },
+              { step: 3, title: "Insurance & Compliance", short: "Insurance" },
+              { step: 4, title: "Review & Finalize", short: "Review" },
+            ].map((item) => (
+              <button
+                key={item.step}
+                onClick={() => setContractViewStep(item.step)}
+                className={[
+                  "flex items-center gap-2 px-4 py-2.5 rounded-lg text-xs font-semibold transition-all whitespace-nowrap",
+                  contractViewStep === item.step
+                    ? "bg-[#29CA8D] text-white shadow-sm"
+                    : "bg-white text-gray-600 hover:bg-gray-100 border border-gray-200",
+                ].join(" ")}
+              >
+                <div
+                  className={[
+                    "flex h-6 w-6 items-center justify-center rounded-full text-xs font-bold flex-shrink-0",
+                    contractViewStep === item.step
+                      ? "bg-white/20 text-white"
+                      : "bg-gray-100 text-gray-500",
+                  ].join(" ")}
+                >
+                  {item.step}
+                </div>
+                <span className="hidden sm:inline">{item.title}</span>
+                <span className="sm:hidden">{item.short}</span>
+              </button>
+            ))}
+          </div>
+        </div>
+
+              <ScrollArea className="flex-1 pr-2 overflow-scroll">
+                <div className="space-y-6 overflow-scroll">
+                  {contractViewStep === 1 && (
+                    <div className="rounded-2xl border border-gray-200 p-4">
+                      <p className="text-sm font-semibold text-gray-900">
+                        Step 1 · Basic info & payment
+                      </p>
+                      <div className="mt-4 grid gap-3 text-sm text-gray-700 sm:grid-cols-2">
+                        {renderContractField("Hauler", contractInfo?.haulerName)}
+                        {renderContractField(
+                          "Route",
+                          `${contractInfo?.route?.origin ?? "—"} → ${
+                            contractInfo?.route?.destination ?? "—"
+                          }`
+                        )}
+                        {renderContractField(
+                          "Livestock",
+                          `${contractInfo?.animalType ?? "—"} • ${
+                            contractInfo?.headCount ?? "—"
+                          } head`
+                        )}
+                        {renderContractField(
+                          "Price",
+                          `${selectedContract.price_amount
+                            ? `$${selectedContract.price_amount}`
+                            : contractInfo?.price
+                              ? `$${contractInfo.price}`
+                              : "—"} ${priceUnit}`.trim()
+                        )}
+                        {renderContractField(
+                          "Payment method",
+                          selectedContract.payment_method ?? "—"
+                        )}
+                        {renderContractField(
+                          "Payment schedule",
+                          selectedContract.payment_schedule ?? "—"
+                        )}
+                        {renderContractField("Contract type", contractPayload?.contractType)}
+                        {renderContractField(
+                          "Contract duration",
+                          contractPayload?.contractDuration
+                        )}
+                        {renderContractField(
+                          "Deposit required",
+                          contractPayload?.depositRequired
+                        )}
+                        {renderContractField(
+                          "Deposit percentage",
+                          contractPayload?.depositPercentage
+                        )}
+                      </div>
+                    </div>
+                  )}
+
+                  {contractViewStep === 2 && (
+                    <div className="rounded-2xl border border-gray-200 p-4">
+                      <p className="text-sm font-semibold text-gray-900">
+                        Step 2 · Trip details & welfare
+                      </p>
+                      <div className="mt-4 grid gap-3 text-sm text-gray-700 sm:grid-cols-2">
+                        {renderContractField("Pickup date", contractPayload?.pickupDate)}
+                        {renderContractField("Pickup time", contractPayload?.pickupTime)}
+                        {renderContractField("Delivery date", contractPayload?.deliveryDate)}
+                        {renderContractField("Delivery time", contractPayload?.deliveryTime)}
+                        {renderContractField(
+                          "Estimated distance",
+                          contractPayload?.estimatedDistance
+                        )}
+                        {renderContractField("Route type", contractPayload?.routeType)}
+                        {renderContractField(
+                          "Rest stops required",
+                          contractPayload?.restStopsRequired
+                        )}
+                        {renderContractField(
+                          "Rest stop interval",
+                          contractPayload?.restStopInterval
+                        )}
+                        {renderContractField(
+                          "Temperature monitoring",
+                          contractPayload?.temperatureMonitoring
+                        )}
+                        {renderContractField(
+                          "Temperature range",
+                          contractPayload?.temperatureRange
+                        )}
+                        {renderContractField(
+                          "Ventilation required",
+                          contractPayload?.ventilationRequired
+                        )}
+                        {renderContractField(
+                          "Water access required",
+                          contractPayload?.waterAccessRequired
+                        )}
+                        {renderContractField(
+                          "Feeding schedule",
+                          contractPayload?.feedingSchedule
+                        )}
+                      </div>
+                    </div>
+                  )}
+
+                  {contractViewStep === 3 && (
+                    <div className="rounded-2xl border border-gray-200 p-4">
+                      <p className="text-sm font-semibold text-gray-900">
+                        Step 3 · Insurance & compliance
+                      </p>
+                      <div className="mt-4 grid gap-3 text-sm text-gray-700 sm:grid-cols-2">
+                        {renderContractField(
+                          "Insurance coverage",
+                          contractPayload?.insuranceCoverage
+                        )}
+                        {renderContractField(
+                          "Liability limit",
+                          contractPayload?.liabilityLimit
+                        )}
+                        {renderContractField(
+                          "Cargo insurance",
+                          contractPayload?.cargoInsurance
+                        )}
+                        {renderContractField(
+                          "Additional insurance",
+                          contractPayload?.additionalInsurance
+                        )}
+                        {renderContractField(
+                          "Health certificates",
+                          contractPayload?.healthCertificates
+                        )}
+                        {renderContractField(
+                          "Movement permits",
+                          contractPayload?.movementPermits
+                        )}
+                        {renderContractField("DOT compliance", contractPayload?.dotCompliance)}
+                        {renderContractField(
+                          "Animal welfare compliance",
+                          contractPayload?.animalWelfareCompliance
+                        )}
+                      </div>
+                    </div>
+                  )}
+
+                  {contractViewStep === 4 && (
+                    <div className="rounded-2xl border border-gray-200 p-4">
+                      <p className="text-sm font-semibold text-gray-900">
+                        Step 4 · Review & finalize
+                      </p>
+                      <div className="mt-4 grid gap-3 text-sm text-gray-700 sm:grid-cols-2">
+                        {renderContractField(
+                          "Special handling",
+                          contractPayload?.specialHandling
+                        )}
+                        {renderContractField(
+                          "Equipment requirements",
+                          contractPayload?.equipmentRequirements
+                        )}
+                        {renderContractField(
+                          "Emergency contact",
+                          contractPayload?.emergencyContact
+                        )}
+                        {renderContractField(
+                          "Emergency phone",
+                          contractPayload?.emergencyPhone
+                        )}
+                        {renderContractField(
+                          "Veterinarian on call",
+                          contractPayload?.veterinarianOnCall
+                        )}
+                        {renderContractField(
+                          "Cancellation policy",
+                          contractPayload?.cancellationPolicy
+                        )}
+                        {renderContractField(
+                          "Late fee policy",
+                          contractPayload?.lateFeePolicy
+                        )}
+                        {renderContractField(
+                          "Dispute resolution",
+                          contractPayload?.disputeResolution
+                        )}
+                        {renderContractField(
+                          "Force majeure",
+                          contractPayload?.forcemajeure
+                        )}
+                      </div>
+                      <div className="mt-4 space-y-3 text-sm text-gray-700">
+                        {renderContractBlock(
+                          "Additional terms",
+                          contractPayload?.additionalTerms
+                        )}
+                        {renderContractBlock(
+                          "Special instructions",
+                          contractPayload?.specialInstructions
+                        )}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              </ScrollArea>
+
+              <div className="flex items-center justify-between border-t pt-3">
+                <Button
+                  variant="outline"
+                  onClick={() =>
+                    setContractViewStep((prev) => Math.max(1, prev - 1))
+                  }
+                  disabled={contractViewStep === 1}
+                >
+                  Previous
+                </Button>
+                <div className="text-xs text-gray-500">
+                  Step {contractViewStep} of 4
+                </div>
+                {contractViewStep === 4 ? (
+                  <Button className="bg-[#29CA8D]" onClick={() => setContractViewOpen(false)}>
+                    Done
+                  </Button>
+                ) : (
+                  <Button
+                    className="bg-[#29CA8D]"
+                    onClick={() =>
+                      setContractViewStep((prev) => Math.min(4, prev + 1))
+                    }
+                  >
+                    Next
+                  </Button>
+                )}
+              </div>
+              </div>
+            )}
           </div>
         </DialogContent>
       </Dialog>
@@ -900,4 +1470,31 @@ function resolveEpodUrl(url?: string | null) {
     return url;
   }
   return `${API_BASE_URL}${url}`;
+}
+
+function formatContractValue(value: unknown) {
+  if (value == null) return "—";
+  if (Array.isArray(value)) return value.length ? value.join(", ") : "—";
+  if (typeof value === "boolean") return value ? "Yes" : "No";
+  const normalized = String(value).trim();
+  return normalized.length ? normalized : "—";
+}
+
+function renderContractField(label: string, value: unknown) {
+  return (
+    <div>
+      <span className="text-xs text-gray-500">{label}</span>
+      <p>{formatContractValue(value)}</p>
+    </div>
+  );
+}
+
+function renderContractBlock(label: string, value: unknown) {
+  const text = formatContractValue(value);
+  return (
+    <div>
+      <span className="text-xs text-gray-500">{label}</span>
+      <p className="mt-1 whitespace-pre-wrap text-sm text-gray-700">{text}</p>
+    </div>
+  );
 }

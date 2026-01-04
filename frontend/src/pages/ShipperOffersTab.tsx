@@ -7,12 +7,14 @@ import {
   postOfferMessage,
   rejectOffer,
   fetchHaulerSummary,
-  fetchBookings,
   type LoadOffer,
   type OfferMessage,
   type HaulerSummary,
-  type LoadBooking,
-  requestBookingForOffer,
+  fetchContracts,
+  createContract,
+  updateContract,
+  sendContract,
+  type ContractRecord,
 } from "../api/marketplace";
 import {
   Card,
@@ -31,6 +33,21 @@ import {
   SOCKET_EVENTS,
   subscribeToSocketEvent,
 } from "../lib/socket";
+import { GenerateContractPopup } from "../components/GenerateContractPopup";
+
+type ContractFormData = {
+  priceAmount?: string | number;
+  priceType?: string;
+  paymentMethod?: string;
+  paymentSchedule?: string;
+  contractInfo?: {
+    haulerName?: string;
+    route?: { origin?: string; destination?: string };
+    animalType?: string;
+    headCount?: number;
+  };
+  [key: string]: unknown;
+};
 
 export default function ShipperOffersTab() {
   const shipperUserId = storage.get<string | null>(STORAGE_KEYS.USER_ID, null);
@@ -41,9 +58,13 @@ export default function ShipperOffersTab() {
   const [messages, setMessages] = useState<OfferMessage[]>([]);
   const [messageDraft, setMessageDraft] = useState("");
   const [haulerSummary, setHaulerSummary] = useState<HaulerSummary | null>(null);
-  const [bookingsByOfferId, setBookingsByOfferId] = useState<
-    Record<string, LoadBooking>
+  const [contractsByOfferId, setContractsByOfferId] = useState<
+    Record<string, ContractRecord>
   >({});
+  const [contractModal, setContractModal] = useState<{
+    open: boolean;
+    offerId: string | null;
+  }>({ open: false, offerId: null });
   const [loadingLoads, setLoadingLoads] = useState(false);
   const [loadingOffers, setLoadingOffers] = useState(false);
   const [chatLoading, setChatLoading] = useState(false);
@@ -81,6 +102,19 @@ export default function ShipperOffersTab() {
     return modeFromLoad === "DIRECT" ? "DIRECT" : "ESCROW";
   }, [currentOffer, loads, selectedLoadId]);
 
+  const selectedLoad = useMemo(
+    () => loads.find((load) => Number(load.id) === Number(selectedLoadId)) || null,
+    [loads, selectedLoadId]
+  );
+
+  const contractOffer = useMemo(
+    () =>
+      contractModal.offerId
+        ? offers.find((offer) => offer.id === contractModal.offerId) || null
+        : null,
+    [contractModal.offerId, offers]
+  );
+
   useEffect(() => {
     if (!shipperUserId) return;
     setLoadingLoads(true);
@@ -101,7 +135,7 @@ export default function ShipperOffersTab() {
     if (!selectedLoadId) {
       setOffers([]);
       setActiveOfferId(null);
-      setBookingsByOfferId({});
+      setContractsByOfferId({});
       return;
     }
     setLoadingOffers(true);
@@ -114,22 +148,18 @@ export default function ShipperOffersTab() {
         toast.error(err?.message ?? "Failed to load offers for this load.")
       )
       .finally(() => setLoadingOffers(false));
-    fetchBookings()
+    fetchContracts({ load_id: String(selectedLoadId) })
       .then((resp) => {
-        const next: Record<string, LoadBooking> = {};
-        resp.items
-          .filter(
-            (booking) => Number(booking.load_id) === Number(selectedLoadId)
-          )
-          .forEach((booking) => {
-            if (booking.offer_id) {
-              next[String(booking.offer_id)] = booking;
-            }
-          });
-        setBookingsByOfferId(next);
+        const next: Record<string, ContractRecord> = {};
+        resp.items.forEach((contract) => {
+          if (contract.offer_id) {
+            next[String(contract.offer_id)] = contract;
+          }
+        });
+        setContractsByOfferId(next);
       })
       .catch((err) =>
-        toast.error(err?.message ?? "Failed to load booking requests.")
+        toast.error(err?.message ?? "Failed to load contracts.")
       );
     const interval = setInterval(() => {
       fetchLoadOffers(String(selectedLoadId))
@@ -142,22 +172,18 @@ export default function ShipperOffersTab() {
         .catch(() =>
           toast.error("Failed to refresh offers. Please check your connection.")
         );
-      fetchBookings()
+      fetchContracts({ load_id: String(selectedLoadId) })
         .then((resp) => {
-          const next: Record<string, LoadBooking> = {};
-          resp.items
-            .filter(
-              (booking) => Number(booking.load_id) === Number(selectedLoadId)
-            )
-            .forEach((booking) => {
-              if (booking.offer_id) {
-                next[String(booking.offer_id)] = booking;
-              }
-            });
-          setBookingsByOfferId(next);
+          const next: Record<string, ContractRecord> = {};
+          resp.items.forEach((contract) => {
+            if (contract.offer_id) {
+              next[String(contract.offer_id)] = contract;
+            }
+          });
+          setContractsByOfferId(next);
         })
         .catch(() => {
-          /* ignore booking refresh errors */
+          /* ignore contract refresh errors */
         });
     }, 8000);
 
@@ -254,36 +280,74 @@ export default function ShipperOffersTab() {
     setOffers(refreshed.items);
     setActiveOfferId(refreshed.items[0]?.id ?? null);
     try {
-      const resp = await fetchBookings();
-      const next: Record<string, LoadBooking> = {};
-      resp.items
-        .filter((booking) => Number(booking.load_id) === Number(loadId))
-        .forEach((booking) => {
-          if (booking.offer_id) {
-            next[String(booking.offer_id)] = booking;
-          }
-        });
-      setBookingsByOfferId(next);
+      const resp = await fetchContracts({ load_id: String(loadId) });
+      const next: Record<string, ContractRecord> = {};
+      resp.items.forEach((contract) => {
+        if (contract.offer_id) {
+          next[String(contract.offer_id)] = contract;
+        }
+      });
+      setContractsByOfferId(next);
     } catch {
-      /* ignore booking refresh errors */
+      /* ignore contract refresh errors */
     }
   };
 
-  const handleAccept = async (offerId: string) => {
+  const handleOpenContract = (offerId: string) => {
+    setContractModal({ open: true, offerId });
+  };
+
+  const handleSaveContract = async (data: ContractFormData, sendNow: boolean) => {
+    if (!contractModal.offerId) return;
+    const offer = offers.find((o) => o.id === contractModal.offerId);
+    const load = loads.find((l) => Number(l.id) === Number(selectedLoadId));
+    if (!offer || !load) {
+      toast.error("Missing offer or load details.");
+      return;
+    }
+    const priceAmountRaw = Number(data.priceAmount ?? 0);
+    const priceAmount = Number.isFinite(priceAmountRaw) ? priceAmountRaw : 0;
+    const payload: Record<string, unknown> = {
+      ...data,
+      contractInfo: {
+        haulerName: data.contractInfo?.haulerName,
+        route: data.contractInfo?.route,
+        animalType: data.contractInfo?.animalType,
+        headCount: data.contractInfo?.headCount,
+      },
+    };
+    const existing = contractsByOfferId[offer.id];
     try {
-      const resp = await requestBookingForOffer(offerId);
-      if (resp.booking?.offer_id) {
-        setBookingsByOfferId((prev) => ({
-          ...prev,
-          [String(resp.booking.offer_id)]: resp.booking,
-        }));
+      if (existing) {
+        await updateContract(existing.id, {
+          price_amount: priceAmount,
+          price_type: data.priceType,
+          payment_method: data.paymentMethod,
+          payment_schedule: data.paymentSchedule,
+          contract_payload: payload,
+        });
+        if (sendNow) {
+          await sendContract(existing.id);
+        }
+      } else {
+        await createContract({
+          load_id: String(load.id),
+          offer_id: offer.id,
+        status: sendNow ? "SENT" : "DRAFT",
+        price_amount: priceAmount,
+        price_type: data.priceType,
+        payment_method: data.paymentMethod,
+        payment_schedule: data.paymentSchedule,
+        contract_payload: payload,
+      });
       }
-      toast.success("Booking requested.");
+      toast.success(sendNow ? "Contract sent to hauler." : "Contract draft saved.");
       if (selectedLoadId) {
         await refreshOffers(selectedLoadId);
       }
+      setContractModal({ open: false, offerId: null });
     } catch (err: any) {
-      toast.error(err?.message ?? "Failed to request booking.");
+      toast.error(err?.message ?? "Failed to save contract.");
     }
   };
 
@@ -305,7 +369,12 @@ export default function ShipperOffersTab() {
       const { message } = await postOfferMessage(activeOfferId, {
         text: messageDraft.trim(),
       });
-      setMessages((prev) => [...prev, message]);
+      setMessages((prev) => {
+        if (prev.some((existing) => existing.id === message.id)) {
+          return prev;
+        }
+        return [...prev, message];
+      });
       setMessageDraft("");
     } catch (err: any) {
       toast.error(err?.message ?? "Failed to send offer messages.");
@@ -325,12 +394,13 @@ export default function ShipperOffersTab() {
   }
 
   return (
-    <div className="space-y-6 p-6">
+    <>
+      <div className="space-y-6 p-6">
       <div className="flex flex-wrap items-center justify-between gap-4">
         <div>
           <h1 className="text-xl font-semibold text-gray-900">Offers</h1>
           <p className="text-sm text-gray-500">
-            Track bids, chat with haulers, and approve bookings.
+            Track bids, chat with haulers, and issue contracts.
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
@@ -444,7 +514,7 @@ export default function ShipperOffersTab() {
                   <div className="space-y-3">
                     {offers.map((offer) => {
                       const isActive = activeOfferId === offer.id;
-                      const offerBooking = bookingsByOfferId[offer.id];
+                      const offerContract = contractsByOfferId[offer.id];
                       const statusStyles =
                         offer.status === "PENDING"
                           ? "bg-amber-50 text-amber-700 border border-amber-200"
@@ -456,12 +526,15 @@ export default function ShipperOffersTab() {
                           key={offer.id}
                           onClick={() => setActiveOfferId(offer.id)}
                           className={[
-                            "cursor-pointer rounded-2xl border p-4 transition",
+                            "relative cursor-pointer rounded-2xl border p-4 transition",
                             isActive
-                              ? "border-emerald-200 bg-primary-50/60 shadow-sm"
+                              ? "border-primary bg-primary/10 shadow-sm ring-1 ring-primary/30"
                               : "border-gray-200 hover:bg-gray-50",
                           ].join(" ")}
                         >
+                          {isActive && (
+                            <span className="absolute left-0 top-4 h-8 w-1 rounded-r-full bg-primary" />
+                          )}
                           <div className="flex items-start justify-between gap-3">
                             <div>
                               <p className="text-lg font-semibold text-gray-900">
@@ -478,9 +551,9 @@ export default function ShipperOffersTab() {
                               "{offer.message}"
                             </p>
                           )}
-                          {offerBooking && (
+                          {offerContract && (
                             <div className="mt-2 text-xs text-emerald-700">
-                              Booking {offerBooking.status.toLowerCase()}
+                              Contract {offerContract.status.toLowerCase()}
                             </div>
                           )}
                           <div className="mt-4 flex flex-wrap gap-2">
@@ -494,17 +567,17 @@ export default function ShipperOffersTab() {
                             >
                               Chat
                             </Button>
-                            {offer.status === "PENDING" && !offerBooking && (
+                            {offer.status === "PENDING" && !offerContract && (
                               <>
                                 <Button
                                   size="sm"
                                   className="bg-primary text-white hover:bg-primary-600"
                                   onClick={(e) => {
                                     e.stopPropagation();
-                                    handleAccept(offer.id);
+                                    handleOpenContract(offer.id);
                                   }}
                                 >
-                                  Request Booking
+                                  Create Contract
                                 </Button>
                                 <Button
                                   size="sm"
@@ -518,9 +591,16 @@ export default function ShipperOffersTab() {
                                 </Button>
                               </>
                             )}
-                            {offer.status === "PENDING" && offerBooking && (
-                              <Button size="sm" variant="outline" disabled>
-                                Booking Requested
+                            {offer.status === "PENDING" && offerContract && (
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  handleOpenContract(offer.id);
+                                }}
+                              >
+                                Edit Contract
                               </Button>
                             )}
                           </div>
@@ -639,6 +719,53 @@ export default function ShipperOffersTab() {
           </Card>
         </div>
         </div>
-    </div>
+      </div>
+      <GenerateContractPopup
+        isOpen={contractModal.open}
+        onClose={() => setContractModal({ open: false, offerId: null })}
+        onGenerate={(data) => handleSaveContract(data, true)}
+        onSaveDraft={(data) => handleSaveContract(data, false)}
+      contractInfo={
+        contractOffer && selectedLoad
+          ? {
+              haulerName:
+                contractOffer.id === activeOfferId
+                  ? haulerSummary?.name ?? `Hauler #${contractOffer.hauler_id}`
+                  : `Hauler #${contractOffer.hauler_id}`,
+              route: {
+                origin: selectedLoad.pickup_location ?? "Unknown",
+                destination: selectedLoad.dropoff_location ?? "Unknown",
+              },
+              animalType: selectedLoad.species ?? "Livestock",
+              headCount: selectedLoad.quantity ?? 0,
+              price: Number(
+                contractsByOfferId[contractOffer.id]?.price_amount ??
+                  contractOffer.offered_amount ??
+                  0
+              ),
+              priceType:
+                (contractsByOfferId[contractOffer.id]?.price_type as
+                  | "per-mile"
+                  | "total"
+                  | undefined) ?? "total",
+            }
+          : undefined
+      }
+      initialData={
+        contractOffer && contractsByOfferId[contractOffer.id]
+          ? {
+              ...(contractsByOfferId[contractOffer.id].contract_payload ?? {}),
+              priceAmount:
+                contractsByOfferId[contractOffer.id].price_amount ?? "",
+              priceType:
+                (contractsByOfferId[contractOffer.id].price_type as
+                  | "per-mile"
+                  | "total"
+                  | undefined) ?? "total",
+            }
+          : undefined
+      }
+      />
+    </>
   );
 }
