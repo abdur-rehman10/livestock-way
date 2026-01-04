@@ -198,6 +198,7 @@ export interface LoadOfferRecord {
   offered_amount: string;
   currency: string;
   message: string | null;
+  chat_enabled_by_shipper?: boolean | null;
   status: LoadOfferStatus;
   expires_at: string | null;
   accepted_at: string | null;
@@ -306,6 +307,42 @@ export interface TruckChatMessageRecord {
   attachments: any[];
   created_at: string;
 }
+
+export interface ShipperTripSummary {
+  trip: TripRecord;
+  load: {
+    id: string;
+    shipper_id: string;
+    species: string | null;
+    animal_count: number | null;
+    pickup_location_text: string | null;
+    dropoff_location_text: string | null;
+    price_offer_amount: string | null;
+    price_currency: string | null;
+    pickup_window_start: string | null;
+    pickup_window_end: string | null;
+    delivery_window_start: string | null;
+    delivery_window_end: string | null;
+    pickup_lat: number | null;
+    pickup_lng: number | null;
+    dropoff_lat: number | null;
+    dropoff_lng: number | null;
+  };
+  contract: ContractRecord | null;
+  hauler: { id: string; name: string | null; phone: string | null } | null;
+  shipper: { id: string; name: string | null; phone: string | null } | null;
+  driver: { id: string; name: string | null; phone: string | null } | null;
+  truck: { id: string; plate_number: string | null; truck_type: string | null } | null;
+  payment_status: string | null;
+  route_plan_id: string | null;
+  latest_location: {
+    lat: number;
+    lng: number;
+    recorded_at: string;
+  } | null;
+}
+
+export interface HaulerTripSummary extends ShipperTripSummary {}
 
 export interface TruckChatSummary {
   chat: TruckChatRecord;
@@ -695,6 +732,7 @@ export function mapOfferRow(row: any): LoadOfferRecord {
     offered_amount: row.offered_amount,
     currency: row.currency,
     message: row.message ?? null,
+    chat_enabled_by_shipper: row.chat_enabled_by_shipper ?? null,
     status: row.status as LoadOfferStatus,
     expires_at: row.expires_at ?? null,
     accepted_at: row.accepted_at ?? null,
@@ -2320,6 +2358,530 @@ export async function listContractsForHauler(
   return result.rows.map(mapContractRow);
 }
 
+type ShipperTripRow = {
+  id: string;
+  load_id: string;
+  hauler_id: string | null;
+  truck_id: string | null;
+  driver_id: string | null;
+  status: string | null;
+  actual_start_time: string | null;
+  actual_end_time: string | null;
+  delivered_confirmed_at: string | null;
+  created_at: string;
+  updated_at: string;
+  load_shipper_id: string;
+  load_species: string | null;
+  load_animal_count: number | null;
+  load_pickup_location_text: string | null;
+  load_dropoff_location_text: string | null;
+  load_price_offer_amount: string | null;
+  load_price_currency: string | null;
+  load_pickup_window_start: string | null;
+  load_pickup_window_end: string | null;
+  load_delivery_window_start: string | null;
+  load_delivery_window_end: string | null;
+  load_pickup_lat: string | number | null;
+  load_pickup_lng: string | number | null;
+  load_dropoff_lat: string | number | null;
+  load_dropoff_lng: string | number | null;
+  load_payment_mode: string | null;
+  load_direct_payment_disclaimer_accepted_at: string | null;
+  load_direct_payment_disclaimer_version: string | null;
+  contract_id: string | null;
+  contract_offer_id: string | null;
+  contract_booking_id: string | null;
+  contract_shipper_id: string | null;
+  contract_hauler_id: string | null;
+  contract_status: string | null;
+  contract_price_amount: string | null;
+  contract_price_type: string | null;
+  contract_payment_method: string | null;
+  contract_payment_schedule: string | null;
+  contract_payload: Record<string, unknown> | null;
+  contract_sent_at: string | null;
+  contract_accepted_at: string | null;
+  contract_rejected_at: string | null;
+  contract_locked_at: string | null;
+  contract_created_by_user_id: string | null;
+  contract_updated_by_user_id: string | null;
+  contract_created_at: string | null;
+  contract_updated_at: string | null;
+  hauler_name: string | null;
+  hauler_phone: string | null;
+  shipper_name: string | null;
+  shipper_phone: string | null;
+  driver_name: string | null;
+  driver_phone: string | null;
+  truck_plate_number: string | null;
+  truck_type: string | null;
+  payment_status: string | null;
+  route_plan_id: string | null;
+  latest_lat: string | number | null;
+  latest_lng: string | number | null;
+  latest_recorded_at: string | null;
+};
+
+export async function listTripsForShipper(shipperId: string): Promise<ShipperTripSummary[]> {
+  const result = await pool.query<ShipperTripRow>(
+    `
+      SELECT
+        t.id,
+        t.load_id,
+        t.hauler_id,
+        t.truck_id,
+        t.driver_id,
+        t.status,
+        t.actual_start_time,
+        t.actual_end_time,
+        t.delivered_confirmed_at,
+        t.created_at,
+        t.updated_at,
+        l.shipper_id::text AS load_shipper_id,
+        l.species AS load_species,
+        l.animal_count AS load_animal_count,
+        l.pickup_location_text AS load_pickup_location_text,
+        l.dropoff_location_text AS load_dropoff_location_text,
+        l.price_offer_amount::text AS load_price_offer_amount,
+        l.price_currency AS load_price_currency,
+        l.pickup_window_start AS load_pickup_window_start,
+        l.pickup_window_end AS load_pickup_window_end,
+        l.delivery_window_start AS load_delivery_window_start,
+        l.delivery_window_end AS load_delivery_window_end,
+        l.pickup_lat AS load_pickup_lat,
+        l.pickup_lng AS load_pickup_lng,
+        l.dropoff_lat AS load_dropoff_lat,
+        l.dropoff_lng AS load_dropoff_lng,
+        l.payment_mode AS load_payment_mode,
+        l.direct_payment_disclaimer_accepted_at AS load_direct_payment_disclaimer_accepted_at,
+        l.direct_payment_disclaimer_version AS load_direct_payment_disclaimer_version,
+        c.id AS contract_id,
+        c.offer_id AS contract_offer_id,
+        c.booking_id AS contract_booking_id,
+        c.shipper_id::text AS contract_shipper_id,
+        c.hauler_id::text AS contract_hauler_id,
+        c.status AS contract_status,
+        c.price_amount::text AS contract_price_amount,
+        c.price_type AS contract_price_type,
+        c.payment_method AS contract_payment_method,
+        c.payment_schedule AS contract_payment_schedule,
+        c.contract_payload AS contract_payload,
+        c.sent_at AS contract_sent_at,
+        c.accepted_at AS contract_accepted_at,
+        c.rejected_at AS contract_rejected_at,
+        c.locked_at AS contract_locked_at,
+        c.created_by_user_id::text AS contract_created_by_user_id,
+        c.updated_by_user_id::text AS contract_updated_by_user_id,
+        c.created_at AS contract_created_at,
+        c.updated_at AS contract_updated_at,
+        hu.full_name AS hauler_name,
+        hu.phone_number AS hauler_phone,
+        su.full_name AS shipper_name,
+        su.phone_number AS shipper_phone,
+        d.full_name AS driver_name,
+        d.phone_number AS driver_phone,
+        tr.plate_number AS truck_plate_number,
+        tr.truck_type AS truck_type,
+        pay.status AS payment_status,
+        trp.id AS route_plan_id,
+        loc.latitude AS latest_lat,
+        loc.longitude AS latest_lng,
+        loc.recorded_at AS latest_recorded_at
+      FROM trips t
+      JOIN loads l ON l.id = t.load_id
+      JOIN shippers s ON s.id = l.shipper_id
+      JOIN app_users su ON su.id = s.user_id
+      LEFT JOIN haulers h ON h.id = t.hauler_id
+      LEFT JOIN app_users hu ON hu.id = h.user_id
+      LEFT JOIN drivers d ON d.id = t.driver_id
+      LEFT JOIN trucks tr ON tr.id = t.truck_id
+      LEFT JOIN LATERAL (
+        SELECT status
+        FROM payments p
+        WHERE p.trip_id = t.id
+        ORDER BY p.created_at DESC
+        LIMIT 1
+      ) pay ON true
+      LEFT JOIN LATERAL (
+        SELECT id
+        FROM trip_route_plans trp
+        WHERE trp.trip_id = t.id
+        ORDER BY trp.created_at DESC
+        LIMIT 1
+      ) trp ON true
+      LEFT JOIN LATERAL (
+        SELECT latitude, longitude, recorded_at
+        FROM trip_locations
+        WHERE trip_id = t.id
+        ORDER BY recorded_at DESC
+        LIMIT 1
+      ) loc ON true
+      LEFT JOIN LATERAL (
+        SELECT *
+        FROM contracts c
+        WHERE c.load_id = l.id
+          AND c.status IN ('ACCEPTED', 'LOCKED')
+        ORDER BY c.updated_at DESC NULLS LAST, c.created_at DESC
+        LIMIT 1
+      ) c ON true
+      WHERE l.shipper_id = $1
+        AND c.id IS NOT NULL
+        AND UPPER(t.status::text) IN (
+          'PENDING_ESCROW',
+          'READY_TO_START',
+          'IN_PROGRESS',
+          'DELIVERED_AWAITING_CONFIRMATION',
+          'DELIVERED_CONFIRMED',
+          'DISPUTED',
+          'CLOSED'
+        )
+      ORDER BY t.created_at DESC
+    `,
+    [shipperId]
+  );
+
+  return result.rows.map((row) => {
+    const trip = mapTripRow({
+      id: row.id,
+      load_id: row.load_id,
+      hauler_id: row.hauler_id,
+      driver_id: row.driver_id,
+      truck_id: row.truck_id,
+      status: row.status,
+      payment_mode: null,
+      load_payment_mode: row.load_payment_mode,
+      direct_payment_disclaimer_accepted_at: null,
+      load_direct_payment_disclaimer_accepted_at: row.load_direct_payment_disclaimer_accepted_at,
+      direct_payment_disclaimer_version: null,
+      load_direct_payment_disclaimer_version: row.load_direct_payment_disclaimer_version,
+      actual_start_time: row.actual_start_time,
+      actual_end_time: row.actual_end_time,
+      delivered_confirmed_at: row.delivered_confirmed_at,
+      created_at: row.created_at,
+      updated_at: row.updated_at,
+    });
+
+    const contract: ContractRecord | null = row.contract_id
+      ? {
+          id: row.contract_id,
+          load_id: row.load_id,
+          offer_id: row.contract_offer_id,
+          booking_id: row.contract_booking_id,
+          shipper_id: row.contract_shipper_id ?? row.load_shipper_id,
+          hauler_id: row.contract_hauler_id ?? row.hauler_id ?? "",
+          status: (row.contract_status as ContractStatus) ?? "ACCEPTED",
+          price_amount: row.contract_price_amount,
+          price_type: row.contract_price_type,
+          payment_method: row.contract_payment_method,
+          payment_schedule: row.contract_payment_schedule,
+          contract_payload: row.contract_payload ?? {},
+          sent_at: row.contract_sent_at,
+          accepted_at: row.contract_accepted_at,
+          rejected_at: row.contract_rejected_at,
+          locked_at: row.contract_locked_at,
+          created_by_user_id: row.contract_created_by_user_id ?? "",
+          updated_by_user_id: row.contract_updated_by_user_id ?? null,
+          created_at: row.contract_created_at ?? row.created_at,
+          updated_at: row.contract_updated_at ?? row.updated_at,
+        }
+      : null;
+
+    return {
+      trip,
+      load: {
+        id: row.load_id,
+        shipper_id: row.load_shipper_id,
+        species: row.load_species,
+        animal_count:
+          row.load_animal_count === null || row.load_animal_count === undefined
+            ? null
+            : Number(row.load_animal_count),
+        pickup_location_text: row.load_pickup_location_text,
+        dropoff_location_text: row.load_dropoff_location_text,
+        price_offer_amount: row.load_price_offer_amount,
+        price_currency: row.load_price_currency,
+        pickup_window_start: row.load_pickup_window_start,
+        pickup_window_end: row.load_pickup_window_end,
+        delivery_window_start: row.load_delivery_window_start,
+        delivery_window_end: row.load_delivery_window_end,
+        pickup_lat:
+          row.load_pickup_lat === null || row.load_pickup_lat === undefined
+            ? null
+            : Number(row.load_pickup_lat),
+        pickup_lng:
+          row.load_pickup_lng === null || row.load_pickup_lng === undefined
+            ? null
+            : Number(row.load_pickup_lng),
+        dropoff_lat:
+          row.load_dropoff_lat === null || row.load_dropoff_lat === undefined
+            ? null
+            : Number(row.load_dropoff_lat),
+        dropoff_lng:
+          row.load_dropoff_lng === null || row.load_dropoff_lng === undefined
+            ? null
+            : Number(row.load_dropoff_lng),
+      },
+      contract,
+      hauler: row.hauler_id
+        ? { id: row.hauler_id, name: row.hauler_name, phone: row.hauler_phone }
+        : null,
+      shipper: { id: row.load_shipper_id, name: row.shipper_name, phone: row.shipper_phone },
+      driver: row.driver_id
+        ? { id: row.driver_id, name: row.driver_name, phone: row.driver_phone }
+        : null,
+      truck: row.truck_id
+        ? {
+            id: row.truck_id,
+            plate_number: row.truck_plate_number,
+            truck_type: row.truck_type,
+          }
+        : null,
+      payment_status: row.payment_status,
+      route_plan_id: row.route_plan_id ? String(row.route_plan_id) : null,
+      latest_location:
+        row.latest_lat !== null && row.latest_lat !== undefined &&
+        row.latest_lng !== null && row.latest_lng !== undefined &&
+        row.latest_recorded_at
+          ? {
+              lat: Number(row.latest_lat),
+              lng: Number(row.latest_lng),
+              recorded_at: row.latest_recorded_at,
+            }
+          : null,
+    };
+  });
+}
+
+export async function listTripsForHauler(haulerId: string): Promise<HaulerTripSummary[]> {
+  const result = await pool.query<ShipperTripRow>(
+    `
+      SELECT
+        t.id,
+        t.load_id,
+        t.hauler_id,
+        t.truck_id,
+        t.driver_id,
+        t.status,
+        t.actual_start_time,
+        t.actual_end_time,
+        t.delivered_confirmed_at,
+        t.created_at,
+        t.updated_at,
+        l.shipper_id::text AS load_shipper_id,
+        l.species AS load_species,
+        l.animal_count AS load_animal_count,
+        l.pickup_location_text AS load_pickup_location_text,
+        l.dropoff_location_text AS load_dropoff_location_text,
+        l.price_offer_amount::text AS load_price_offer_amount,
+        l.price_currency AS load_price_currency,
+        l.pickup_window_start AS load_pickup_window_start,
+        l.pickup_window_end AS load_pickup_window_end,
+        l.delivery_window_start AS load_delivery_window_start,
+        l.delivery_window_end AS load_delivery_window_end,
+        l.pickup_lat AS load_pickup_lat,
+        l.pickup_lng AS load_pickup_lng,
+        l.dropoff_lat AS load_dropoff_lat,
+        l.dropoff_lng AS load_dropoff_lng,
+        l.payment_mode AS load_payment_mode,
+        l.direct_payment_disclaimer_accepted_at AS load_direct_payment_disclaimer_accepted_at,
+        l.direct_payment_disclaimer_version AS load_direct_payment_disclaimer_version,
+        c.id AS contract_id,
+        c.offer_id AS contract_offer_id,
+        c.booking_id AS contract_booking_id,
+        c.shipper_id::text AS contract_shipper_id,
+        c.hauler_id::text AS contract_hauler_id,
+        c.status AS contract_status,
+        c.price_amount::text AS contract_price_amount,
+        c.price_type AS contract_price_type,
+        c.payment_method AS contract_payment_method,
+        c.payment_schedule AS contract_payment_schedule,
+        c.contract_payload AS contract_payload,
+        c.sent_at AS contract_sent_at,
+        c.accepted_at AS contract_accepted_at,
+        c.rejected_at AS contract_rejected_at,
+        c.locked_at AS contract_locked_at,
+        c.created_by_user_id::text AS contract_created_by_user_id,
+        c.updated_by_user_id::text AS contract_updated_by_user_id,
+        c.created_at AS contract_created_at,
+        c.updated_at AS contract_updated_at,
+        hu.full_name AS hauler_name,
+        hu.phone_number AS hauler_phone,
+        su.full_name AS shipper_name,
+        su.phone_number AS shipper_phone,
+        d.full_name AS driver_name,
+        d.phone_number AS driver_phone,
+        tr.plate_number AS truck_plate_number,
+        tr.truck_type AS truck_type,
+        pay.status AS payment_status,
+        trp.id AS route_plan_id,
+        loc.latitude AS latest_lat,
+        loc.longitude AS latest_lng,
+        loc.recorded_at AS latest_recorded_at
+      FROM trips t
+      JOIN loads l ON l.id = t.load_id
+      JOIN shippers s ON s.id = l.shipper_id
+      JOIN app_users su ON su.id = s.user_id
+      LEFT JOIN haulers h ON h.id = t.hauler_id
+      LEFT JOIN app_users hu ON hu.id = h.user_id
+      LEFT JOIN drivers d ON d.id = t.driver_id
+      LEFT JOIN trucks tr ON tr.id = t.truck_id
+      LEFT JOIN LATERAL (
+        SELECT status
+        FROM payments p
+        WHERE p.trip_id = t.id
+        ORDER BY p.created_at DESC
+        LIMIT 1
+      ) pay ON true
+      LEFT JOIN LATERAL (
+        SELECT id
+        FROM trip_route_plans trp
+        WHERE trp.trip_id = t.id
+        ORDER BY trp.created_at DESC
+        LIMIT 1
+      ) trp ON true
+      LEFT JOIN LATERAL (
+        SELECT latitude, longitude, recorded_at
+        FROM trip_locations
+        WHERE trip_id = t.id
+        ORDER BY recorded_at DESC
+        LIMIT 1
+      ) loc ON true
+      LEFT JOIN LATERAL (
+        SELECT *
+        FROM contracts c
+        WHERE c.load_id = l.id
+          AND c.status IN ('ACCEPTED', 'LOCKED')
+        ORDER BY c.updated_at DESC NULLS LAST, c.created_at DESC
+        LIMIT 1
+      ) c ON true
+      WHERE t.hauler_id = $1
+        AND c.id IS NOT NULL
+        AND UPPER(t.status::text) IN (
+          'PENDING_ESCROW',
+          'READY_TO_START',
+          'IN_PROGRESS',
+          'DELIVERED_AWAITING_CONFIRMATION',
+          'DELIVERED_CONFIRMED',
+          'DISPUTED',
+          'CLOSED'
+        )
+      ORDER BY t.created_at DESC
+    `,
+    [haulerId]
+  );
+
+  return result.rows.map((row) => {
+    const trip = mapTripRow({
+      id: row.id,
+      load_id: row.load_id,
+      hauler_id: row.hauler_id,
+      driver_id: row.driver_id,
+      truck_id: row.truck_id,
+      status: row.status,
+      payment_mode: null,
+      load_payment_mode: row.load_payment_mode,
+      direct_payment_disclaimer_accepted_at: null,
+      load_direct_payment_disclaimer_accepted_at: row.load_direct_payment_disclaimer_accepted_at,
+      direct_payment_disclaimer_version: null,
+      load_direct_payment_disclaimer_version: row.load_direct_payment_disclaimer_version,
+      actual_start_time: row.actual_start_time,
+      actual_end_time: row.actual_end_time,
+      delivered_confirmed_at: row.delivered_confirmed_at,
+      created_at: row.created_at,
+      updated_at: row.updated_at,
+    });
+
+    const contract: ContractRecord | null = row.contract_id
+      ? {
+          id: row.contract_id,
+          load_id: row.load_id,
+          offer_id: row.contract_offer_id,
+          booking_id: row.contract_booking_id,
+          shipper_id: row.contract_shipper_id ?? row.load_shipper_id,
+          hauler_id: row.contract_hauler_id ?? row.hauler_id ?? "",
+          status: (row.contract_status as ContractStatus) ?? "ACCEPTED",
+          price_amount: row.contract_price_amount,
+          price_type: row.contract_price_type,
+          payment_method: row.contract_payment_method,
+          payment_schedule: row.contract_payment_schedule,
+          contract_payload: row.contract_payload ?? {},
+          sent_at: row.contract_sent_at,
+          accepted_at: row.contract_accepted_at,
+          rejected_at: row.contract_rejected_at,
+          locked_at: row.contract_locked_at,
+          created_by_user_id: row.contract_created_by_user_id ?? "",
+          updated_by_user_id: row.contract_updated_by_user_id ?? null,
+          created_at: row.contract_created_at ?? row.created_at,
+          updated_at: row.contract_updated_at ?? row.updated_at,
+        }
+      : null;
+
+    return {
+      trip,
+      load: {
+        id: row.load_id,
+        shipper_id: row.load_shipper_id,
+        species: row.load_species,
+        animal_count:
+          row.load_animal_count === null || row.load_animal_count === undefined
+            ? null
+            : Number(row.load_animal_count),
+        pickup_location_text: row.load_pickup_location_text,
+        dropoff_location_text: row.load_dropoff_location_text,
+        price_offer_amount: row.load_price_offer_amount,
+        price_currency: row.load_price_currency,
+        pickup_window_start: row.load_pickup_window_start,
+        pickup_window_end: row.load_pickup_window_end,
+        delivery_window_start: row.load_delivery_window_start,
+        delivery_window_end: row.load_delivery_window_end,
+        pickup_lat:
+          row.load_pickup_lat === null || row.load_pickup_lat === undefined
+            ? null
+            : Number(row.load_pickup_lat),
+        pickup_lng:
+          row.load_pickup_lng === null || row.load_pickup_lng === undefined
+            ? null
+            : Number(row.load_pickup_lng),
+        dropoff_lat:
+          row.load_dropoff_lat === null || row.load_dropoff_lat === undefined
+            ? null
+            : Number(row.load_dropoff_lat),
+        dropoff_lng:
+          row.load_dropoff_lng === null || row.load_dropoff_lng === undefined
+            ? null
+            : Number(row.load_dropoff_lng),
+      },
+      contract,
+      hauler: row.hauler_id
+        ? { id: row.hauler_id, name: row.hauler_name, phone: row.hauler_phone }
+        : null,
+      shipper: { id: row.load_shipper_id, name: row.shipper_name, phone: row.shipper_phone },
+      driver: row.driver_id
+        ? { id: row.driver_id, name: row.driver_name, phone: row.driver_phone }
+        : null,
+      truck: row.truck_id
+        ? {
+            id: row.truck_id,
+            plate_number: row.truck_plate_number,
+            truck_type: row.truck_type,
+          }
+        : null,
+      payment_status: row.payment_status,
+      route_plan_id: row.route_plan_id ? String(row.route_plan_id) : null,
+      latest_location:
+        row.latest_lat !== null && row.latest_lat !== undefined &&
+        row.latest_lng !== null && row.latest_lng !== undefined &&
+        row.latest_recorded_at
+          ? {
+              lat: Number(row.latest_lat),
+              lng: Number(row.latest_lng),
+              recorded_at: row.latest_recorded_at,
+            }
+          : null,
+    };
+  });
+}
+
 export async function createContract(params: {
   loadId: string;
   offerId: string | null;
@@ -2830,6 +3392,7 @@ export interface UpdateOfferDetailsInput {
   currency?: string;
   message?: string | null;
   expiresAt?: string | null;
+  chatEnabledByShipper?: boolean;
 }
 
 export async function updateOfferDetails(
@@ -2854,6 +3417,10 @@ export async function updateOfferDetails(
   if (patch.expiresAt !== undefined) {
     sets.push(`expires_at = $${values.length + 2}`);
     values.push(patch.expiresAt);
+  }
+  if (patch.chatEnabledByShipper !== undefined) {
+    sets.push(`chat_enabled_by_shipper = $${values.length + 2}`);
+    values.push(patch.chatEnabledByShipper);
   }
 
   if (sets.length === 0) {

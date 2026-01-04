@@ -604,9 +604,13 @@ export function HaulerTripView() {
     }
     try {
       setAssignDriverLoading(true);
-      await assignTripDriver(marketplaceContext.trip.id, driverInput.trim());
+      const { trip: updatedTrip } = await assignTripDriver(
+        marketplaceContext.trip.id,
+        driverInput.trim()
+      );
       toast.success("Driver assigned.");
       setDriverInput("");
+      setMarketplaceContext((prev) => (prev ? { ...prev, trip: updatedTrip } : prev));
       await loadMarketplaceContext();
     } catch (err: any) {
       toast.error(err?.message ?? "Failed to assign driver.");
@@ -626,9 +630,13 @@ export function HaulerTripView() {
     }
     try {
       setAssignVehicleLoading(true);
-      await assignTripVehicle(marketplaceContext.trip.id, vehicleInput.trim());
+      const { trip: updatedTrip } = await assignTripVehicle(
+        marketplaceContext.trip.id,
+        vehicleInput.trim()
+      );
       toast.success("Vehicle assigned.");
       setVehicleInput("");
+      setMarketplaceContext((prev) => (prev ? { ...prev, trip: updatedTrip } : prev));
       await loadMarketplaceContext();
     } catch (err: any) {
       toast.error(err?.message ?? "Failed to assign vehicle.");
@@ -846,14 +854,9 @@ export function HaulerTripView() {
           <>
             <div className="grid gap-3 text-xs text-gray-600 md:grid-cols-3">
               <div>
-                <p className="font-semibold text-gray-900">Driver</p>
+                <p className="font-semibold text-gray-900">Hauler</p>
                 <p className="text-gray-900">
-                  {assignedDriver
-                    ? `${assignedDriver.full_name}${assignedDriver.phone_number ? ` · ${assignedDriver.phone_number}` : ""
-                      }`
-                    : marketplaceTrip.assigned_driver_id
-                      ? `Driver #${marketplaceTrip.assigned_driver_id}`
-                      : "Not assigned"}
+                  {load?.assigned_to || "Not assigned"}
                 </p>
               </div>
               <div>
@@ -878,39 +881,6 @@ export function HaulerTripView() {
               ) && (
                 <>
                   <div className="grid gap-4 md:grid-cols-2">
-                    <div className="space-y-2">
-                      <Label className="text-xs">Assign Driver</Label>
-                    <select
-                      className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm"
-                      value={driverInput}
-                      onChange={(e) => setDriverInput(e.target.value)}
-                      onFocus={() => {
-                        if (!resourceLoading) {
-                          loadResourceOptions();
-                        }
-                      }}
-                    >
-                        <option value="">Select driver</option>
-                        {driverOptions.map((driver) => (
-                          <option key={driver.id} value={driver.id}>
-                            {driver.full_name || `Driver #${driver.id}`}
-                            {driver.status ? ` (${driver.status})` : ""}
-                          </option>
-                        ))}
-                      </select>
-                      <Button
-                        size="sm"
-                        onClick={handleAssignDriver}
-                        disabled={
-                          assignDriverLoading ||
-                          !driverInput.trim() ||
-                          resourceLoading ||
-                          driverOptions.length === 0
-                        }
-                      >
-                        {assignDriverLoading ? "Assigning…" : "Assign Driver"}
-                      </Button>
-                    </div>
                     <div className="space-y-2">
                       <Label className="text-xs">Assign Vehicle</Label>
                     <select
@@ -947,7 +917,7 @@ export function HaulerTripView() {
                   </div>
                   {resourceLoading && (
                     <p className="text-[11px] text-gray-500">
-                      Loading drivers and vehicles…
+                      Loading vehicles…
                     </p>
                   )}
                   {resourceError && (

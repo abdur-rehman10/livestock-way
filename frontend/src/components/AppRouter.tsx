@@ -263,7 +263,7 @@ export function AppRouter({ showKeyboardShortcuts, onKeyboardShortcutsToggle }: 
                   <Route path="loadboard" element={<Loadboard />} />
                   <Route path="truck-board" element={<TruckBoard />} />
                   <Route path="fleet" element={<FleetManagement />} />
-                  <Route path="trips" element={<TripsTab onViewTrip={() => toast.info('Trip view coming soon')} />} />
+                  <Route path="trips" element={<TripsTab role="hauler" onViewTrip={() => toast.info('Trip view coming soon')} />} />
                   <Route path="trips/:id/route-plan" element={<TripRoutePlan />} />
                   <Route path="trips/:id" element={<TripDetail />} />
                   <Route path="trips/:id/tracking" element={<TripTracking />} />
@@ -298,7 +298,8 @@ export function AppRouter({ showKeyboardShortcuts, onKeyboardShortcutsToggle }: 
                   <Route path="contracts" element={<ShipperContractsTab />} />
                   <Route path="loadboard" element={<Navigate to="/shipper/dashboard" replace />} />
                   <Route path="truck-board" element={<TruckBoard />} />
-                  <Route path="trips" element={<TripsTab onViewTrip={() => toast.info('Trip view coming soon')} />} />
+                  <Route path="trips" element={<TripsTab role="shipper" onViewTrip={() => toast.info('Trip view coming soon')} />} />
+                  <Route path="trips/:id/route-plan" element={<TripRoutePlan />} />
                   <Route path="trips/:id" element={<TripDetail />} />
                   <Route path="trips/:id/tracking" element={<TripTracking />} />
                   <Route path="trips/:id/chat" element={<TripChat />} />
@@ -324,7 +325,7 @@ export function AppRouter({ showKeyboardShortcuts, onKeyboardShortcutsToggle }: 
               <AppLayout userRole="driver" onLogout={handleLogout}>
                 <Routes>
                   <Route path="dashboard" element={<DriverDashboard onLogout={handleLogout} onRoleSwitch={handleRoleSwitch} />} />
-                  <Route path="trips" element={<TripsTab onViewTrip={() => toast.info('Trip view coming soon')} />} />
+                  <Route path="trips" element={<TripsTab role="driver" onViewTrip={() => toast.info('Trip view coming soon')} />} />
                   <Route path="expenses" element={<ExpensesTab />} />
                   <Route path="documents" element={<DocumentsTab />} />
                   <Route path="settings" element={<ProfileSettings role="driver" onBack={() => navigate(-1)} />} />

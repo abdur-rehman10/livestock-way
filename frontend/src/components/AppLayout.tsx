@@ -77,8 +77,8 @@ export function AppLayout({ children, userRole, onLogout }: AppLayoutProps) {
         { path: '/hauler/loadboard', icon: Package, label: 'Loadboard' },
         { path: '/hauler/truck-board', icon: Truck, label: 'Truck Board' },
         { path: '/hauler/my-loads', icon: ClipboardList, label: 'My Loads' },
-        { path: '/hauler/fleet', icon: Truck, label: 'Fleet' },
-        { path: '/hauler/trips', icon: MapPin, label: 'Trips' },
+        { path: '/hauler/fleet', icon: Truck, label: 'My Fleet' },
+        { path: '/hauler/trips', icon: MapPin, label: 'My Trips' },
         { path: '/hauler/earnings', icon: DollarSign, label: 'Earnings' },
         { path: '/hauler/team', icon: Users, label: 'Team' },
         { path: '/hauler/marketplace', icon: ShoppingCart, label: 'Marketplace' },
@@ -90,11 +90,11 @@ export function AppLayout({ children, userRole, onLogout }: AppLayoutProps) {
       label: 'Shipper',
       routes: [
         { path: '/shipper/dashboard', icon: LayoutDashboard, label: 'Dashboard' },
-        { path: '/shipper/my-loads', icon: Package, label: 'My Loads' },
+        { path: '/shipper/my-loads', icon: Package, label: 'My Listing' },
         { path: '/shipper/offers', icon: MessageSquare, label: 'Offers' },
         { path: '/shipper/contracts', icon: FileText, label: 'Contracts' },
+        { path: '/shipper/trips', icon: MapPin, label: 'My Trips' },
         { path: '/shipper/truck-board', icon: Truck, label: 'Truck Board' },
-        { path: '/shipper/trips', icon: MapPin, label: 'Track Shipments' },
         { path: '/shipper/payments', icon: DollarSign, label: 'Payments' },
         { path: '/shipper/documents', icon: FileText, label: 'Documents' },
         { path: '/shipper/marketplace', icon: ShoppingCart, label: 'Marketplace' },
@@ -254,7 +254,7 @@ export function AppLayout({ children, userRole, onLogout }: AppLayoutProps) {
   const routes =
     userRole === 'hauler' && accountMode === 'INDIVIDUAL'
       ? config.routes.filter(
-          (route) => route.path !== '/hauler/fleet' && route.path !== '/hauler/team'
+          (route) => route.path !== '/hauler/team'
         )
       : config.routes;
   const userName = storage.get(STORAGE_KEYS.USER_NAME, 'User');
@@ -354,7 +354,7 @@ export function AppLayout({ children, userRole, onLogout }: AppLayoutProps) {
                       [
                         "relative flex items-center gap-3 px-3 py-2.5 rounded-lg transition-colors",
                         isActive
-                          ? "bg-primary-50 text-emerald-700"
+                          ? "bg-primary/10 text-primary"
                           : "text-gray-600 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-800",
                         !isSidebarOpen && "justify-center",
                       ].join(" ")

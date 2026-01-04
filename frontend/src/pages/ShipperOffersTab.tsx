@@ -6,6 +6,7 @@ import {
   fetchOfferMessages,
   postOfferMessage,
   rejectOffer,
+  updateLoadOffer,
   fetchHaulerSummary,
   type LoadOffer,
   type OfferMessage,
@@ -27,6 +28,7 @@ import { Button } from "../components/ui/button";
 import { Input } from "../components/ui/input";
 import { Textarea } from "../components/ui/textarea";
 import { Badge } from "../components/ui/badge";
+import { Switch } from "../components/ui/switch";
 import { ScrollArea } from "../components/ui/scroll-area";
 import { storage, STORAGE_KEYS } from "../lib/storage";
 import {
@@ -91,6 +93,8 @@ export default function ShipperOffersTab() {
   const canChat =
     !!currentOffer &&
     !["REJECTED", "WITHDRAWN", "EXPIRED"].includes(currentOffer.status);
+  const chatEnabledByShipper = currentOffer?.chat_enabled_by_shipper ?? false;
+  const canSendChat = canChat && chatEnabledByShipper;
 
   const currentPaymentMode = useMemo(() => {
     const modeFromOffer = currentOffer?.payment_mode;
@@ -363,8 +367,22 @@ export default function ShipperOffersTab() {
     }
   };
 
+  const handleToggleChat = async (offerId: string, enabled: boolean) => {
+    try {
+      const { offer } = await updateLoadOffer(offerId, {
+        chat_enabled_by_shipper: enabled,
+      });
+      setOffers((prev) =>
+        prev.map((item) => (item.id === offerId ? offer : item))
+      );
+      toast.success(enabled ? "Chat enabled for hauler." : "Chat disabled for hauler.");
+    } catch (err: any) {
+      toast.error(err?.message ?? "Failed to update chat setting.");
+    }
+  };
+
   const handleSendMessage = async () => {
-    if (!activeOfferId || !messageDraft.trim() || !canChat) return;
+    if (!activeOfferId || !messageDraft.trim() || !canSendChat) return;
     try {
       const { message } = await postOfferMessage(activeOfferId, {
         text: messageDraft.trim(),
@@ -404,7 +422,7 @@ export default function ShipperOffersTab() {
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
-          <Badge variant="secondary" className="bg-primary-50 text-emerald-700">
+          <Badge variant="secondary" className="bg-primary/10 text-primary border border-primary/20">
             Loads: {loads.length}
           </Badge>
           {selectedLoadId && (
@@ -446,7 +464,7 @@ export default function ShipperOffersTab() {
                         className={[
                           "relative rounded-lg border p-4 text-left transition-all",
                           active
-                            ? "border-emerald-500 bg-white shadow-md ring-2 ring-emerald-100"
+                          ? "border-primary bg-white shadow-md ring-2 ring-primary/20"
                             : "border-gray-200 bg-white hover:border-gray-300 hover:shadow-sm",
                         ].join(" ")}
                       >
@@ -515,11 +533,14 @@ export default function ShipperOffersTab() {
                     {offers.map((offer) => {
                       const isActive = activeOfferId === offer.id;
                       const offerContract = contractsByOfferId[offer.id];
+                      const canToggleChat = !["REJECTED", "WITHDRAWN", "EXPIRED"].includes(
+                        offer.status
+                      );
                       const statusStyles =
                         offer.status === "PENDING"
                           ? "bg-amber-50 text-amber-700 border border-amber-200"
                           : offer.status === "ACCEPTED"
-                          ? "bg-primary-50 text-emerald-700 border border-emerald-200"
+                          ? "bg-primary/10 text-primary border border-primary/20"
                           : "bg-gray-100 text-gray-600 border border-gray-200";
                       return (
                         <div
@@ -552,10 +573,19 @@ export default function ShipperOffersTab() {
                             </p>
                           )}
                           {offerContract && (
-                            <div className="mt-2 text-xs text-emerald-700">
+                            <div className="mt-2 text-xs text-primary">
                               Contract {offerContract.status.toLowerCase()}
                             </div>
                           )}
+                          <div className="mt-3 flex items-center justify-between rounded-xl border border-gray-100 bg-gray-50 px-3 py-2 text-xs">
+                            <span className="text-gray-600">Chat enabled</span>
+                            <Switch
+                              checked={offer.chat_enabled_by_shipper ?? false}
+                              onCheckedChange={(checked) => handleToggleChat(offer.id, checked)}
+                              onClick={(event) => event.stopPropagation()}
+                              disabled={!canToggleChat}
+                            />
+                          </div>
                           <div className="mt-4 flex flex-wrap gap-2">
                             <Button
                               size="sm"
@@ -628,7 +658,7 @@ export default function ShipperOffersTab() {
                     className={
                       currentPaymentMode === "DIRECT"
                         ? "bg-amber-50 text-amber-800 border border-amber-200"
-                        : "bg-primary-50 text-emerald-800 border border-emerald-200"
+                        : "bg-primary/10 text-primary border border-primary/20"
                     }
                   >
                     Payment: {currentPaymentMode === "DIRECT" ? "Direct" : "Escrow"}
@@ -664,12 +694,24 @@ export default function ShipperOffersTab() {
                   Chat closes once an offer is withdrawn or rejected.
                 </p>
               ) : null}
+              {canChat && currentOffer && !chatEnabledByShipper ? (
+                <div className="flex items-center justify-between rounded-xl border border-dashed border-gray-200 bg-white px-3 py-2 text-xs text-gray-600">
+                  <span>Chat is disabled. Enable it to message this hauler.</span>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={() => handleToggleChat(currentOffer.id, true)}
+                  >
+                    Enable chat
+                  </Button>
+                </div>
+              ) : null}
               <ScrollArea className="h-[320px] rounded-2xl border border-gray-200 bg-gray-50">
                 {chatLoading ? (
                   <p className="p-4 text-sm text-gray-500">Loading chat…</p>
                 ) : messages.length === 0 ? (
                   <p className="p-4 text-sm text-gray-500">
-                    No messages yet. Send the first note to unlock chat for the hauler.
+                    No messages yet. Enable chat to start messaging the hauler.
                   </p>
                 ) : (
                   <div className="space-y-3 p-4">
@@ -683,7 +725,7 @@ export default function ShipperOffersTab() {
                           className={[
                             "rounded-2xl border p-3 text-sm shadow-sm",
                             isShipperMessage
-                              ? "ml-auto border-emerald-200 bg-white"
+                              ? "ml-auto border-primary/20 bg-white"
                               : "mr-auto border-gray-200 bg-white",
                           ].join(" ")}
                         >
@@ -706,11 +748,11 @@ export default function ShipperOffersTab() {
                   value={messageDraft}
                   onChange={(e) => setMessageDraft(e.target.value)}
                   className="flex-1"
-                  disabled={!activeOfferId || !canChat}
+                  disabled={!activeOfferId || !canSendChat}
                 />
                 <Button
                   onClick={handleSendMessage}
-                  disabled={!activeOfferId || !canChat}
+                  disabled={!activeOfferId || !canSendChat}
                 >
                   Send
                 </Button>

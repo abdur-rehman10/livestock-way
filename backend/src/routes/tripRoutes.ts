@@ -1558,4 +1558,86 @@ router.post(
   }
 );
 
+router.post(
+  "/:id/location",
+  requireRoles(["driver", "hauler"]),
+  auditRequest("trip:location-update", (req) => `trip:${req.params.id}`),
+  async (req: Request, res: Response) => {
+    try {
+      const tripId = getTripIdParam(req);
+      if (tripId === null) {
+        return res.status(400).json({ message: "Invalid trip id" });
+      }
+      const latitude = Number(req.body?.latitude ?? req.body?.lat);
+      const longitude = Number(req.body?.longitude ?? req.body?.lng);
+      if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) {
+        return res.status(400).json({ message: "latitude and longitude are required" });
+      }
+      if (latitude < -90 || latitude > 90 || longitude < -180 || longitude > 180) {
+        return res.status(400).json({ message: "Invalid latitude/longitude" });
+      }
+      const recordedAt = req.body?.recorded_at ?? null;
+      const speedKmh = req.body?.speed_kmh ?? null;
+      const source = req.body?.source ?? "mobile";
+
+      const tripCheck = await pool.query("SELECT id FROM trips WHERE id = $1", [tripId]);
+      if (tripCheck.rowCount === 0) {
+        return res.status(404).json({ message: "Trip not found" });
+      }
+
+      const insert = await pool.query(
+        `
+          INSERT INTO trip_locations (
+            trip_id,
+            recorded_at,
+            latitude,
+            longitude,
+            speed_kmh,
+            source
+          )
+          VALUES ($1, COALESCE($2::timestamptz, NOW()), $3, $4, $5, $6)
+          RETURNING id, trip_id, recorded_at, latitude, longitude, speed_kmh, source
+        `,
+        [tripId, recordedAt, latitude, longitude, speedKmh, source]
+      );
+
+      return res.status(201).json({ location: insert.rows[0] });
+    } catch (err) {
+      console.error("Error in POST /api/trips/:id/location:", err);
+      return res.status(500).json({ message: "Failed to save location" });
+    }
+  }
+);
+
+router.get(
+  "/:id/location/latest",
+  requireRoles(["driver", "hauler", "shipper"]),
+  auditRequest("trip:location-latest", (req) => `trip:${req.params.id}`),
+  async (req: Request, res: Response) => {
+    try {
+      const tripId = getTripIdParam(req);
+      if (tripId === null) {
+        return res.status(400).json({ message: "Invalid trip id" });
+      }
+      const result = await pool.query(
+        `
+          SELECT id, trip_id, recorded_at, latitude, longitude, speed_kmh, source
+          FROM trip_locations
+          WHERE trip_id = $1
+          ORDER BY recorded_at DESC
+          LIMIT 1
+        `,
+        [tripId]
+      );
+      if (result.rowCount === 0) {
+        return res.status(404).json({ message: "No locations yet" });
+      }
+      return res.json({ location: result.rows[0] });
+    } catch (err) {
+      console.error("Error in GET /api/trips/:id/location/latest:", err);
+      return res.status(500).json({ message: "Failed to load location" });
+    }
+  }
+);
+
 export default router;

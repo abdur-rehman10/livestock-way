@@ -1,0 +1,2 @@
+ALTER TABLE load_offers
+ADD COLUMN IF NOT EXISTS chat_enabled_by_shipper BOOLEAN DEFAULT FALSE;

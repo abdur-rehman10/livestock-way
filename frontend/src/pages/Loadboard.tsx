@@ -72,6 +72,7 @@ import {
   type HaulerOfferSummary,
   subscribeHauler,
 } from "../api/marketplace";
+import { fetchTrucks } from "../api/fleet";
 import { useHaulerSubscription } from "../hooks/useHaulerSubscription";
 import { SubscriptionCTA } from "../components/SubscriptionCTA";
 import {
@@ -159,6 +160,7 @@ export function Loadboard() {
   const [isLoading, setIsLoading] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);
   const [haulerOffers, setHaulerOffers] = useState<Record<string, HaulerOfferSummary>>({});
+  const [haulerTruckCount, setHaulerTruckCount] = useState<number | null>(null);
   const [subscriptionDialogOpen, setSubscriptionDialogOpen] = useState(false);
   const [oneTimeUpgradeOpen, setOneTimeUpgradeOpen] = useState(false);
   const [subscriptionSaving, setSubscriptionSaving] = useState(false);
@@ -186,8 +188,10 @@ export function Loadboard() {
   const isEditingOffer = !!offerDialogExistingOffer;
   const activeOfferIdRef = useRef<string | null>(null);
   const haulerChatAllowedRef = useRef(false);
+  const activeHaulerOfferRef = useRef<LoadOffer | null>(null);
   useEffect(() => {
     activeOfferIdRef.current = activeHaulerOffer?.id ?? null;
+    activeHaulerOfferRef.current = activeHaulerOffer ?? null;
   }, [activeHaulerOffer]);
   useEffect(() => {
     haulerChatAllowedRef.current = haulerChatAllowed;
@@ -255,6 +259,7 @@ type LoadboardFilters = {
     subscriptionState?.hauler_type === "INDIVIDUAL" &&
     subscriptionState.subscription_status !== "ACTIVE" &&
     subscriptionState.free_trip_used === true;
+  const hasFleet = haulerTruckCount === null ? true : haulerTruckCount > 0;
   const offerBlockedMessage = "You have used your one free trip. Please subscribe to keep using LivestockWay.";
   const individualPrice =
     subscriptionState?.current_individual_monthly_price !== null &&
@@ -365,7 +370,10 @@ type LoadboardFilters = {
           typeof message.sender_role === "string" &&
           message.sender_role.toUpperCase().startsWith("SHIPPER")
         ) {
-          setHaulerChatAllowed(true);
+          const activeOffer = activeHaulerOfferRef.current;
+          if (activeOffer?.id === message.offer_id && activeOffer.chat_enabled_by_shipper) {
+            setHaulerChatAllowed(true);
+          }
         }
       }
     );
@@ -393,9 +401,16 @@ type LoadboardFilters = {
             offered_amount: offer.offered_amount,
             currency: offer.currency,
             created_at: offer.created_at,
+            chat_enabled_by_shipper: offer.chat_enabled_by_shipper ?? null,
             last_message_at: prev[String(offer.load_id)]?.last_message_at ?? null,
           },
         }));
+        if (offer.id === activeOfferIdRef.current) {
+          const chatAllowed =
+            !["REJECTED", "WITHDRAWN", "EXPIRED"].includes(offer.status) &&
+            !!offer.chat_enabled_by_shipper;
+          setHaulerChatAllowed(chatAllowed);
+        }
       }
     );
     const unsubscribeOfferCreated = subscribeToSocketEvent(
@@ -410,6 +425,7 @@ type LoadboardFilters = {
             offered_amount: offer.offered_amount,
             currency: offer.currency,
             created_at: offer.created_at,
+            chat_enabled_by_shipper: offer.chat_enabled_by_shipper ?? null,
             last_message_at: prev[String(offer.load_id)]?.last_message_at ?? null,
           },
         }));
@@ -465,6 +481,11 @@ type LoadboardFilters = {
   };
 
   const handleOfferClick = (load: Load) => {
+    if (!hasFleet) {
+      toast.error("Add a vehicle in My Fleet before placing offers.");
+      navigate("/hauler/fleet");
+      return;
+    }
     if (offerBlocked) {
       if (shouldShowOneTimeUpgrade()) {
         setOneTimeUpgradeOpen(true);
@@ -480,6 +501,11 @@ type LoadboardFilters = {
   const openOfferDialog = async (load: Load) => {
     if (load.isExternal) {
       toast.info("This external load is read-only.");
+      return;
+    }
+    if (!hasFleet) {
+      toast.error("Add a vehicle in My Fleet before placing offers.");
+      navigate("/hauler/fleet");
       return;
     }
     setOfferDialogLoad(load);
@@ -621,12 +647,11 @@ const loadUserOffer = async (load: Load, options: { silent?: boolean } = {}) => 
       const refreshed = resp.items.find((o) => o.id === offer!.id);
       if (refreshed) offer = refreshed;
       const messagesResp = await fetchOfferMessages(offer.id);
-      const shipperInitiated = messagesResp.items.some((msg) =>
-        (msg.sender_role ?? "").toUpperCase().startsWith("SHIPPER")
-      );
-      const allowed = offer.status === "ACCEPTED" || shipperInitiated;
-      if (!allowed) {
-        toast.error("Chat opens after the shipper accepts or messages you.");
+      const chatAllowed =
+        !["REJECTED", "WITHDRAWN", "EXPIRED"].includes(offer.status) &&
+        !!offer.chat_enabled_by_shipper;
+      if (!chatAllowed) {
+        toast.error("Shipper has not enabled chat for this offer yet.");
         setActiveHaulerOffer(null);
         setHaulerChatMessages([]);
         setHaulerChatAllowed(false);
@@ -682,7 +707,12 @@ const loadUserOffer = async (load: Load, options: { silent?: boolean } = {}) => 
       const { message } = await postOfferMessage(activeHaulerOffer.id, {
         text: haulerChatDraft.trim(),
       });
-      setHaulerChatMessages((prev) => [...prev, message]);
+      setHaulerChatMessages((prev) => {
+        if (prev.some((existing) => existing.id === message.id)) {
+          return prev;
+        }
+        return [...prev, message];
+      });
       setHaulerChatDraft("");
       updateOfferLastSeen(activeHaulerOffer.id, message.created_at);
     } catch (err: any) {
@@ -728,6 +758,13 @@ const loadUserOffer = async (load: Load, options: { silent?: boolean } = {}) => 
         })
         .catch(() => {
           setHaulerOffers({});
+        });
+      fetchTrucks()
+        .then((resp) => {
+          setHaulerTruckCount(resp.items?.length ?? 0);
+        })
+        .catch(() => {
+          setHaulerTruckCount(0);
         });
     }
 
@@ -788,6 +825,7 @@ const loadUserOffer = async (load: Load, options: { silent?: boolean } = {}) => 
 
   const hasUnreadForLoad = (loadId: string) => {
     const summary = haulerOffers[loadId];
+    if (summary?.chat_enabled_by_shipper === false) return false;
     if (!summary?.offer_id || !summary?.last_message_at) return false;
     const lastSeen = offerLastSeen[summary.offer_id];
     if (!lastSeen) return true;

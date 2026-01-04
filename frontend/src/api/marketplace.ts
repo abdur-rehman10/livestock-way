@@ -86,6 +86,7 @@ export interface LoadOffer {
   offered_amount: string;
   currency: string;
   message: string | null;
+  chat_enabled_by_shipper?: boolean | null;
   status: LoadOfferStatus;
   expires_at: string | null;
   accepted_at: string | null;
@@ -115,6 +116,7 @@ export interface HaulerOfferSummary {
   currency: string;
   created_at: string;
   last_message_at?: string | null;
+  chat_enabled_by_shipper?: boolean | null;
 }
 
 export interface TripRecord {
@@ -217,6 +219,46 @@ export interface TruckAvailability {
 
 export type ContractStatus = "DRAFT" | "SENT" | "ACCEPTED" | "REJECTED" | "LOCKED";
 
+export interface ShipperTripSummary {
+  trip: TripRecord;
+  load: {
+    id: string;
+    shipper_id: string;
+    species: string | null;
+    animal_count: number | null;
+    pickup_location_text: string | null;
+    dropoff_location_text: string | null;
+    price_offer_amount: string | null;
+    price_currency: string | null;
+    pickup_window_start: string | null;
+    pickup_window_end: string | null;
+    delivery_window_start: string | null;
+    delivery_window_end: string | null;
+    pickup_lat: number | null;
+    pickup_lng: number | null;
+    dropoff_lat: number | null;
+    dropoff_lng: number | null;
+  };
+  contract: {
+    id: string;
+    status: ContractStatus;
+    price_amount: string | null;
+    price_type: string | null;
+    payment_method: string | null;
+    payment_schedule: string | null;
+    contract_payload: Record<string, unknown>;
+  } | null;
+  hauler: { id: string; name: string | null; phone: string | null } | null;
+  shipper: { id: string; name: string | null; phone: string | null } | null;
+  driver: { id: string; name: string | null; phone: string | null } | null;
+  truck: { id: string; plate_number: string | null; truck_type: string | null } | null;
+  payment_status: string | null;
+  route_plan_id: string | null;
+  latest_location: { lat: number; lng: number; recorded_at: string } | null;
+}
+
+export interface HaulerTripSummary extends ShipperTripSummary {}
+
 export interface ContractRecord {
   id: string;
   load_id: string;
@@ -307,6 +349,14 @@ export async function rejectContract(contractId: string) {
   return marketplaceRequest<{ contract: ContractRecord }>(`/contracts/${contractId}/reject`, {
     method: "POST",
   });
+}
+
+export async function fetchShipperTrips() {
+  return marketplaceRequest<{ items: ShipperTripSummary[] }>(`/shipper/trips`);
+}
+
+export async function fetchHaulerTrips() {
+  return marketplaceRequest<{ items: HaulerTripSummary[] }>(`/hauler/trips`);
 }
 
 export interface LoadBooking {
@@ -448,6 +498,7 @@ export async function updateLoadOffer(offerId: string, payload: {
   currency?: string;
   message?: string | null;
   expires_at?: string | null;
+  chat_enabled_by_shipper?: boolean;
 }) {
   return marketplaceRequest<{ offer: LoadOffer }>(`/load-offers/${offerId}`, {
     method: "PATCH",

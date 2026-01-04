@@ -79,6 +79,8 @@ import {
   acceptContract,
   rejectContract,
   ContractStatus,
+  listTripsForShipper,
+  listTripsForHauler,
   listDriversForHauler,
   listVehiclesForHauler,
 } from "../services/marketplaceService";
@@ -467,6 +469,7 @@ router.get(
             status,
             offered_amount,
             currency,
+            chat_enabled_by_shipper,
             created_at,
             (
               SELECT MAX(lom.created_at)
@@ -596,18 +599,15 @@ router.patch(
       const companyId = getCompanyId(authUser);
       const isHauler = companyId !== null && offer.hauler_id === companyId;
       const isCreator = String(authUser.id ?? "") === offer.created_by_user_id;
-      if (!isHauler && !isCreator && !isSuperAdminUser(authUser)) {
-        return res.status(403).json({ error: "Forbidden" });
-      }
-      if (offer.status !== LoadOfferStatus.PENDING) {
-        return res.status(400).json({ error: "Only pending offers can be updated" });
-      }
+      const isSuperAdmin = isSuperAdminUser(authUser);
+      const chatEnabledByShipper = req.body?.chat_enabled_by_shipper;
 
       const patch: {
         offeredAmount?: number;
         currency?: string;
         message?: string | null;
         expiresAt?: string | null;
+        chatEnabledByShipper?: boolean;
       } = {};
       if (req.body?.offered_amount !== undefined) {
         const amount = Number(req.body.offered_amount);
@@ -625,11 +625,46 @@ router.patch(
       if (req.body?.expires_at !== undefined) {
         patch.expiresAt = req.body.expires_at ?? null;
       }
+      if (chatEnabledByShipper !== undefined) {
+        if (typeof chatEnabledByShipper !== "boolean") {
+          return res.status(400).json({ error: "chat_enabled_by_shipper must be boolean" });
+        }
+        patch.chatEnabledByShipper = chatEnabledByShipper;
+      }
+
+      const updatesOfferDetails =
+        patch.offeredAmount !== undefined ||
+        patch.currency !== undefined ||
+        patch.message !== undefined ||
+        patch.expiresAt !== undefined;
+
+      if (updatesOfferDetails && !isHauler && !isCreator && !isSuperAdmin) {
+        return res.status(403).json({ error: "Forbidden" });
+      }
+
+      if (updatesOfferDetails && offer.status !== LoadOfferStatus.PENDING) {
+        return res.status(400).json({ error: "Only pending offers can be updated" });
+      }
+
+      if (patch.chatEnabledByShipper !== undefined && !isSuperAdmin) {
+        if (!isShipperUser(authUser)) {
+          return res.status(403).json({ error: "Only shippers can update chat settings" });
+        }
+        const load = await getLoadById(offer.load_id);
+        if (!load) {
+          return res.status(404).json({ error: "Load not found" });
+        }
+        if (!isShipperForLoad(authUser, load)) {
+          return res.status(403).json({ error: "Forbidden" });
+        }
+      }
+
       if (
         patch.offeredAmount === undefined &&
         patch.currency === undefined &&
         patch.message === undefined &&
-        patch.expiresAt === undefined
+        patch.expiresAt === undefined &&
+        patch.chatEnabledByShipper === undefined
       ) {
         return res.status(400).json({ error: "No fields provided to update" });
       }
@@ -2148,6 +2183,50 @@ router.get(
     } catch (err) {
       console.error("list truck chat messages error", err);
       res.status(500).json({ error: "Failed to load messages" });
+    }
+  }
+);
+
+router.get(
+  "/hauler/trips",
+  authRequired,
+  async (req, res) => {
+    try {
+      const authUser = getAuthUser(req);
+      if (!isHaulerUser(authUser)) {
+        return res.status(403).json({ error: "Only haulers can access trips" });
+      }
+      const haulerIdResolved = await resolveHaulerId(authUser);
+      if (!haulerIdResolved) {
+        return res.status(400).json({ error: "Unable to resolve hauler profile" });
+      }
+      const items = await listTripsForHauler(haulerIdResolved);
+      return res.json({ items });
+    } catch (err) {
+      console.error("listHaulerTrips error", err);
+      res.status(500).json({ error: "Failed to load trips" });
+    }
+  }
+);
+
+router.get(
+  "/shipper/trips",
+  authRequired,
+  async (req, res) => {
+    try {
+      const authUser = getAuthUser(req);
+      if (!isShipperUser(authUser)) {
+        return res.status(403).json({ error: "Only shippers can access trips" });
+      }
+      const shipperIdResolved = await resolveShipperId(authUser);
+      if (!shipperIdResolved) {
+        return res.status(400).json({ error: "Unable to resolve shipper profile" });
+      }
+      const items = await listTripsForShipper(shipperIdResolved);
+      return res.json({ items });
+    } catch (err) {
+      console.error("listShipperTrips error", err);
+      res.status(500).json({ error: "Failed to load trips" });
     }
   }
 );
