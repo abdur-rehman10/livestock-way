@@ -800,39 +800,6 @@ export function TripsTab({ onViewTrip, role = 'hauler' }: TripsTabProps) {
             </div>
           </div>
 
-          {trip.status === 'in-progress' && (() => {
-            const progress = computeProgress(trip);
-            if (progress === null) {
-              return (
-                <div className="mb-3 rounded bg-gray-50 px-3 py-2 text-xs text-gray-500">
-                  Live progress will appear once location updates are received.
-                </div>
-              );
-            }
-            return (
-              <div className="mb-3">
-                <div className="flex items-center justify-between text-xs text-gray-600 mb-1">
-                  <span>Progress</span>
-                  <span>{progress}%</span>
-                </div>
-                <div className="w-full bg-gray-200 rounded-full h-2">
-                  <div
-                    className="h-2 rounded-full transition-all"
-                    style={{
-                      width: `${progress}%`,
-                      backgroundColor: '#42b883',
-                    }}
-                  />
-                </div>
-                {trip.latestLocation?.recorded_at && (
-                  <p className="text-[11px] text-gray-500 mt-1">
-                    Last update: {new Date(trip.latestLocation.recorded_at).toLocaleString()}
-                  </p>
-                )}
-              </div>
-            );
-          })()}
-
           <div className="grid grid-cols-2 md:grid-cols-3 gap-3 mb-3 text-xs">
             <div className="bg-gray-50 p-2 rounded">
               <p className="text-gray-500 mb-1">Hauler</p>
