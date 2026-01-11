@@ -87,6 +87,7 @@ export interface LoadOffer {
   currency: string;
   message: string | null;
   chat_enabled_by_shipper?: boolean | null;
+  chat_enabled_by_hauler?: boolean | null;
   status: LoadOfferStatus;
   expires_at: string | null;
   accepted_at: string | null;
@@ -117,6 +118,7 @@ export interface HaulerOfferSummary {
   created_at: string;
   last_message_at?: string | null;
   chat_enabled_by_shipper?: boolean | null;
+  chat_enabled_by_hauler?: boolean | null;
 }
 
 export interface TripRecord {
@@ -215,6 +217,8 @@ export interface TruckAvailability {
   destination_lng: number | null;
   is_active?: boolean;
   is_external?: boolean;
+  created_at?: string;
+  updated_at?: string;
 }
 
 export type ContractStatus = "DRAFT" | "SENT" | "ACCEPTED" | "REJECTED" | "LOCKED";
@@ -285,11 +289,13 @@ export interface ContractRecord {
 export async function fetchContracts(filters: {
   load_id?: string;
   offer_id?: string;
+  booking_id?: string;
   status?: ContractStatus;
 } = {}) {
   const params = new URLSearchParams();
   if (filters.load_id) params.set("load_id", filters.load_id);
   if (filters.offer_id) params.set("offer_id", filters.offer_id);
+  if (filters.booking_id) params.set("booking_id", filters.booking_id);
   if (filters.status) params.set("status", filters.status);
   const suffix = params.toString() ? `?${params.toString()}` : "";
   return marketplaceRequest<{ items: ContractRecord[] }>(`/contracts${suffix}`);
@@ -300,8 +306,9 @@ export async function fetchContract(contractId: string) {
 }
 
 export async function createContract(payload: {
-  load_id: string;
-  offer_id: string;
+  load_id?: string;
+  offer_id?: string;
+  booking_id?: string;
   status?: "DRAFT" | "SENT";
   price_amount?: number | null;
   price_type?: string | null;
@@ -395,6 +402,7 @@ export interface TruckChat {
   shipper_id: string;
   load_id: string | null;
   status: string;
+  chat_enabled_by_shipper?: boolean | null;
 }
 
 export interface TruckChatMessage {
@@ -414,6 +422,13 @@ export interface TruckChatSummary {
     destination_location_text: string | null;
     capacity_headcount: number | null;
   };
+  booking: {
+    id: string;
+    status: string | null;
+    offered_amount: number | null;
+    offered_currency: string | null;
+    hauler_id: string | null;
+  } | null;
   last_message: TruckChatMessage | null;
 }
 
@@ -499,6 +514,7 @@ export async function updateLoadOffer(offerId: string, payload: {
   message?: string | null;
   expires_at?: string | null;
   chat_enabled_by_shipper?: boolean;
+  chat_enabled_by_hauler?: boolean;
 }) {
   return marketplaceRequest<{ offer: LoadOffer }>(`/load-offers/${offerId}`, {
     method: "PATCH",
@@ -770,6 +786,16 @@ export async function fetchTruckChatMessages(chatId: string) {
 
 export async function fetchTruckChats() {
   return marketplaceRequest<{ items: TruckChatSummary[] }>(`/truck-chats`);
+}
+
+export async function updateTruckChat(
+  chatId: string,
+  payload: { chat_enabled_by_shipper: boolean }
+) {
+  return marketplaceRequest<{ chat: TruckChat }>(`/truck-chats/${chatId}`, {
+    method: "PATCH",
+    body: JSON.stringify(payload),
+  });
 }
 
 export interface HaulerSummary {

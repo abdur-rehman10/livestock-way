@@ -371,7 +371,7 @@ type LoadboardFilters = {
           message.sender_role.toUpperCase().startsWith("SHIPPER")
         ) {
           const activeOffer = activeHaulerOfferRef.current;
-          if (activeOffer?.id === message.offer_id && activeOffer.chat_enabled_by_shipper) {
+          if (activeOffer?.id === message.offer_id && activeOffer.chat_enabled_by_hauler) {
             setHaulerChatAllowed(true);
           }
         }
@@ -401,14 +401,14 @@ type LoadboardFilters = {
             offered_amount: offer.offered_amount,
             currency: offer.currency,
             created_at: offer.created_at,
-            chat_enabled_by_shipper: offer.chat_enabled_by_shipper ?? null,
+            chat_enabled_by_hauler: offer.chat_enabled_by_hauler ?? null,
             last_message_at: prev[String(offer.load_id)]?.last_message_at ?? null,
           },
         }));
         if (offer.id === activeOfferIdRef.current) {
           const chatAllowed =
             !["REJECTED", "WITHDRAWN", "EXPIRED"].includes(offer.status) &&
-            !!offer.chat_enabled_by_shipper;
+            !!offer.chat_enabled_by_hauler;
           setHaulerChatAllowed(chatAllowed);
         }
       }
@@ -425,7 +425,7 @@ type LoadboardFilters = {
             offered_amount: offer.offered_amount,
             currency: offer.currency,
             created_at: offer.created_at,
-            chat_enabled_by_shipper: offer.chat_enabled_by_shipper ?? null,
+            chat_enabled_by_hauler: offer.chat_enabled_by_hauler ?? null,
             last_message_at: prev[String(offer.load_id)]?.last_message_at ?? null,
           },
         }));
@@ -649,17 +649,10 @@ const loadUserOffer = async (load: Load, options: { silent?: boolean } = {}) => 
       const messagesResp = await fetchOfferMessages(offer.id);
       const chatAllowed =
         !["REJECTED", "WITHDRAWN", "EXPIRED"].includes(offer.status) &&
-        !!offer.chat_enabled_by_shipper;
-      if (!chatAllowed) {
-        toast.error("Shipper has not enabled chat for this offer yet.");
-        setActiveHaulerOffer(null);
-        setHaulerChatMessages([]);
-        setHaulerChatAllowed(false);
-        return;
-      }
+        !!offer.chat_enabled_by_hauler;
       setActiveHaulerOffer(offer);
       setHaulerChatMessages(messagesResp.items);
-      setHaulerChatAllowed(true);
+      setHaulerChatAllowed(chatAllowed);
       const latestMessageAt =
         messagesResp.items.length > 0
           ? messagesResp.items[messagesResp.items.length - 1].created_at
@@ -717,6 +710,33 @@ const loadUserOffer = async (load: Load, options: { silent?: boolean } = {}) => 
       updateOfferLastSeen(activeHaulerOffer.id, message.created_at);
     } catch (err: any) {
       toast.error(err?.message ?? "Failed to send message.");
+    }
+  };
+
+  const enableHaulerChat = async () => {
+    if (!activeHaulerOffer) return;
+    try {
+      const { offer } = await updateLoadOffer(activeHaulerOffer.id, {
+        chat_enabled_by_hauler: true,
+      });
+      setActiveHaulerOffer(offer);
+      setHaulerChatAllowed(true);
+      setHaulerOffers((prev) => ({
+        ...prev,
+        [String(offer.load_id)]: {
+          load_id: String(offer.load_id),
+          offer_id: String(offer.id),
+          status: offer.status,
+          offered_amount: offer.offered_amount,
+          currency: offer.currency,
+          created_at: offer.created_at,
+          chat_enabled_by_hauler: offer.chat_enabled_by_hauler ?? null,
+          last_message_at: prev[String(offer.load_id)]?.last_message_at ?? null,
+        },
+      }));
+      toast.success("Chat enabled for this offer.");
+    } catch (err: any) {
+      toast.error(err?.message ?? "Failed to enable chat.");
     }
   };
   useEffect(() => {
@@ -825,7 +845,7 @@ const loadUserOffer = async (load: Load, options: { silent?: boolean } = {}) => 
 
   const hasUnreadForLoad = (loadId: string) => {
     const summary = haulerOffers[loadId];
-    if (summary?.chat_enabled_by_shipper === false) return false;
+    if (summary?.chat_enabled_by_hauler === false) return false;
     if (!summary?.offer_id || !summary?.last_message_at) return false;
     const lastSeen = offerLastSeen[summary.offer_id];
     if (!lastSeen) return true;
@@ -1555,6 +1575,14 @@ const loadUserOffer = async (load: Load, options: { silent?: boolean } = {}) => 
             <p className="text-sm text-gray-500">Loading conversation…</p>
           ) : (
             <div className="space-y-3">
+              {!haulerChatAllowed && activeHaulerOffer && (
+                <div className="flex items-center justify-between rounded-xl border border-dashed border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-700">
+                  <span>Enable chat to let the shipper reply.</span>
+                  <Button size="sm" variant="outline" onClick={enableHaulerChat}>
+                    Enable chat
+                  </Button>
+                </div>
+              )}
               <ScrollArea className="h-60 rounded border">
                 {haulerChatMessages.length === 0 ? (
                   <p className="p-4 text-sm text-gray-500">

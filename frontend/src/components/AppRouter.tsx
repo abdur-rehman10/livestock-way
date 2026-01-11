@@ -15,6 +15,7 @@ import { SuperAdminDashboard } from '../pages/SuperAdminDashboard';
 import { AppLayout } from './AppLayout';
 import { Loadboard } from '../pages/Loadboard';
 import TruckBoard from '../pages/TruckBoard';
+import HaulerTruckListings from '../pages/HaulerTruckListings';
 import { FleetManagement } from '../pages/FleetManagement';
 import { TeamManagement } from './TeamManagement';
 import WalletTab from '../pages/WalletTab';
@@ -26,6 +27,7 @@ import { TripsTab } from '../pages/TripsTab';
 import TripTracking from '../pages/TripTracking';
 import TripChat from '../pages/TripChat';
 import HaulerBookingsTab from '../pages/HaulerBookingsTab';
+import HaulerOffersTab from '../pages/HaulerOffersTab';
 import SuperAdminLogin from '../pages/SuperAdminLogin';
 import { ExpensesTab } from '../pages/ExpensesTab';
 import SupportTab from '../pages/SupportTab';
@@ -259,9 +261,11 @@ export function AppRouter({ showKeyboardShortcuts, onKeyboardShortcutsToggle }: 
                 <Routes>
                   <Route path="dashboard" element={<HaulerDashboard onLogout={handleLogout} />} />
                   <Route path="bookings" element={<HaulerBookingsTab />} />
+                  <Route path="offers" element={<HaulerOffersTab />} />
                   <Route path="my-loads" element={<HaulerMyLoads />} />
                   <Route path="loadboard" element={<Loadboard />} />
                   <Route path="truck-board" element={<TruckBoard />} />
+                  <Route path="truck-listings" element={<HaulerTruckListings />} />
                   <Route path="fleet" element={<FleetManagement />} />
                   <Route path="trips" element={<TripsTab role="hauler" onViewTrip={() => toast.info('Trip view coming soon')} />} />
                   <Route path="trips/:id/route-plan" element={<TripRoutePlan />} />

@@ -68,6 +68,7 @@ import {
   createBookingForAvailability,
   listBookingsForHauler,
   listBookingsForShipper,
+  getBookingById,
   respondToBooking,
   BookingStatus,
   createContract,
@@ -83,6 +84,7 @@ import {
   listTripsForHauler,
   listDriversForHauler,
   listVehiclesForHauler,
+  updateTruckChatPermissions,
 } from "../services/marketplaceService";
 import { emitEvent, SOCKET_EVENTS } from "../socket";
 import { resolvePaymentModeSelection } from "../utils/paymentMode";
@@ -469,7 +471,7 @@ router.get(
             status,
             offered_amount,
             currency,
-            chat_enabled_by_shipper,
+            chat_enabled_by_hauler,
             created_at,
             (
               SELECT MAX(lom.created_at)
@@ -536,6 +538,7 @@ router.post(
       if (!offer) {
         return res.status(404).json({ error: "Offer not found" });
       }
+      const load = await getLoadById(offer.load_id);
       const companyId = String(authUser.company_id ?? "");
       if (!companyId || offer.hauler_id !== companyId) {
         return res.status(403).json({ error: "Forbidden" });
@@ -596,18 +599,19 @@ router.patch(
       if (!offer) {
         return res.status(404).json({ error: "Offer not found" });
       }
+      const load = await getLoadById(offer.load_id);
       const companyId = getCompanyId(authUser);
       const isHauler = companyId !== null && offer.hauler_id === companyId;
       const isCreator = String(authUser.id ?? "") === offer.created_by_user_id;
       const isSuperAdmin = isSuperAdminUser(authUser);
-      const chatEnabledByShipper = req.body?.chat_enabled_by_shipper;
+      const chatEnabledByHauler = req.body?.chat_enabled_by_hauler;
 
       const patch: {
         offeredAmount?: number;
         currency?: string;
         message?: string | null;
         expiresAt?: string | null;
-        chatEnabledByShipper?: boolean;
+        chatEnabledByHauler?: boolean;
       } = {};
       if (req.body?.offered_amount !== undefined) {
         const amount = Number(req.body.offered_amount);
@@ -625,11 +629,11 @@ router.patch(
       if (req.body?.expires_at !== undefined) {
         patch.expiresAt = req.body.expires_at ?? null;
       }
-      if (chatEnabledByShipper !== undefined) {
-        if (typeof chatEnabledByShipper !== "boolean") {
-          return res.status(400).json({ error: "chat_enabled_by_shipper must be boolean" });
+      if (chatEnabledByHauler !== undefined) {
+        if (typeof chatEnabledByHauler !== "boolean") {
+          return res.status(400).json({ error: "chat_enabled_by_hauler must be boolean" });
         }
-        patch.chatEnabledByShipper = chatEnabledByShipper;
+        patch.chatEnabledByHauler = chatEnabledByHauler;
       }
 
       const updatesOfferDetails =
@@ -646,16 +650,17 @@ router.patch(
         return res.status(400).json({ error: "Only pending offers can be updated" });
       }
 
-      if (patch.chatEnabledByShipper !== undefined && !isSuperAdmin) {
-        if (!isShipperUser(authUser)) {
-          return res.status(403).json({ error: "Only shippers can update chat settings" });
-        }
-        const load = await getLoadById(offer.load_id);
-        if (!load) {
-          return res.status(404).json({ error: "Load not found" });
-        }
-        if (!isShipperForLoad(authUser, load)) {
-          return res.status(403).json({ error: "Forbidden" });
+      if (patch.chatEnabledByHauler !== undefined && !isSuperAdmin) {
+        if (isHaulerUser(authUser) && isCreator) {
+          // haulers can enable/disable chat
+        } else if (
+          patch.chatEnabledByHauler === false &&
+          load &&
+          isShipperForLoad(authUser, load)
+        ) {
+          // shippers can only disable chat
+        } else {
+          return res.status(403).json({ error: "Only haulers can update chat settings" });
         }
       }
 
@@ -664,7 +669,7 @@ router.patch(
         patch.currency === undefined &&
         patch.message === undefined &&
         patch.expiresAt === undefined &&
-        patch.chatEnabledByShipper === undefined
+        patch.chatEnabledByHauler === undefined
       ) {
         return res.status(400).json({ error: "No fields provided to update" });
       }
@@ -1012,16 +1017,8 @@ router.post(
       if (!access.allowed) {
         return res.status(403).json({ error: "Forbidden" });
       }
-      if (
-        access.isHauler &&
-        access.offer.status === LoadOfferStatus.PENDING
-      ) {
-        const hasShipperMessage = await offerHasShipperMessage(access.offer.id);
-        if (!hasShipperMessage) {
-          return res
-            .status(403)
-            .json({ error: "Shipper must start the conversation first." });
-        }
+      if (access.isShipper && !access.offer.chat_enabled_by_hauler) {
+        return res.status(403).json({ error: "Hauler has not enabled chat yet." });
       }
       if (
         access.offer.status === LoadOfferStatus.EXPIRED ||
@@ -2136,6 +2133,9 @@ router.post(
       if (!isShipperParticipant && !isHaulerParticipant && !isSuperAdminUser(authUser)) {
         return res.status(403).json({ error: "Forbidden" });
       }
+      if (isShipperParticipant && context.chat.chat_enabled_by_shipper !== true) {
+        return res.status(403).json({ error: "Hauler has not enabled chat yet." });
+      }
       const message = await createTruckChatMessage({
         chatId,
         senderUserId: String(authUser.id ?? ""),
@@ -2148,6 +2148,46 @@ router.post(
     } catch (err: any) {
       console.error("truck chat message error", err);
       res.status(400).json({ error: err?.message ?? "Failed to send message" });
+    }
+  }
+);
+
+router.patch(
+  "/truck-chats/:chatId",
+  authRequired,
+  async (req, res) => {
+    try {
+      const chatId = req.params.chatId;
+      if (!chatId) {
+        return res.status(400).json({ error: "Missing chat id" });
+      }
+      const authUser = getAuthUser(req);
+      const context = await getTruckChatContext(chatId);
+      if (!context) {
+        return res.status(404).json({ error: "Chat not found" });
+      }
+      const haulerId = isHaulerUser(authUser)
+        ? await resolveHaulerId(authUser)
+        : null;
+      const isHaulerParticipant =
+        haulerId !== null && context.availability.hauler_id === haulerId;
+      if (!isHaulerParticipant && !isSuperAdminUser(authUser)) {
+        return res.status(403).json({ error: "Forbidden" });
+      }
+      const chatEnabledByShipper = req.body?.chat_enabled_by_shipper;
+      if (chatEnabledByShipper === undefined) {
+        return res.status(400).json({ error: "No fields provided to update" });
+      }
+      if (typeof chatEnabledByShipper !== "boolean") {
+        return res.status(400).json({ error: "chat_enabled_by_shipper must be boolean" });
+      }
+      const updated = await updateTruckChatPermissions(chatId, {
+        chatEnabledByShipper,
+      });
+      return res.json({ chat: updated });
+    } catch (err) {
+      console.error("update truck chat error", err);
+      res.status(500).json({ error: "Failed to update chat" });
     }
   }
 );
@@ -2239,10 +2279,17 @@ router.get(
       const authUser = getAuthUser(req);
       const loadId = req.query?.load_id ? String(req.query.load_id) : undefined;
       const offerId = req.query?.offer_id ? String(req.query.offer_id) : undefined;
+      const bookingId = req.query?.booking_id ? String(req.query.booking_id) : undefined;
       const status = req.query?.status ? String(req.query.status) : undefined;
-      const filters: { loadId?: string; offerId?: string; status?: ContractStatus } = {};
+      const filters: {
+        loadId?: string;
+        offerId?: string;
+        bookingId?: string;
+        status?: ContractStatus;
+      } = {};
       if (loadId) filters.loadId = loadId;
       if (offerId) filters.offerId = offerId;
+      if (bookingId) filters.bookingId = bookingId;
       if (status && ["DRAFT", "SENT", "ACCEPTED", "REJECTED", "LOCKED"].includes(status)) {
         filters.status = status as ContractStatus;
       }
@@ -2325,28 +2372,52 @@ router.post(
       if (!shipperIdResolved) {
         return res.status(400).json({ error: "Unable to resolve shipper profile" });
       }
+      const bookingId = req.body?.booking_id ? String(req.body.booking_id) : null;
       const loadId = req.body?.load_id ? String(req.body.load_id) : null;
       const offerId = req.body?.offer_id ? String(req.body.offer_id) : null;
-      if (!loadId || !offerId) {
-        return res.status(400).json({ error: "load_id and offer_id are required" });
+      let resolvedLoadId = loadId;
+      let resolvedOfferId = offerId;
+      let resolvedHaulerId: string | null = null;
+      if (bookingId) {
+        const booking = await getBookingById(bookingId);
+        if (!booking) {
+          return res.status(404).json({ error: "Booking not found" });
+        }
+        if (booking.shipper_id !== shipperIdResolved) {
+          return res.status(403).json({ error: "Forbidden" });
+        }
+        resolvedLoadId = String(booking.load_id);
+        resolvedOfferId = booking.offer_id ? String(booking.offer_id) : null;
+        resolvedHaulerId = String(booking.hauler_id);
+      } else {
+        if (!loadId || !offerId) {
+          return res.status(400).json({ error: "load_id and offer_id are required" });
+        }
+        const load = await getLoadById(loadId);
+        if (!load) {
+          return res.status(404).json({ error: "Load not found" });
+        }
+        if (!isShipperForLoad(authUser, load)) {
+          return res.status(403).json({ error: "Forbidden" });
+        }
+        const offer = await getLoadOfferById(offerId);
+        if (!offer || offer.load_id !== loadId) {
+          return res.status(404).json({ error: "Offer not found for load" });
+        }
+        resolvedLoadId = loadId;
+        resolvedOfferId = offerId;
+        resolvedHaulerId = offer.hauler_id;
       }
-      const load = await getLoadById(loadId);
-      if (!load) {
-        return res.status(404).json({ error: "Load not found" });
-      }
-      if (!isShipperForLoad(authUser, load)) {
-        return res.status(403).json({ error: "Forbidden" });
-      }
-      const offer = await getLoadOfferById(offerId);
-      if (!offer || offer.load_id !== loadId) {
-        return res.status(404).json({ error: "Offer not found for load" });
+      if (!resolvedLoadId || !resolvedHaulerId) {
+        return res.status(400).json({ error: "Missing contract identifiers" });
       }
       const status = req.body?.status === "SENT" ? "SENT" : "DRAFT";
       const contract = await createContract({
-        loadId,
-        offerId,
+        loadId: resolvedLoadId,
+        offerId: resolvedOfferId,
+        bookingId,
         shipperId: shipperIdResolved,
-        haulerId: offer.hauler_id,
+        haulerId: resolvedHaulerId,
         status,
         priceAmount:
           req.body?.price_amount !== undefined ? Number(req.body.price_amount) : null,

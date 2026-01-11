@@ -199,6 +199,7 @@ export interface LoadOfferRecord {
   currency: string;
   message: string | null;
   chat_enabled_by_shipper?: boolean | null;
+  chat_enabled_by_hauler?: boolean | null;
   status: LoadOfferStatus;
   expires_at: string | null;
   accepted_at: string | null;
@@ -294,6 +295,7 @@ export interface TruckChatRecord {
   load_id: string | null;
   status: string;
   created_by_user_id: string;
+  chat_enabled_by_shipper?: boolean | null;
   created_at: string;
   updated_at: string;
 }
@@ -351,6 +353,13 @@ export interface TruckChatSummary {
     destination_location_text: string | null;
     capacity_headcount: number | null;
   };
+  booking: {
+    id: string;
+    status: string | null;
+    offered_amount: number | null;
+    offered_currency: string | null;
+    hauler_id: string | null;
+  } | null;
   last_message: TruckChatMessageRecord | null;
 }
 
@@ -733,6 +742,7 @@ export function mapOfferRow(row: any): LoadOfferRecord {
     currency: row.currency,
     message: row.message ?? null,
     chat_enabled_by_shipper: row.chat_enabled_by_shipper ?? null,
+    chat_enabled_by_hauler: row.chat_enabled_by_hauler ?? null,
     status: row.status as LoadOfferStatus,
     expires_at: row.expires_at ?? null,
     accepted_at: row.accepted_at ?? null,
@@ -1033,6 +1043,7 @@ function mapTruckChatRow(row: any): TruckChatRecord {
     load_id: row.load_id ?? null,
     status: row.status,
     created_by_user_id: row.created_by_user_id,
+    chat_enabled_by_shipper: row.chat_enabled_by_shipper ?? null,
     created_at: row.created_at,
     updated_at: row.updated_at,
   };
@@ -1297,7 +1308,7 @@ export async function listTruckAvailability(options: {
   near?: { lat: number; lng: number; radiusKm: number };
   limit?: number;
 } = {}): Promise<TruckAvailabilityRecord[]> {
-  const clauses = ["is_active = TRUE"];
+  const clauses = ["COALESCE(is_active, TRUE) = TRUE"];
   const params: any[] = [];
   let idx = 1;
   if (options.haulerId) {
@@ -1350,7 +1361,7 @@ export async function listTruckAvailability(options: {
         updated_at
       FROM truck_availability
       WHERE ${clauses.join(" AND ")}
-      ORDER BY available_from ASC
+      ORDER BY created_at DESC
       LIMIT $${idx}
     `,
     params
@@ -1487,10 +1498,11 @@ export async function createTruckAvailability(input: CreateTruckAvailabilityInpu
         origin_lat,
         origin_lng,
         destination_lat,
-        destination_lng
+        destination_lng,
+        is_active
       )
       VALUES (
-        $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14
+        $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15
       )
       RETURNING
         id::text,
@@ -1527,6 +1539,7 @@ export async function createTruckAvailability(input: CreateTruckAvailabilityInpu
       originLng,
       destinationLat,
       destinationLng,
+      true,
     ]
   );
   const row = result.rows[0];
@@ -1732,6 +1745,7 @@ export async function getTruckChatById(id: string): Promise<TruckChatRecord | nu
         load_id::text,
         status::text,
         created_by_user_id::text,
+        chat_enabled_by_shipper,
         created_at,
         updated_at
       FROM truck_availability_chats
@@ -1740,6 +1754,33 @@ export async function getTruckChatById(id: string): Promise<TruckChatRecord | nu
     [id]
   );
   return result.rows[0] ? mapTruckChatRow(result.rows[0]) : null;
+}
+
+export async function updateTruckChatPermissions(
+  chatId: string,
+  patch: { chatEnabledByShipper?: boolean }
+): Promise<TruckChatRecord | null> {
+  const sets: string[] = [];
+  const values: any[] = [];
+  if (patch.chatEnabledByShipper !== undefined) {
+    sets.push(`chat_enabled_by_shipper = $${values.length + 2}`);
+    values.push(patch.chatEnabledByShipper);
+  }
+  if (sets.length === 0) {
+    return getTruckChatById(chatId);
+  }
+  sets.push(`updated_at = NOW()`);
+  const result = await pool.query(
+    `
+      UPDATE truck_availability_chats
+      SET ${sets.join(", ")}
+      WHERE id = $1
+      RETURNING *
+    `,
+    [chatId, ...values]
+  );
+  const row = result.rows[0];
+  return row ? mapTruckChatRow(row) : null;
 }
 
 export async function getTruckChatForShipper(
@@ -1762,6 +1803,7 @@ export async function getTruckChatForShipper(
         load_id::text,
         status::text,
         created_by_user_id::text,
+        chat_enabled_by_shipper,
         created_at,
         updated_at
       FROM truck_availability_chats
@@ -1790,10 +1832,11 @@ export async function createTruckChat(params: {
         truck_availability_id,
         shipper_id,
         load_id,
-        created_by_user_id
+        created_by_user_id,
+        chat_enabled_by_shipper
       )
       VALUES (
-        $1,$2,$3,$4
+        $1,$2,$3,$4,$5
       )
       RETURNING
         id::text,
@@ -1802,6 +1845,7 @@ export async function createTruckChat(params: {
         load_id::text,
         status::text,
         created_by_user_id::text,
+        chat_enabled_by_shipper,
         created_at,
         updated_at
     `,
@@ -1810,6 +1854,7 @@ export async function createTruckChat(params: {
       params.shipperId,
       params.loadId ?? null,
       params.createdByUserId,
+      false,
     ]
   );
   if (!result.rows[0]) {
@@ -1882,6 +1927,19 @@ export async function listTruckChatMessages(chatId: string): Promise<TruckChatMe
 
 function mapSummaryRow(row: any): TruckChatSummary {
   const chat = mapTruckChatRow(row);
+  const booking =
+    row.booking_id
+      ? {
+          id: String(row.booking_id),
+          status: row.booking_status ?? null,
+          offered_amount:
+            row.booking_offered_amount === null || row.booking_offered_amount === undefined
+              ? null
+              : Number(row.booking_offered_amount),
+          offered_currency: row.booking_offered_currency ?? null,
+          hauler_id: row.booking_hauler_id ? String(row.booking_hauler_id) : null,
+        }
+      : null;
   let lastMessage: TruckChatMessageRecord | null = null;
   if (row.last_message_id) {
     lastMessage = mapTruckChatMessageRow({
@@ -1904,6 +1962,7 @@ function mapSummaryRow(row: any): TruckChatSummary {
           ? null
           : Number(row.capacity_headcount),
     },
+    booking,
     last_message: lastMessage,
   };
 }
@@ -1918,11 +1977,17 @@ export async function listTruckChatsForHauler(haulerId: string): Promise<TruckCh
         c.load_id::text,
         c.status::text,
         c.created_by_user_id::text,
+        c.chat_enabled_by_shipper,
         c.created_at,
         c.updated_at,
         ta.origin_location_text,
         ta.destination_location_text,
         ta.capacity_headcount,
+        lb.id::text AS booking_id,
+        lb.status AS booking_status,
+        lb.offered_amount AS booking_offered_amount,
+        lb.offered_currency AS booking_offered_currency,
+        lb.hauler_id::text AS booking_hauler_id,
         lm.id::text AS last_message_id,
         lm.sender_user_id::text AS last_message_sender_user_id,
         lm.sender_role AS last_message_sender_role,
@@ -1931,6 +1996,20 @@ export async function listTruckChatsForHauler(haulerId: string): Promise<TruckCh
         lm.created_at AS last_message_created_at
       FROM truck_availability_chats c
       JOIN truck_availability ta ON ta.id = c.truck_availability_id
+      LEFT JOIN LATERAL (
+        SELECT
+          b.id,
+          b.status,
+          b.offered_amount,
+          b.offered_currency,
+          b.hauler_id
+        FROM load_bookings b
+        WHERE b.truck_availability_id = c.truck_availability_id
+          AND b.load_id = c.load_id
+          AND b.hauler_id = $1
+        ORDER BY b.created_at DESC
+        LIMIT 1
+      ) lb ON TRUE
       LEFT JOIN LATERAL (
         SELECT
           m.id::text,
@@ -1963,11 +2042,17 @@ export async function listTruckChatsForShipper(shipperId: string): Promise<Truck
         c.load_id::text,
         c.status::text,
         c.created_by_user_id::text,
+        c.chat_enabled_by_shipper,
         c.created_at,
         c.updated_at,
         ta.origin_location_text,
         ta.destination_location_text,
         ta.capacity_headcount,
+        lb.id::text AS booking_id,
+        lb.status AS booking_status,
+        lb.offered_amount AS booking_offered_amount,
+        lb.offered_currency AS booking_offered_currency,
+        lb.hauler_id::text AS booking_hauler_id,
         lm.id::text AS last_message_id,
         lm.sender_user_id::text AS last_message_sender_user_id,
         lm.sender_role AS last_message_sender_role,
@@ -1976,6 +2061,20 @@ export async function listTruckChatsForShipper(shipperId: string): Promise<Truck
         lm.created_at AS last_message_created_at
       FROM truck_availability_chats c
       JOIN truck_availability ta ON ta.id = c.truck_availability_id
+      LEFT JOIN LATERAL (
+        SELECT
+          b.id,
+          b.status,
+          b.offered_amount,
+          b.offered_currency,
+          b.hauler_id
+        FROM load_bookings b
+        WHERE b.truck_availability_id = c.truck_availability_id
+          AND b.load_id = c.load_id
+          AND b.shipper_id = $1
+        ORDER BY b.created_at DESC
+        LIMIT 1
+      ) lb ON TRUE
       LEFT JOIN LATERAL (
         SELECT
           m.id::text,
@@ -2308,7 +2407,7 @@ export async function getContractByOfferId(offerId: string): Promise<ContractRec
 
 export async function listContractsForShipper(
   shipperId: string,
-  filters: { loadId?: string; offerId?: string; status?: ContractStatus } = {}
+  filters: { loadId?: string; offerId?: string; bookingId?: string; status?: ContractStatus } = {}
 ): Promise<ContractRecord[]> {
   const clauses: string[] = ["shipper_id = $1"];
   const values: Array<string | null> = [shipperId];
@@ -2320,6 +2419,10 @@ export async function listContractsForShipper(
   if (filters.offerId) {
     clauses.push(`offer_id = $${idx++}`);
     values.push(filters.offerId);
+  }
+  if (filters.bookingId) {
+    clauses.push(`booking_id = $${idx++}`);
+    values.push(filters.bookingId);
   }
   if (filters.status) {
     clauses.push(`status = $${idx++}`);
@@ -2334,7 +2437,7 @@ export async function listContractsForShipper(
 
 export async function listContractsForHauler(
   haulerId: string,
-  filters: { loadId?: string; offerId?: string; status?: ContractStatus } = {}
+  filters: { loadId?: string; offerId?: string; bookingId?: string; status?: ContractStatus } = {}
 ): Promise<ContractRecord[]> {
   const clauses: string[] = ["hauler_id = $1"];
   const values: Array<string | null> = [haulerId];
@@ -2346,6 +2449,10 @@ export async function listContractsForHauler(
   if (filters.offerId) {
     clauses.push(`offer_id = $${idx++}`);
     values.push(filters.offerId);
+  }
+  if (filters.bookingId) {
+    clauses.push(`booking_id = $${idx++}`);
+    values.push(filters.bookingId);
   }
   if (filters.status) {
     clauses.push(`status = $${idx++}`);
@@ -3393,6 +3500,7 @@ export interface UpdateOfferDetailsInput {
   message?: string | null;
   expiresAt?: string | null;
   chatEnabledByShipper?: boolean;
+  chatEnabledByHauler?: boolean;
 }
 
 export async function updateOfferDetails(
@@ -3421,6 +3529,10 @@ export async function updateOfferDetails(
   if (patch.chatEnabledByShipper !== undefined) {
     sets.push(`chat_enabled_by_shipper = $${values.length + 2}`);
     values.push(patch.chatEnabledByShipper);
+  }
+  if (patch.chatEnabledByHauler !== undefined) {
+    sets.push(`chat_enabled_by_hauler = $${values.length + 2}`);
+    values.push(patch.chatEnabledByHauler);
   }
 
   if (sets.length === 0) {

@@ -73,10 +73,12 @@ export function AppLayout({ children, userRole, onLogout }: AppLayoutProps) {
       label: 'Hauler',
       routes: [
         { path: '/hauler/dashboard', icon: LayoutDashboard, label: 'Dashboard' },
+        { path: '/hauler/truck-listings', icon: Truck, label: 'My Listing' },
         { path: '/hauler/bookings', icon: Calendar, label: 'Bookings' },
+        { path: '/hauler/offers', icon: MessageSquare, label: 'Offers' },
         { path: '/hauler/loadboard', icon: Package, label: 'Loadboard' },
         { path: '/hauler/truck-board', icon: Truck, label: 'Truck Board' },
-        { path: '/hauler/my-loads', icon: ClipboardList, label: 'My Loads' },
+        // { path: '/hauler/my-loads', icon: ClipboardList, label: 'My Loads' },
         { path: '/hauler/fleet', icon: Truck, label: 'My Fleet' },
         { path: '/hauler/trips', icon: MapPin, label: 'My Trips' },
         { path: '/hauler/earnings', icon: DollarSign, label: 'Earnings' },
@@ -215,6 +217,11 @@ export function AppLayout({ children, userRole, onLogout }: AppLayoutProps) {
     const loadOfferCount = async () => {
       if (userRole !== 'shipper') return;
       try {
+        const unread = storage.get<number>(STORAGE_KEYS.SHIPPER_OFFERS_UNREAD, 0);
+        if (unread > 0) {
+          if (isMounted) setShipperOfferCount(unread);
+          return;
+        }
         const resp = await fetchShipperOfferCount();
         if (isMounted) setShipperOfferCount(Number(resp.count ?? 0));
       } catch {
@@ -227,6 +234,21 @@ export function AppLayout({ children, userRole, onLogout }: AppLayoutProps) {
       isMounted = false;
     };
   }, [userRole, location.pathname]);
+
+  useEffect(() => {
+    if (userRole !== 'shipper') return;
+    const syncUnread = () => {
+      const unread = storage.get<number>(STORAGE_KEYS.SHIPPER_OFFERS_UNREAD, 0);
+      if (unread > 0) {
+        setShipperOfferCount(unread);
+      }
+    };
+    syncUnread();
+    window.addEventListener('shipper-offers-unread', syncUnread);
+    return () => {
+      window.removeEventListener('shipper-offers-unread', syncUnread);
+    };
+  }, [userRole]);
 
   useEffect(() => {
     let isMounted = true;
@@ -334,9 +356,9 @@ export function AppLayout({ children, userRole, onLogout }: AppLayoutProps) {
                   userRole === 'hauler' &&
                   route.path === '/hauler/bookings' &&
                   haulerBookingCount > 0;
-                const showLoadboardBadge =
+                const showHaulerOfferBadge =
                   userRole === 'hauler' &&
-                  route.path === '/hauler/loadboard' &&
+                  route.path === '/hauler/offers' &&
                   haulerUnreadCount > 0;
                 const showOfferBadge =
                   userRole === 'shipper' &&
@@ -371,7 +393,7 @@ export function AppLayout({ children, userRole, onLogout }: AppLayoutProps) {
                       ) : (
                         <span className="absolute right-2 top-2 h-2 w-2 rounded-full bg-primary" />
                       ))}
-                    {showLoadboardBadge &&
+                    {showHaulerOfferBadge &&
                       (isSidebarOpen ? (
                         <span className="ml-auto rounded-full bg-primary px-2 py-0.5 text-xs font-semibold text-white">
                           {haulerUnreadCount}

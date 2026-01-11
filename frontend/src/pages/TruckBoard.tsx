@@ -1,28 +1,28 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   fetchTruckAvailability,
-  createTruckAvailabilityEntry,
-  updateTruckAvailabilityEntry,
-  deleteTruckAvailabilityEntry,
+  fetchBookings,
+  fetchTruckChats,
+  fetchTruckChatMessages,
   requestBookingForTruckListing,
+  sendTruckChatMessage,
   startTruckChat,
-  fetchHaulerVehicles,
+  type TruckChatMessage,
+  type TruckChatSummary,
   type TruckAvailability,
-  type HaulerVehicleOption,
 } from "../api/marketplace";
 import { fetchLoadsForShipper, type LoadSummary } from "../lib/api";
 import { Card, CardContent, CardHeader, CardTitle } from "../components/ui/card";
 import { Button } from "../components/ui/button";
 import { Input } from "../components/ui/input";
-import { Textarea } from "../components/ui/textarea";
 import { Label } from "../components/ui/label";
+import { Textarea } from "../components/ui/textarea";
 import { toast } from "sonner";
 import { storage, STORAGE_KEYS } from "../lib/storage";
 import { Badge } from "../components/ui/badge";
-import { Switch } from "../components/ui/switch";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../components/ui/select";
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "../components/ui/dialog";
-import { PostTruckDialog } from "./PostTruckDialog";
+import { MessageSquare } from "lucide-react";
+import { SOCKET_EVENTS, subscribeToSocketEvent } from "../lib/socket";
 
 function extractErrorMessage(error: unknown): string {
   if (!error) return "";
@@ -84,53 +84,9 @@ export default function TruckBoard() {
     nearLng: "",
     radiusKm: "200",
   });
-  const [form, setForm] = useState(() => ({
-    truck_id: "",
-    origin: "",
-    destination: "",
-    available_from: new Date().toISOString().slice(0, 16),
-    available_until: "",
-    capacity_headcount: "",
-    capacity_weight_kg: "",
-    origin_lat: "",
-    origin_lng: "",
-    destination_lat: "",
-    destination_lng: "",
-    allow_shared: true,
-    notes: "",
-  }));
   const [interestForm, setInterestForm] = useState<
     Record<string, { loadId: string; message: string }>
   >({});
-  const [posting, setPosting] = useState(false);
-  const [myListings, setMyListings] = useState<TruckAvailability[]>([]);
-  const [myListingsLoading, setMyListingsLoading] = useState(false);
-  const [editDialog, setEditDialog] = useState<{
-    open: boolean;
-    listing: TruckAvailability | null;
-    saving: boolean;
-  }>({ open: false, listing: null, saving: false });
-  const [editForm, setEditForm] = useState({
-    truck_id: "",
-    origin: "",
-    destination: "",
-    available_from: "",
-    available_until: "",
-    capacity_headcount: "",
-    capacity_weight_kg: "",
-    origin_lat: "",
-    origin_lng: "",
-    destination_lat: "",
-    destination_lng: "",
-    allow_shared: true,
-    notes: "",
-    is_active: true,
-  });
-  const [editError, setEditError] = useState<string | null>(null);
-  const [haulerTrucks, setHaulerTrucks] = useState<HaulerVehicleOption[]>([]);
-  const [haulerTrucksLoading, setHaulerTrucksLoading] = useState(false);
-  const [haulerTruckError, setHaulerTruckError] = useState<string | null>(null);
-  const [postDialogOpen, setPostDialogOpen] = useState(false);
   const [detailListing, setDetailListing] = useState<TruckAvailability | null>(null);
   const userRole = storage.get<string | null>(STORAGE_KEYS.USER_ROLE, null);
   const userId = storage.get<string | null>(STORAGE_KEYS.USER_ID, null);
@@ -142,8 +98,20 @@ export default function TruckBoard() {
     load: LoadSummary | null;
     submitting: boolean;
     error: string | null;
-  }>({ open: false, listing: null, load: null, submitting: false, error: null });
+    offeredAmount: string;
+  }>({ open: false, listing: null, load: null, submitting: false, error: null, offeredAmount: "" });
   const [requestedPairs, setRequestedPairs] = useState<Set<string>>(new Set());
+  const [truckChats, setTruckChats] = useState<TruckChatSummary[]>([]);
+  const [chatModal, setChatModal] = useState<{ open: boolean; chatId: string | null }>({
+    open: false,
+    chatId: null,
+  });
+  const [chatMessages, setChatMessages] = useState<TruckChatMessage[]>([]);
+  const [chatDraft, setChatDraft] = useState("");
+  const [chatLoading, setChatLoading] = useState(false);
+  const [chatSending, setChatSending] = useState(false);
+  const chatScrollRef = useRef<HTMLDivElement | null>(null);
+  const shouldAutoScrollRef = useRef(true);
 
   const refresh = async (nextQuery?: { origin?: string; nearLat?: number; nearLng?: number; radiusKm?: number }) => {
     try {
@@ -160,19 +128,6 @@ export default function TruckBoard() {
       setLoading(false);
     }
   };
-
-  const refreshMyListings = useCallback(async () => {
-    if (userRole !== "hauler") return;
-    try {
-      setMyListingsLoading(true);
-      const resp = await fetchTruckAvailability({ scope: "mine" });
-      setMyListings(resp.items);
-    } catch (err: any) {
-      toast.error(err?.message ?? "Failed to load your truck listings.");
-    } finally {
-      setMyListingsLoading(false);
-    }
-  }, [userRole]);
 
   useEffect(() => {
     refresh();
@@ -202,52 +157,81 @@ export default function TruckBoard() {
   }, [userRole, userId]);
 
   useEffect(() => {
-    if (userRole === "hauler") {
-      refreshMyListings();
-    } else {
-      setMyListings([]);
-    }
-  }, [userRole, refreshMyListings]);
-
-  useEffect(() => {
-    if (userRole !== "hauler") {
-      setHaulerTrucks([]);
-      setHaulerTruckError(null);
-      setHaulerTrucksLoading(false);
-      return;
-    }
+    if (userRole !== "shipper") return;
     let active = true;
-    setHaulerTrucksLoading(true);
-    setHaulerTruckError(null);
-    fetchHaulerVehicles()
+    fetchBookings()
       .then((resp) => {
         if (!active) return;
-        const items = resp.items ?? [];
-        setHaulerTrucks(items);
-        if (items.length === 0) {
-          setHaulerTruckError("Add at least one truck in Fleet before posting availability.");
-        }
-        setForm((prev) => {
-          if (prev.truck_id || items.length === 0) {
-            return prev;
+        const next = new Set<string>();
+        resp.items.forEach((booking) => {
+          if (booking.truck_availability_id && booking.load_id) {
+            next.add(getRequestKey(booking.truck_availability_id, booking.load_id));
           }
-          const nextId = items[0]?.id ? String(items[0].id) : "";
-          return { ...prev, truck_id: nextId };
         });
+        setRequestedPairs(next);
       })
-      .catch((err: any) => {
-        if (!active) return;
-        setHaulerTruckError(extractErrorMessage(err) || "Failed to load trucks.");
+      .catch(() => {
+        if (active) setRequestedPairs(new Set());
+      });
+    fetchTruckChats()
+      .then((resp) => {
+        if (active) setTruckChats(resp.items);
       })
-      .finally(() => {
-        if (active) {
-          setHaulerTrucksLoading(false);
-        }
+      .catch(() => {
+        if (active) setTruckChats([]);
       });
     return () => {
       active = false;
     };
   }, [userRole]);
+
+  useEffect(() => {
+    const unsubscribe = subscribeToSocketEvent(
+      SOCKET_EVENTS.TRUCK_CHAT_MESSAGE,
+      ({ message }) => {
+        setTruckChats((prev) =>
+          prev.map((item) =>
+            item.chat.id === message.chat_id
+              ? { ...item, last_message: message }
+              : item
+          )
+        );
+        if (message.chat_id === chatModal.chatId) {
+          setChatMessages((prev) => {
+            if (prev.some((existing) => existing.id === message.id)) return prev;
+            return [...prev, message];
+          });
+        }
+      }
+    );
+    return () => {
+      unsubscribe();
+    };
+  }, [chatModal.chatId]);
+
+  useEffect(() => {
+    if (!chatModal.open || !chatModal.chatId) return;
+    setChatLoading(true);
+    fetchTruckChatMessages(chatModal.chatId)
+      .then((resp) => setChatMessages(resp.items))
+      .catch((err: any) => toast.error(err?.message ?? "Failed to load chat"))
+      .finally(() => setChatLoading(false));
+  }, [chatModal.open, chatModal.chatId]);
+
+  useEffect(() => {
+    if (chatModal.open) {
+      shouldAutoScrollRef.current = true;
+    }
+  }, [chatModal.open]);
+
+  useEffect(() => {
+    if (!chatModal.open || !chatScrollRef.current) return;
+    if (!shouldAutoScrollRef.current) return;
+    const target = chatScrollRef.current;
+    requestAnimationFrame(() => {
+      target.scrollTop = target.scrollHeight;
+    });
+  }, [chatMessages, chatModal.open]);
 
   const selectableLoads = useMemo(() => {
     if (userRole !== "shipper") return [];
@@ -264,13 +248,23 @@ export default function TruckBoard() {
     });
   }, [shipperLoads, userRole]);
 
-  const toLocalInputValue = (value?: string | null) => {
-    if (!value) return "";
-    const date = new Date(value);
-    if (Number.isNaN(date.getTime())) return "";
-    const offsetMs = date.getTimezoneOffset() * 60000;
-    return new Date(date.getTime() - offsetMs).toISOString().slice(0, 16);
-  };
+  const chatByListingId = useMemo(() => {
+    const map: Record<string, TruckChatSummary> = {};
+    truckChats.forEach((chat) => {
+      map[chat.chat.truck_availability_id] = chat;
+    });
+    return map;
+  }, [truckChats]);
+
+  const activeChat = useMemo(
+    () => truckChats.find((chat) => chat.chat.id === chatModal.chatId) || null,
+    [truckChats, chatModal.chatId]
+  );
+
+  const canSendChat = activeChat?.chat.chat_enabled_by_shipper === true;
+
+  const getRequestKey = (listingId: string, loadId: string) =>
+    `${listingId}-${loadId}`;
 
   const parseOptionalCoordinate = (
     value: string,
@@ -289,15 +283,6 @@ export default function TruckBoard() {
     }
     if (parsed < min || parsed > max) {
       throw new Error(`${label} must be between ${min} and ${max}.`);
-    }
-    return parsed;
-  };
-
-  const parseOptionalPositiveNumber = (value: string, label: string): number | null => {
-    if (!value || value.trim() === "") return null;
-    const parsed = Number(value);
-    if (Number.isNaN(parsed) || parsed <= 0) {
-      throw new Error(`${label} must be a positive number.`);
     }
     return parsed;
   };
@@ -353,221 +338,6 @@ export default function TruckBoard() {
     return `${latText}, ${lngText}`;
   };
 
-  const handlePostTruck = async () => {
-    if (!form.truck_id) {
-      toast.error("Select one of your trucks before posting.");
-      return;
-    }
-    if (!form.origin.trim()) {
-      toast.error("Origin is required");
-      return;
-    }
-    const availableFromDate = new Date(form.available_from);
-    if (Number.isNaN(availableFromDate.getTime())) {
-      toast.error("Available from must be a valid date.");
-      return;
-    }
-    let availableUntilIso: string | null = null;
-    if (form.available_until) {
-      const availableUntilDate = new Date(form.available_until);
-      if (Number.isNaN(availableUntilDate.getTime())) {
-        toast.error("Available until must be a valid date.");
-        return;
-      }
-      if (availableUntilDate.getTime() < availableFromDate.getTime()) {
-        toast.error("Available until must be after the start date.");
-        return;
-      }
-      availableUntilIso = availableUntilDate.toISOString();
-    }
-    let originLat: number | null = null;
-    let originLng: number | null = null;
-    let destinationLat: number | null = null;
-    let destinationLng: number | null = null;
-    let capacityHeadcount: number | null = null;
-    let capacityWeight: number | null = null;
-    try {
-      originLat = parseOptionalCoordinate(form.origin_lat, "Origin latitude", -90, 90);
-      originLng = parseOptionalCoordinate(form.origin_lng, "Origin longitude", -180, 180);
-      destinationLat = parseOptionalCoordinate(form.destination_lat, "Destination latitude", -90, 90);
-      destinationLng = parseOptionalCoordinate(form.destination_lng, "Destination longitude", -180, 180);
-      capacityHeadcount = parseOptionalPositiveNumber(form.capacity_headcount, "Capacity headcount");
-      capacityWeight = parseOptionalPositiveNumber(form.capacity_weight_kg, "Capacity weight");
-    } catch (err: any) {
-      toast.error(err?.message ?? "Invalid truck details");
-      return;
-    }
-    if ((originLat !== null && originLng === null) || (originLat === null && originLng !== null)) {
-      toast.error("Provide both origin latitude and longitude.");
-      return;
-    }
-    if (
-      (destinationLat !== null && destinationLng === null) ||
-      (destinationLat === null && destinationLng !== null)
-    ) {
-      toast.error("Provide both destination latitude and longitude.");
-      return;
-    }
-    try {
-      setPosting(true);
-      await createTruckAvailabilityEntry({
-        truck_id: form.truck_id,
-        origin_location_text: form.origin,
-        destination_location_text: form.destination || null,
-        available_from: availableFromDate.toISOString(),
-        available_until: availableUntilIso,
-        capacity_headcount: capacityHeadcount,
-        capacity_weight_kg: capacityWeight,
-        notes: form.notes || null,
-        allow_shared: form.allow_shared,
-        origin_lat: originLat,
-        origin_lng: originLng,
-        destination_lat: destinationLat,
-        destination_lng: destinationLng,
-      });
-      toast.success("Truck availability posted.");
-      setForm((prev) => ({
-        ...prev,
-        origin: "",
-        destination: "",
-        available_from: new Date().toISOString().slice(0, 16),
-        available_until: "",
-        capacity_headcount: "",
-        capacity_weight_kg: "",
-        origin_lat: "",
-        origin_lng: "",
-        destination_lat: "",
-        destination_lng: "",
-        allow_shared: true,
-        notes: "",
-      }));
-      refresh();
-      refreshMyListings();
-    } catch (err: any) {
-      toast.error(formatTruckBoardError(err, "Failed to post availability."));
-    } finally {
-      setPosting(false);
-    }
-  };
-
-  const closeEditDialog = () => {
-    setEditDialog({ open: false, listing: null, saving: false });
-    setEditError(null);
-  };
-
-  const openEditDialog = (listing: TruckAvailability) => {
-    setEditDialog({ open: true, listing, saving: false });
-    setEditError(null);
-    setEditForm({
-      truck_id: listing.truck_id ?? "",
-      origin: listing.origin_location_text ?? "",
-      destination: listing.destination_location_text ?? "",
-      available_from: toLocalInputValue(listing.available_from),
-      available_until: toLocalInputValue(listing.available_until ?? null),
-      capacity_headcount:
-        typeof listing.capacity_headcount === "number" ? String(listing.capacity_headcount) : "",
-      capacity_weight_kg:
-        typeof listing.capacity_weight_kg === "number" ? String(listing.capacity_weight_kg) : "",
-      origin_lat: listing.origin_lat != null ? String(listing.origin_lat) : "",
-      origin_lng: listing.origin_lng != null ? String(listing.origin_lng) : "",
-      destination_lat: listing.destination_lat != null ? String(listing.destination_lat) : "",
-      destination_lng: listing.destination_lng != null ? String(listing.destination_lng) : "",
-      allow_shared: listing.allow_shared,
-      notes: listing.notes ?? "",
-      is_active: listing.is_active !== false,
-    });
-  };
-
-  const handleSaveListing = async () => {
-    if (!editDialog.listing) return;
-    if (!editForm.truck_id) {
-      setEditError("Select which truck this listing belongs to.");
-      return;
-    }
-    if (!editForm.origin.trim()) {
-      setEditError("Origin is required.");
-      return;
-    }
-    if (!editForm.available_from) {
-      setEditError("Start date/time is required.");
-      return;
-    }
-    const availableFromDate = new Date(editForm.available_from);
-    if (Number.isNaN(availableFromDate.getTime())) {
-      setEditError("Start date/time is invalid.");
-      return;
-    }
-    let availableUntilIso: string | null = null;
-    if (editForm.available_until) {
-      const until = new Date(editForm.available_until);
-      if (Number.isNaN(until.getTime())) {
-        setEditError("End date/time is invalid.");
-        return;
-      }
-      if (until.getTime() < availableFromDate.getTime()) {
-        setEditError("End date/time must be after the start date.");
-        return;
-      }
-      availableUntilIso = until.toISOString();
-    }
-    let originLat: number | null = null;
-    let originLng: number | null = null;
-    let destinationLat: number | null = null;
-    let destinationLng: number | null = null;
-    let capacityHeadcount: number | null = null;
-    let capacityWeight: number | null = null;
-    try {
-      originLat = parseOptionalCoordinate(editForm.origin_lat, "Origin latitude", -90, 90);
-      originLng = parseOptionalCoordinate(editForm.origin_lng, "Origin longitude", -180, 180);
-      destinationLat = parseOptionalCoordinate(editForm.destination_lat, "Destination latitude", -90, 90);
-      destinationLng = parseOptionalCoordinate(editForm.destination_lng, "Destination longitude", -180, 180);
-      capacityHeadcount = parseOptionalPositiveNumber(editForm.capacity_headcount, "Capacity headcount");
-      capacityWeight = parseOptionalPositiveNumber(editForm.capacity_weight_kg, "Capacity weight");
-    } catch (err: any) {
-      setEditError(err?.message ?? "Invalid form values.");
-      return;
-    }
-    if ((originLat !== null && originLng === null) || (originLat === null && originLng !== null)) {
-      setEditError("Provide both origin latitude and longitude.");
-      return;
-    }
-    if (
-      (destinationLat !== null && destinationLng === null) ||
-      (destinationLat === null && destinationLng !== null)
-    ) {
-      setEditError("Provide both destination latitude and longitude.");
-      return;
-    }
-    try {
-      setEditDialog((prev) => ({ ...prev, saving: true }));
-      setEditError(null);
-      await updateTruckAvailabilityEntry(editDialog.listing.id, {
-        truck_id: editForm.truck_id,
-        origin_location_text: editForm.origin,
-        destination_location_text: editForm.destination || null,
-        available_from: availableFromDate.toISOString(),
-        available_until: availableUntilIso,
-        capacity_headcount: capacityHeadcount,
-        capacity_weight_kg: capacityWeight,
-        origin_lat: originLat,
-        origin_lng: originLng,
-        destination_lat: destinationLat,
-        destination_lng: destinationLng,
-        allow_shared: editForm.allow_shared,
-        notes: editForm.notes || null,
-        is_active: editForm.is_active,
-      });
-      toast.success("Listing updated.");
-      closeEditDialog();
-      refresh();
-      refreshMyListings();
-    } catch (err: any) {
-      setEditError(formatTruckBoardError(err, "Failed to update listing."));
-    } finally {
-      setEditDialog((prev) => ({ ...prev, saving: false }));
-    }
-  };
-
   const updateInterest = (id: string, field: "loadId" | "message", value: string) => {
     setInterestForm((prev) => {
       const existing = prev[id] ?? { loadId: "", message: "" };
@@ -588,26 +358,67 @@ export default function TruckBoard() {
       return;
     }
     const interest = interestForm[availabilityId] ?? { loadId: "", message: "" };
-    if (!interest.loadId.trim() && !interest.message.trim()) {
-      toast.error("Select a load or enter a message to start the conversation.");
+    if (!interest.loadId.trim()) {
+      toast.error("Select a load and place an offer before starting chat.");
+      return;
+    }
+    const key = getRequestKey(availabilityId, interest.loadId);
+    if (!requestedPairs.has(key)) {
+      toast.error("Place an offer before starting chat.");
       return;
     }
     try {
-      await startTruckChat(availabilityId, {
+      const resp = await startTruckChat(availabilityId, {
         load_id: interest.loadId || undefined,
         message: interest.message || undefined,
       });
       toast.success("Chat started with hauler.");
       updateInterest(availabilityId, "message", "");
+      setTruckChats((prev) => {
+        const exists = prev.some((item) => item.chat.id === resp.chat.id);
+        if (exists) return prev;
+        return [
+          {
+            chat: resp.chat,
+            availability: {
+              origin_location_text: listing?.origin_location_text ?? "",
+              destination_location_text: listing?.destination_location_text ?? null,
+              capacity_headcount: listing?.capacity_headcount ?? null,
+            },
+            last_message: resp.message ?? null,
+          },
+          ...prev,
+        ];
+      });
+      setChatModal({ open: true, chatId: resp.chat.id });
     } catch (err: any) {
       toast.error(formatTruckBoardError(err, "Failed to start chat."));
     }
   };
 
+  const handleSendChatMessage = async () => {
+    if (!chatModal.chatId || !chatDraft.trim()) return;
+    try {
+      setChatSending(true);
+      await sendTruckChatMessage(chatModal.chatId, { message: chatDraft.trim() });
+      setChatDraft("");
+    } catch (err: any) {
+      toast.error(err?.message ?? "Failed to send message.");
+    } finally {
+      setChatSending(false);
+    }
+  };
+
+
   const handleRequestBooking = async (availabilityId: string) => {
     const interest = interestForm[availabilityId] ?? { loadId: "", message: "" };
     if (!interest.loadId.trim()) {
       toast.error("Select which load you want to book onto this truck.");
+      return;
+    }
+    const key = getRequestKey(availabilityId, interest.loadId);
+    if (requestedPairs.has(key)) {
+      toast.info("You already requested this truck for that load.");
       return;
     }
     const load = selectableLoads.find((l) => String(l.id) === interest.loadId) || null;
@@ -622,6 +433,7 @@ export default function TruckBoard() {
       load,
       submitting: false,
       error: null,
+      offeredAmount: "",
     });
   };
 
@@ -634,6 +446,10 @@ export default function TruckBoard() {
       setRequestDialog((prev) => ({ ...prev, error: "External listings are read-only." }));
       return;
     }
+    if (!requestDialog.offeredAmount.trim()) {
+      setRequestDialog((prev) => ({ ...prev, error: "Enter an offer amount." }));
+      return;
+    }
     const key = `${requestDialog.listing.id}-${requestDialog.load.id}`;
     if (requestedPairs.has(key)) {
       setRequestDialog((prev) => ({ ...prev, error: "You already requested this truck for that load." }));
@@ -644,12 +460,44 @@ export default function TruckBoard() {
       await requestBookingForTruckListing(requestDialog.listing.id, {
         load_id: requestDialog.load.id,
         requested_headcount: undefined,
+        offered_amount: requestDialog.offeredAmount || undefined,
+        offered_currency: requestDialog.offeredAmount ? "USD" : undefined,
       });
       const nextSet = new Set(requestedPairs);
       nextSet.add(key);
       setRequestedPairs(nextSet);
-      toast.success("Booking requested.");
-      setRequestDialog({ open: false, listing: null, load: null, submitting: false, error: null });
+      const interest = interestForm[requestDialog.listing.id] ?? { loadId: "", message: "" };
+      const chatResp = await startTruckChat(requestDialog.listing.id, {
+        load_id: String(requestDialog.load.id),
+        message: interest.message || undefined,
+      });
+      setTruckChats((prev) => {
+        const exists = prev.some((item) => item.chat.id === chatResp.chat.id);
+        if (exists) return prev;
+        return [
+          {
+            chat: chatResp.chat,
+            availability: {
+              origin_location_text: requestDialog.listing?.origin_location_text ?? "",
+              destination_location_text: requestDialog.listing?.destination_location_text ?? null,
+              capacity_headcount: requestDialog.listing?.capacity_headcount ?? null,
+            },
+            last_message: chatResp.message ?? null,
+          },
+          ...prev,
+        ];
+      });
+      setChatModal({ open: true, chatId: chatResp.chat.id });
+      updateInterest(requestDialog.listing.id, "message", "");
+      toast.success("Offer submitted.");
+      setRequestDialog({
+        open: false,
+        listing: null,
+        load: null,
+        submitting: false,
+        error: null,
+        offeredAmount: "",
+      });
     } catch (err: any) {
       const msg = formatTruckBoardError(err, "Unable to request this booking.");
       setRequestDialog((prev) => ({ ...prev, error: msg, submitting: false }));
@@ -786,6 +634,100 @@ export default function TruckBoard() {
                         </div>
                       </div>
                     )}
+                    {!listing.is_external && userRole === "shipper" && (
+                      <div className="flex flex-col gap-3 w-full md:max-w-sm md:pl-4 md:border-l md:border-dashed md:border-gray-200">
+                        {selectableLoads.length === 0 ? (
+                          <p className="text-xs text-white-500">
+                            Post a load before requesting this truck.
+                          </p>
+                        ) : (
+                          <>
+                            <div className="space-y-1">
+                              <Label className="text-xs">Select your load</Label>
+                              <select
+                                value={interestForm[listing.id]?.loadId ?? ""}
+                                onChange={(e) =>
+                                  updateInterest(listing.id, "loadId", e.target.value)
+                                }
+                                className="w-full rounded-md border border-gray-200 bg-white px-2 py-1.5 text-xs text-gray-700 focus:border-primary focus:outline-none"
+                              >
+                                <option value="">Select a load</option>
+                                {selectableLoads.map((load) => (
+                                  <option key={load.id} value={load.id}>
+                                    {load.title || `Load #${load.id}`} · {load.pickup_location} →{" "}
+                                    {load.dropoff_location}
+                                  </option>
+                                ))}
+                              </select>
+                            </div>
+                            <div className="space-y-1">
+                              <Label className="text-xs">Message</Label>
+                              <Textarea
+                                rows={3}
+                                value={interestForm[listing.id]?.message ?? ""}
+                                onChange={(e) =>
+                                  updateInterest(listing.id, "message", e.target.value)
+                                }
+                                placeholder="Share details for the hauler…"
+                              />
+                            </div>
+                            {(() => {
+                              const listingChat = chatByListingId[listing.id];
+                              const chatEnabled =
+                                listingChat?.chat.chat_enabled_by_shipper ?? false;
+                              const selectedLoadId = interestForm[listing.id]?.loadId ?? "";
+                              const requestKey = selectedLoadId
+                                ? getRequestKey(listing.id, selectedLoadId)
+                                : null;
+                              const alreadyRequested = requestKey
+                                ? requestedPairs.has(requestKey)
+                                : false;
+                              return (
+                                <>
+                                  <div className="flex flex-wrap gap-2">
+                      <Button
+                        size="sm"
+                        onClick={() =>
+                          listingChat
+                            ? setChatModal({
+                                open: true,
+                                chatId: listingChat.chat.id,
+                              })
+                            : handleStartChat(listing.id)
+                        }
+                        disabled={
+                          !interestForm[listing.id]?.loadId ||
+                          !requestedPairs.has(
+                            getRequestKey(listing.id, interestForm[listing.id]?.loadId ?? "")
+                          )
+                        }
+                      >
+                        <MessageSquare className="mr-2 h-4 w-4" />
+                        {listingChat ? "Open chat" : "Start chat"}
+                      </Button>
+                                    <Button
+                                      size="sm"
+                                      variant="outline"
+                                      onClick={() => handleRequestBooking(listing.id)}
+                                      disabled={!selectedLoadId || alreadyRequested}
+                                    >
+                                      {alreadyRequested ? "Offer placed" : "Place offer"}
+                                    </Button>
+                                  </div>
+                                  {listingChat && (
+                                    <p className="text-[11px] text-gray-500">
+                                      {chatEnabled
+                                        ? "Chat enabled by hauler"
+                                        : "Chat locked until hauler enables it"}
+                                    </p>
+                                  )}
+                                </>
+                              );
+                            })()}
+                          </>
+                        )}
+                      </div>
+                    )}
                   </div>
                 );
               })}
@@ -794,259 +736,23 @@ export default function TruckBoard() {
         </CardContent>
       </Card>
 
-      {userRole === "hauler" && (
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between">
-            <div>
-              <CardTitle>My Truck Listings</CardTitle>
-              <p className="text-sm text-gray-500">Manage active and paused postings</p>
-            </div>
-            <Button onClick={() => setPostDialogOpen(true)}>Post a Truck</Button>
-          </CardHeader>
-          <CardContent className="space-y-3">
-            {myListingsLoading ? (
-              <p className="text-sm text-gray-500">Loading your listings…</p>
-            ) : myListings.length === 0 ? (
-              <div className="text-sm text-gray-500">No listings yet. Use "Post a Truck" to share availability.</div>
-            ) : (
-              <div className="space-y-3">
-                {myListings.map((listing) => (
-                  <div
-                    key={listing.id}
-                    className="border rounded-lg p-4 flex flex-col gap-3 md:flex-row md:items-center md:justify-between"
-                  >
-                    <div>
-                      <div className="text-sm font-semibold text-gray-900">
-                        {listing.origin_location_text}
-                        {listing.destination_location_text ? ` → ${listing.destination_location_text}` : ""}
-                      </div>
-                      <div className="text-xs text-gray-500">
-                        Window: {new Date(listing.available_from).toLocaleString()} {listing.available_until ? `- ${new Date(listing.available_until).toLocaleString()}` : ""}
-                      </div>
-                      <div className="text-xs text-gray-600">
-                        Capacity:{" "}
-                        {[
-                          typeof listing.capacity_headcount === "number" && listing.capacity_headcount > 0
-                            ? `${listing.capacity_headcount} head`
-                            : null,
-                          typeof listing.capacity_weight_kg === "number" && listing.capacity_weight_kg > 0
-                            ? `${listing.capacity_weight_kg} kg`
-                            : null,
-                        ]
-                          .filter(Boolean)
-                          .join(" • ") || "Not specified"}
-                      </div>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <Badge variant={listing.is_active === false ? "outline" : "default"}>
-                        {listing.is_active === false ? "Paused" : "Active"}
-                      </Badge>
-                      <Button size="sm" variant="outline" onClick={() => openEditDialog(listing)}>
-                        Edit
-                      </Button>
-                      <Button
-                        size="sm"
-                        variant="destructive"
-                        onClick={async () => {
-                          try {
-                            await deleteTruckAvailabilityEntry(listing.id);
-                            toast.success("Listing removed");
-                            refreshMyListings();
-                            refresh();
-                          } catch (err: any) {
-                            toast.error(err?.message ?? "Unable to delete listing. It may have an accepted booking.");
-                          }
-                        }}
-                      >
-                        Delete
-                      </Button>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            )}
-          </CardContent>
-        </Card>
-      )}
-
-      <Dialog
-        open={editDialog.open}
-        onOpenChange={(open) => {
-          if (!open) closeEditDialog();
-        }}
-      >
-        <DialogContent className="max-w-2xl">
-          <DialogHeader>
-            <DialogTitle>Edit Truck Listing</DialogTitle>
-          </DialogHeader>
-          <div className="space-y-3">
-            {editError && <p className="text-sm text-rose-600">{editError}</p>}
-            <div>
-              <Label className="text-xs">Truck</Label>
-              {haulerTrucks.length === 0 ? (
-                <p className="text-xs text-gray-500">
-                  Add trucks to your fleet to edit this listing.
-                </p>
-              ) : (
-                <Select
-                  value={editForm.truck_id || undefined}
-                  onValueChange={(value) => setEditForm((prev) => ({ ...prev, truck_id: value }))}
-                >
-                  <SelectTrigger>
-                    <SelectValue placeholder="Select truck" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {haulerTrucks.map((truck) => (
-                      <SelectItem key={truck.id} value={String(truck.id)}>
-                        {(truck.truck_name || truck.plate_number || `Truck #${truck.id}`) ?? `Truck #${truck.id}`} ·{" "}
-                        {truck.truck_type || "—"}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              )}
-            </div>
-            <div className="grid md:grid-cols-2 gap-3">
-              <div>
-                <Label className="text-xs">Origin</Label>
-                <Input
-                  value={editForm.origin}
-                  onChange={(e) => setEditForm((prev) => ({ ...prev, origin: e.target.value }))}
-                />
-              </div>
-              <div>
-                <Label className="text-xs">Destination</Label>
-                <Input
-                  value={editForm.destination}
-                  onChange={(e) => setEditForm((prev) => ({ ...prev, destination: e.target.value }))}
-                />
-              </div>
-            </div>
-            <div className="grid md:grid-cols-2 gap-3">
-              <div>
-                <Label className="text-xs">Available From</Label>
-                <Input
-                  type="datetime-local"
-                  value={editForm.available_from}
-                  onChange={(e) => setEditForm((prev) => ({ ...prev, available_from: e.target.value }))}
-                />
-              </div>
-              <div>
-                <Label className="text-xs">Available Until (optional)</Label>
-                <Input
-                  type="datetime-local"
-                  value={editForm.available_until}
-                  onChange={(e) => setEditForm((prev) => ({ ...prev, available_until: e.target.value }))}
-                />
-              </div>
-            </div>
-            <div className="grid md:grid-cols-2 gap-3">
-              <div>
-                <Label className="text-xs">Capacity (headcount)</Label>
-                <Input
-                  type="number"
-                  value={editForm.capacity_headcount}
-                  onChange={(e) => setEditForm((prev) => ({ ...prev, capacity_headcount: e.target.value }))}
-                />
-              </div>
-              <div>
-                <Label className="text-xs">Capacity (weight kg)</Label>
-                <Input
-                  type="number"
-                  value={editForm.capacity_weight_kg}
-                  onChange={(e) => setEditForm((prev) => ({ ...prev, capacity_weight_kg: e.target.value }))}
-                />
-              </div>
-            </div>
-            <div className="grid md:grid-cols-2 gap-3">
-              <div>
-                <Label className="text-xs">Origin latitude</Label>
-                <Input
-                  type="number"
-                  step="0.0001"
-                  value={editForm.origin_lat}
-                  onChange={(e) => setEditForm((prev) => ({ ...prev, origin_lat: e.target.value }))}
-                />
-              </div>
-              <div>
-                <Label className="text-xs">Origin longitude</Label>
-                <Input
-                  type="number"
-                  step="0.0001"
-                  value={editForm.origin_lng}
-                  onChange={(e) => setEditForm((prev) => ({ ...prev, origin_lng: e.target.value }))}
-                />
-              </div>
-            </div>
-            <div className="grid md:grid-cols-2 gap-3">
-              <div>
-                <Label className="text-xs">Destination latitude</Label>
-                <Input
-                  type="number"
-                  step="0.0001"
-                  value={editForm.destination_lat}
-                  onChange={(e) => setEditForm((prev) => ({ ...prev, destination_lat: e.target.value }))}
-                />
-              </div>
-              <div>
-                <Label className="text-xs">Destination longitude</Label>
-                <Input
-                  type="number"
-                  step="0.0001"
-                  value={editForm.destination_lng}
-                  onChange={(e) => setEditForm((prev) => ({ ...prev, destination_lng: e.target.value }))}
-                />
-              </div>
-            </div>
-            <div className="flex items-center justify-between rounded-lg border px-3 py-2">
-              <div>
-                <Label className="text-xs">Allow shared loads</Label>
-                <p className="text-[11px] text-gray-500">Turn off for exclusive loads.</p>
-              </div>
-              <Switch
-                checked={editForm.allow_shared}
-                onCheckedChange={(checked) => setEditForm((prev) => ({ ...prev, allow_shared: checked }))}
-              />
-            </div>
-            <div className="flex items-center justify-between rounded-lg border px-3 py-2">
-              <div>
-                <Label className="text-xs">Listing active</Label>
-                <p className="text-[11px] text-gray-500">Pause the listing without deleting it.</p>
-              </div>
-              <Switch
-                checked={editForm.is_active}
-                onCheckedChange={(checked) => setEditForm((prev) => ({ ...prev, is_active: checked }))}
-              />
-            </div>
-            <div>
-              <Label className="text-xs">Notes</Label>
-              <Textarea
-                rows={3}
-                value={editForm.notes}
-                onChange={(e) => setEditForm((prev) => ({ ...prev, notes: e.target.value }))}
-              />
-            </div>
-          </div>
-          <DialogFooter className="gap-2">
-            <Button variant="outline" onClick={closeEditDialog} disabled={editDialog.saving}>
-              Cancel
-            </Button>
-            <Button onClick={handleSaveListing} disabled={editDialog.saving || haulerTrucks.length === 0}>
-              {editDialog.saving ? "Saving…" : "Save Changes"}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-
       <Dialog
         open={requestDialog.open}
         onOpenChange={(open) => {
-          if (!open) setRequestDialog({ open: false, listing: null, load: null, submitting: false, error: null });
+          if (!open)
+            setRequestDialog({
+              open: false,
+              listing: null,
+              load: null,
+              submitting: false,
+              error: null,
+              offeredAmount: "",
+            });
         }}
       >
         <DialogContent className="max-w-lg">
           <DialogHeader>
-            <DialogTitle>Request Booking</DialogTitle>
+            <DialogTitle>Place Offer</DialogTitle>
           </DialogHeader>
           <div className="space-y-3">
             {requestDialog.listing && (
@@ -1070,6 +776,19 @@ export default function TruckBoard() {
                 </div>
               </div>
             )}
+            <div className="space-y-2">
+              <Label className="text-xs">Offer amount (USD)</Label>
+              <Input
+                type="number"
+                min="0"
+                step="0.01"
+                value={requestDialog.offeredAmount}
+                onChange={(e) =>
+                  setRequestDialog((prev) => ({ ...prev, offeredAmount: e.target.value }))
+                }
+                placeholder="e.g. 2500"
+              />
+            </div>
             {requestDialog.error && <p className="text-sm text-rose-600">{requestDialog.error}</p>}
           </div>
           <DialogFooter className="gap-2">
@@ -1083,28 +802,77 @@ export default function TruckBoard() {
               Cancel
             </Button>
             <Button onClick={handleConfirmRequest} disabled={requestDialog.submitting}>
-              {requestDialog.submitting ? "Submitting…" : "Submit Request"}
+              {requestDialog.submitting ? "Submitting…" : "Submit Offer"}
             </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
 
-      {userRole === "hauler" && (
-        <PostTruckDialog
-          open={postDialogOpen}
-          onOpenChange={(open) => {
-            setPostDialogOpen(open);
-            if (!open) {
-              refreshMyListings();
-              refresh();
-            }
-          }}
-          onPosted={() => {
-            refreshMyListings();
-            refresh();
-          }}
-        />
-      )}
+      <Dialog
+        open={chatModal.open}
+        onOpenChange={(open) => {
+          if (!open) {
+            setChatModal({ open: false, chatId: null });
+            setChatMessages([]);
+            setChatDraft("");
+          }
+        }}
+      >
+        <DialogContent className="max-w-3xl">
+          <DialogHeader>
+            <DialogTitle>Truck Chat</DialogTitle>
+          </DialogHeader>
+          {chatLoading ? (
+            <p className="text-sm text-gray-500">Loading messages…</p>
+          ) : (
+            <div className="space-y-3">
+              <div
+                ref={chatScrollRef}
+                className="h-[50vh] overflow-y-auto rounded-xl border border-gray-200"
+              >
+                <div className="space-y-2 p-3">
+                  {chatMessages.length === 0 ? (
+                    <p className="text-xs text-gray-500">No messages yet.</p>
+                  ) : (
+                    chatMessages.map((msg) => (
+                      <div
+                        key={msg.id}
+                        className="rounded-lg border border-gray-100 bg-white p-2 text-sm"
+                      >
+                        <div className="flex items-center justify-between text-[11px] text-gray-500">
+                          <span className="font-semibold text-gray-900">
+                            {msg.sender_role}
+                          </span>
+                          <span>{new Date(msg.created_at).toLocaleString()}</span>
+                        </div>
+                        {msg.message && <p className="mt-1 text-gray-700">{msg.message}</p>}
+                      </div>
+                    ))
+                  )}
+                </div>
+              </div>
+            </div>
+          )}
+          <DialogFooter className="flex flex-col gap-2 sm:flex-row sm:items-center">
+            <Input
+              value={chatDraft}
+              onChange={(e) => setChatDraft(e.target.value)}
+              placeholder={
+                canSendChat
+                  ? "Send a message…"
+                  : "Chat locked until hauler enables it"
+              }
+            />
+            <Button
+              onClick={handleSendChatMessage}
+              disabled={!chatDraft.trim() || chatSending || !canSendChat}
+            >
+              {chatSending ? "Sending…" : "Send"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
       <Dialog open={!!detailListing} onOpenChange={(open) => !open && setDetailListing(null)}>
         <DialogContent className="max-w-2xl">
           <DialogHeader>
