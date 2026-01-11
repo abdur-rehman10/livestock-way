@@ -189,17 +189,18 @@ export default function TruckBoard() {
     const unsubscribe = subscribeToSocketEvent(
       SOCKET_EVENTS.TRUCK_CHAT_MESSAGE,
       ({ message }) => {
+        const typedMessage = message as TruckChatMessage;
         setTruckChats((prev) =>
           prev.map((item) =>
-            item.chat.id === message.chat_id
-              ? { ...item, last_message: message }
+            item.chat.id === typedMessage.chat_id
+              ? { ...item, last_message: typedMessage }
               : item
           )
         );
-        if (message.chat_id === chatModal.chatId) {
+        if (typedMessage.chat_id === chatModal.chatId) {
           setChatMessages((prev) => {
-            if (prev.some((existing) => existing.id === message.id)) return prev;
-            return [...prev, message];
+            if (prev.some((existing) => existing.id === typedMessage.id)) return prev;
+            return [...prev, typedMessage];
           });
         }
       }
@@ -385,6 +386,7 @@ export default function TruckBoard() {
               destination_location_text: listing?.destination_location_text ?? null,
               capacity_headcount: listing?.capacity_headcount ?? null,
             },
+            booking: null,
             last_message: resp.message ?? null,
           },
           ...prev,
@@ -457,10 +459,11 @@ export default function TruckBoard() {
     }
     try {
       setRequestDialog((prev) => ({ ...prev, submitting: true, error: null }));
+      const offeredAmountNum = requestDialog.offeredAmount ? Number(requestDialog.offeredAmount) : undefined;
       await requestBookingForTruckListing(requestDialog.listing.id, {
         load_id: requestDialog.load.id,
         requested_headcount: undefined,
-        offered_amount: requestDialog.offeredAmount || undefined,
+        offered_amount: offeredAmountNum,
         offered_currency: requestDialog.offeredAmount ? "USD" : undefined,
       });
       const nextSet = new Set(requestedPairs);
@@ -482,6 +485,7 @@ export default function TruckBoard() {
               destination_location_text: requestDialog.listing?.destination_location_text ?? null,
               capacity_headcount: requestDialog.listing?.capacity_headcount ?? null,
             },
+            booking: null,
             last_message: chatResp.message ?? null,
           },
           ...prev,
@@ -795,7 +799,7 @@ export default function TruckBoard() {
             <Button
               variant="outline"
               onClick={() =>
-                setRequestDialog({ open: false, listing: null, load: null, submitting: false, error: null })
+                setRequestDialog({ open: false, listing: null, load: null, submitting: false, error: null, offeredAmount: "" })
               }
               disabled={requestDialog.submitting}
             >

@@ -184,7 +184,7 @@ export default function HaulerOffersTab() {
       .then((resp) => {
         setOfferMessages(resp.items);
         const last = resp.items[resp.items.length - 1];
-        if (last?.created_at) {
+        if (last?.created_at && chatModal.offerId) {
           updateOfferLastSeen(chatModal.offerId, last.created_at);
         }
       })
@@ -247,17 +247,18 @@ export default function HaulerOffersTab() {
     const unsubscribeTruckMessage = subscribeToSocketEvent(
       SOCKET_EVENTS.TRUCK_CHAT_MESSAGE,
       ({ message }) => {
+        const typedMessage = message as TruckChatMessage;
         setReceivedChats((prev) =>
           prev.map((item) =>
-            item.chat.id === message.chat_id
-              ? { ...item, last_message: message }
+            item.chat.id === typedMessage.chat_id
+              ? { ...item, last_message: typedMessage }
               : item
           )
         );
-        if (message.chat_id === truckChatModal.chatId) {
+        if (typedMessage.chat_id === truckChatModal.chatId) {
           setTruckMessages((prev) => {
-            if (prev.some((existing) => existing.id === message.id)) return prev;
-            return [...prev, message];
+            if (prev.some((existing) => existing.id === typedMessage.id)) return prev;
+            return [...prev, typedMessage];
           });
         }
       }

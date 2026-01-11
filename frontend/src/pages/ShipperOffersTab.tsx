@@ -427,19 +427,20 @@ export default function ShipperOffersTab() {
     const unsubscribeTruckChatMessage = subscribeToSocketEvent(
       SOCKET_EVENTS.TRUCK_CHAT_MESSAGE,
       ({ message }) => {
+        const typedMessage = message as TruckChatMessage;
         setSentTruckChats((prev) =>
           prev.map((chat) =>
-            chat.chat.id === message.chat_id
-              ? { ...chat, last_message: message }
+            chat.chat.id === typedMessage.chat_id
+              ? { ...chat, last_message: typedMessage }
               : chat
           )
         );
-        if (message.chat_id === truckChatModal.chatId) {
+        if (typedMessage.chat_id === truckChatModal.chatId) {
           setTruckChatMessages((prev) => {
-            if (prev.some((existing) => existing.id === message.id)) {
+            if (prev.some((existing) => existing.id === typedMessage.id)) {
               return prev;
             }
-            return [...prev, message];
+            return [...prev, typedMessage];
           });
         }
       }
