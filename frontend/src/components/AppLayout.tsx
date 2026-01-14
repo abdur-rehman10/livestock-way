@@ -5,7 +5,6 @@ import { Avatar, AvatarFallback } from "./ui/avatar";
 import { Separator } from "./ui/separator";
 import {
   Menu,
-  X,
   ChevronLeft,
   Truck,
   MapPin,
@@ -16,7 +15,6 @@ import {
   HelpCircle,
   LogOut,
   Bell,
-  Search,
   LayoutDashboard,
   Package,
   Calendar,
@@ -24,8 +22,10 @@ import {
   BarChart3,
   Wrench,
   ShoppingCart,
-  ClipboardList,
   MessageSquare,
+  Briefcase,
+  Plus,
+  ChevronDown,
 } from "lucide-react";
 import { ThemeToggle } from "./ThemeToggle";
 import { NotificationsCenter } from "./NotificationsCenter";
@@ -39,6 +39,12 @@ import {
   fetchShipperOfferCount,
   fetchHaulerOfferSummaries,
 } from "../api/marketplace";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "./ui/dropdown-menu";
 
 interface AppLayoutProps {
   children: React.ReactNode;
@@ -76,8 +82,6 @@ export function AppLayout({ children, userRole, onLogout }: AppLayoutProps) {
         { path: '/hauler/truck-listings', icon: Truck, label: 'My Listing' },
         { path: '/hauler/bookings', icon: Calendar, label: 'Bookings' },
         { path: '/hauler/offers', icon: MessageSquare, label: 'Offers' },
-        { path: '/hauler/loadboard', icon: Package, label: 'Loadboard' },
-        { path: '/hauler/truck-board', icon: Truck, label: 'Truck Board' },
         // { path: '/hauler/my-loads', icon: ClipboardList, label: 'My Loads' },
         { path: '/hauler/fleet', icon: Truck, label: 'My Fleet' },
         { path: '/hauler/trips', icon: MapPin, label: 'My Trips' },
@@ -96,7 +100,6 @@ export function AppLayout({ children, userRole, onLogout }: AppLayoutProps) {
         { path: '/shipper/offers', icon: MessageSquare, label: 'Offers' },
         { path: '/shipper/contracts', icon: FileText, label: 'Contracts' },
         { path: '/shipper/trips', icon: MapPin, label: 'My Trips' },
-        { path: '/shipper/truck-board', icon: Truck, label: 'Truck Board' },
         { path: '/shipper/payments', icon: DollarSign, label: 'Payments' },
         { path: '/shipper/documents', icon: FileText, label: 'Documents' },
         { path: '/shipper/marketplace', icon: ShoppingCart, label: 'Marketplace' },
@@ -350,6 +353,80 @@ export function AppLayout({ children, userRole, onLogout }: AppLayoutProps) {
           {/* Navigation */}
           <nav className="flex-1 overflow-y-auto p-2">
             <div className="space-y-1">
+              {/* Post a Dropdown - Only for Hauler and Shipper */}
+              {(userRole === 'hauler' || userRole === 'shipper') && (
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <button
+                      className={`
+                        w-full relative flex items-center gap-3 px-3 py-2.5 rounded-lg transition-colors
+                        text-gray-600 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-800
+                        ${!isSidebarOpen && 'justify-center'}
+                      `}
+                    >
+                      <Plus className="w-5 h-5 flex-shrink-0" />
+                      {isSidebarOpen && (
+                        <>
+                          <span>Post a</span>
+                          <ChevronDown className="w-4 h-4 ml-auto" />
+                        </>
+                      )}
+                    </button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="start" className="w-56">
+                    {userRole === 'shipper' && (
+                      <>
+                        <DropdownMenuItem
+                          onClick={() => {
+                            navigate('/shipper/dashboard');
+                            // Trigger PostLoadDialog after navigation
+                            setTimeout(() => {
+                              window.dispatchEvent(new CustomEvent('open-post-load-dialog'));
+                            }, 100);
+                          }}
+                        >
+                          <Package className="w-4 h-4 mr-2" />
+                          Post a Load
+                        </DropdownMenuItem>
+                        <DropdownMenuItem
+                          onClick={() => navigate('/shipper/post-job')}
+                        >
+                          <Briefcase className="w-4 h-4 mr-2" />
+                          Post a Job
+                        </DropdownMenuItem>
+                      </>
+                    )}
+                    {userRole === 'hauler' && (
+                      <>
+                        <DropdownMenuItem
+                          onClick={() => navigate('/hauler/fleet')}
+                        >
+                          <Truck className="w-4 h-4 mr-2" />
+                          Post a Fleet
+                        </DropdownMenuItem>
+                        <DropdownMenuItem
+                          onClick={() => {
+                            navigate('/hauler/truck-listings');
+                            // Trigger PostTruckDialog - we'll use a custom event
+                            setTimeout(() => {
+                              window.dispatchEvent(new CustomEvent('open-post-truck-dialog'));
+                            }, 100);
+                          }}
+                        >
+                          <Truck className="w-4 h-4 mr-2" />
+                          Post a Truck
+                        </DropdownMenuItem>
+                        <DropdownMenuItem
+                          onClick={() => navigate('/hauler/post-job')}
+                        >
+                          <Briefcase className="w-4 h-4 mr-2" />
+                          Post a Job
+                        </DropdownMenuItem>
+                      </>
+                    )}
+                  </DropdownMenuContent>
+                </DropdownMenu>
+              )}
               {routes.map((route) => {
                 const Icon = route.icon;
                 const showBookingBadge =
@@ -507,6 +584,48 @@ export function AppLayout({ children, userRole, onLogout }: AppLayoutProps) {
             </div>
 
             <div className="flex items-center gap-2">
+              {/* Board Dropdown - Only for Hauler and Shipper */}
+              {(userRole === 'hauler' || userRole === 'shipper') && (
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <Button
+                      size="sm"
+                      className="gap-2 bg-primary text-primary-foreground hover:bg-primary/90"
+                    >
+                      <Briefcase className="w-4 h-4" />
+                      <span>Boards</span>
+                      <ChevronDown className="w-4 h-4" />
+                    </Button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="end" className="w-48">
+                    {userRole === 'hauler' && (
+                      <>
+                        <DropdownMenuItem onClick={() => navigate('/hauler/loadboard')}>
+                          <Package className="w-4 h-4 mr-2" />
+                          Loadboard
+                        </DropdownMenuItem>
+                        <DropdownMenuItem onClick={() => navigate('/hauler/job-board')}>
+                          <Briefcase className="w-4 h-4 mr-2" />
+                          Job Board
+                        </DropdownMenuItem>
+                      </>
+                    )}
+                    {userRole === 'shipper' && (
+                      <>
+                        <DropdownMenuItem onClick={() => navigate('/shipper/truck-board')}>
+                          <Truck className="w-4 h-4 mr-2" />
+                          Truck Board
+                        </DropdownMenuItem>
+                        <DropdownMenuItem onClick={() => navigate('/shipper/job-board')}>
+                          <Briefcase className="w-4 h-4 mr-2" />
+                          Job Board
+                        </DropdownMenuItem>
+                      </>
+                    )}
+                  </DropdownMenuContent>
+                </DropdownMenu>
+              )}
+
               {/* Theme Toggle */}
               <ThemeToggle />
 

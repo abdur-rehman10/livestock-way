@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
+import { useSearchParams } from "react-router-dom";
 import {
   fetchTruckAvailability,
   updateTruckAvailabilityEntry,
@@ -16,7 +17,9 @@ import { Input } from "../components/ui/input";
 import { Textarea } from "../components/ui/textarea";
 import { Switch } from "../components/ui/switch";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../components/ui/select";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "../components/ui/tabs";
 import { PostTruckDialog } from "./PostTruckDialog";
+import MyJobsTab from "./MyJobsTab";
 import { toast } from "sonner";
 
 function extractErrorMessage(error: unknown): string {
@@ -105,6 +108,8 @@ const parseOptionalPositiveNumber = (value: string, label: string): number | nul
 };
 
 export default function HaulerTruckListings() {
+  const [searchParams] = useSearchParams();
+  const defaultTab = searchParams.get("tab") === "jobs" ? "jobs" : "trucks";
   const [myListings, setMyListings] = useState<TruckAvailability[]>([]);
   const [myListingsLoading, setMyListingsLoading] = useState(false);
   const [editDialog, setEditDialog] = useState<{
@@ -149,6 +154,16 @@ export default function HaulerTruckListings() {
   useEffect(() => {
     refreshMyListings();
   }, [refreshMyListings]);
+
+  useEffect(() => {
+    const handleOpenPostTruck = () => {
+      setPostDialogOpen(true);
+    };
+    window.addEventListener('open-post-truck-dialog', handleOpenPostTruck);
+    return () => {
+      window.removeEventListener('open-post-truck-dialog', handleOpenPostTruck);
+    };
+  }, []);
 
   useEffect(() => {
     let active = true;
@@ -296,16 +311,23 @@ export default function HaulerTruckListings() {
 
   return (
     <div className="p-4 space-y-4">
-      <Card>
-        <CardHeader className="flex flex-row items-center justify-between gap-4">
-          <div>
-            <CardTitle>My Truck Listings</CardTitle>
-            <p className="text-sm text-gray-500">Manage active and paused postings</p>
-          </div>
-          <Button onClick={() => setPostDialogOpen(true)} disabled={haulerTrucksLoading}>
-            Post a Truck
-          </Button>
-        </CardHeader>
+      <Tabs defaultValue={defaultTab} className="w-full">
+        <TabsList className="mb-4">
+          <TabsTrigger value="trucks">Truck Listings</TabsTrigger>
+          <TabsTrigger value="jobs">Jobs</TabsTrigger>
+        </TabsList>
+
+        <TabsContent value="trucks" className="space-y-4">
+          <Card>
+            <CardHeader className="flex flex-row items-center justify-between gap-4">
+              <div>
+                <CardTitle>My Truck Listings</CardTitle>
+                <p className="text-sm text-gray-500">Manage active and paused postings</p>
+              </div>
+              <Button onClick={() => setPostDialogOpen(true)} disabled={haulerTrucksLoading}>
+                Post a Truck
+              </Button>
+            </CardHeader>
         <CardContent className="space-y-3">
           {haulerTruckError && (
             <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
@@ -557,6 +579,12 @@ export default function HaulerTruckListings() {
         }}
         onPosted={refreshMyListings}
       />
+        </TabsContent>
+
+        <TabsContent value="jobs" className="space-y-4">
+          <MyJobsTab />
+        </TabsContent>
+      </Tabs>
     </div>
   );
 }

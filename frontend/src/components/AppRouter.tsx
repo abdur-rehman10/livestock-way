@@ -47,6 +47,8 @@ import AdminSubscriptions from '../pages/AdminSubscriptions';
 import HaulerPayment from '../pages/HaulerPayment';
 import ShipperOffersTab from '../pages/ShipperOffersTab';
 import ShipperContractsTab from '../pages/ShipperContractsTab';
+import PostJob from '../pages/PostJob';
+import JobBoard from '../pages/JobBoard';
 
 type UserRole = 'shipper' | 'driver' | 'hauler' | 'stakeholder' | 'super-admin' | null;
 type LandingRole = 'hauler' | 'shipper' | 'stakeholder';
@@ -223,6 +225,8 @@ export function AppRouter({ showKeyboardShortcuts, onKeyboardShortcutsToggle }: 
 
         <Route path="/dev/marketplace" element={<MarketplaceDevLab />} />
 
+        <Route path="/job-board" element={<JobBoard />} />
+
         <Route path="/admin/login" element={
           <AuthRoute>
             <SuperAdminLogin onLoginSuccess={() => handleLogin('super-admin')} />
@@ -266,6 +270,8 @@ export function AppRouter({ showKeyboardShortcuts, onKeyboardShortcutsToggle }: 
                   <Route path="loadboard" element={<Loadboard />} />
                   <Route path="truck-board" element={<TruckBoard />} />
                   <Route path="truck-listings" element={<HaulerTruckListings />} />
+                  <Route path="post-job" element={<PostJob />} />
+                  <Route path="job-board" element={<JobBoard />} />
                   <Route path="fleet" element={<FleetManagement />} />
                   <Route path="trips" element={<TripsTab role="hauler" onViewTrip={() => toast.info('Trip view coming soon')} />} />
                   <Route path="trips/:id/route-plan" element={<TripRoutePlan />} />
@@ -298,6 +304,8 @@ export function AppRouter({ showKeyboardShortcuts, onKeyboardShortcutsToggle }: 
                 <Routes>
                   <Route path="dashboard" element={<ShipperDashboard onLogout={handleLogout} onRoleSwitch={handleRoleSwitch} />} />
                   <Route path="my-loads" element={<MyLoadsTab />} />
+                  <Route path="post-job" element={<PostJob />} />
+                  <Route path="job-board" element={<JobBoard />} />
                   <Route path="offers" element={<ShipperOffersTab />} />
                   <Route path="contracts" element={<ShipperContractsTab />} />
                   <Route path="loadboard" element={<Navigate to="/shipper/dashboard" replace />} />
@@ -329,6 +337,7 @@ export function AppRouter({ showKeyboardShortcuts, onKeyboardShortcutsToggle }: 
               <AppLayout userRole="driver" onLogout={handleLogout}>
                 <Routes>
                   <Route path="dashboard" element={<DriverDashboard onLogout={handleLogout} onRoleSwitch={handleRoleSwitch} />} />
+                  <Route path="job-board" element={<JobBoard />} />
                   <Route path="trips" element={<TripsTab role="driver" onViewTrip={() => toast.info('Trip view coming soon')} />} />
                   <Route path="expenses" element={<ExpensesTab />} />
                   <Route path="documents" element={<DocumentsTab />} />
@@ -351,6 +360,7 @@ export function AppRouter({ showKeyboardShortcuts, onKeyboardShortcutsToggle }: 
                 <Routes>
                   <Route path="dashboard" element={<StakeholderDashboard />} />
                   <Route path="services" element={<StakeholderServices />} />
+                  <Route path="job-board" element={<JobBoard />} />
                   <Route path="bookings" element={<div>Bookings (Coming Soon)</div>} />
                   <Route path="marketplace" element={<MarketplaceTab userRole="stakeholder" />} />
                   <Route path="services/new" element={<PostService />} />

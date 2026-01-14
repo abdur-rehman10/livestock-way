@@ -65,6 +65,18 @@ router.post("/service-image", upload.single("file"), (req, res) => {
   return res.status(200).json({ status: "OK", url });
 });
 
+router.post("/resume", upload.single("file"), (req, res) => {
+  if (!req.file) {
+    return res.status(400).json({ status: "ERROR", message: "No file uploaded" });
+  }
+  // Only allow PDF files for resumes
+  if (req.file.mimetype !== "application/pdf") {
+    return res.status(400).json({ status: "ERROR", message: "Only PDF files are allowed for resumes" });
+  }
+  const url = `/uploads/${req.file.filename}`;
+  return res.status(200).json({ status: "OK", url });
+});
+
 // Multer error handler to send clear messages
 router.use((err: any, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
   if (err instanceof multer.MulterError) {

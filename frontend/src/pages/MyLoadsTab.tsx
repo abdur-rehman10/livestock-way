@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Link, useNavigate } from "react-router-dom";
+import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import {
   fetchLoadsForShipper,
   type LoadSummary,
@@ -16,6 +16,7 @@ import { Badge } from "../components/ui/badge";
 import { Label } from "../components/ui/label";
 import { Card } from "../components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "../components/ui/tabs";
+import MyJobsTab from "./MyJobsTab";
 import { Eye, MessageSquare, Power, PowerOff, TrendingUp } from "lucide-react";
 import {
   Dialog,
@@ -104,6 +105,8 @@ function getErrorMessage(error: unknown, fallback: string) {
 }
 
 export default function MyLoadsTab() {
+  const [searchParams] = useSearchParams();
+  const defaultTab = searchParams.get("tab") === "jobs" ? "jobs" : "loads";
   const [loads, setLoads] = useState<ShipperLoadSummary[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -696,12 +699,19 @@ export default function MyLoadsTab() {
 
   return (
     <div className="p-6 space-y-6">
-      <div>
-        <h1 className="text-lg font-semibold text-gray-900">My Listings</h1>
-        <p className="text-xs text-gray-500">
-          Manage your active and offline load listings.
-        </p>
-      </div>
+      <Tabs defaultValue={defaultTab} className="w-full">
+        <TabsList className="mb-6">
+          <TabsTrigger value="loads">Load Listings</TabsTrigger>
+          <TabsTrigger value="jobs">Jobs</TabsTrigger>
+        </TabsList>
+
+        <TabsContent value="loads" className="space-y-6">
+          <div>
+            <h1 className="text-lg font-semibold text-gray-900">My Listings</h1>
+            <p className="text-xs text-gray-500">
+              Manage your active and offline load listings.
+            </p>
+          </div>
 
       <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
         <Card className="p-4 hover:shadow-lg transition-shadow cursor-pointer">
@@ -1007,6 +1017,12 @@ export default function MyLoadsTab() {
           )}
         </DialogContent>
       </Dialog>
+        </TabsContent>
+
+        <TabsContent value="jobs" className="space-y-6">
+          <MyJobsTab />
+        </TabsContent>
+      </Tabs>
     </div>
   );
 }

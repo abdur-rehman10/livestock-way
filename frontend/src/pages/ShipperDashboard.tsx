@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { Button } from '../components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../components/ui/card';
 import { Badge } from '../components/ui/badge';
@@ -89,6 +89,16 @@ const availableCarriers = [
 export function ShipperDashboard({ onLogout, onRoleSwitch }: ShipperDashboardProps) {
   const [activeTab, setActiveTab] = useState('home');
   const [isPostLoadOpen, setIsPostLoadOpen] = useState(false);
+
+  useEffect(() => {
+    const handleOpenPostLoad = () => {
+      setIsPostLoadOpen(true);
+    };
+    window.addEventListener('open-post-load-dialog', handleOpenPostLoad);
+    return () => {
+      window.removeEventListener('open-post-load-dialog', handleOpenPostLoad);
+    };
+  }, []);
 
   return (
     <div className="min-h-screen bg-gray-50">

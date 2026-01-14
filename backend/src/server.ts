@@ -21,6 +21,7 @@ import adminRoutes from "./routes/adminRoutes";
 import haulerRoutes from "./routes/haulerRoutes";
 import pricingRoutes from "./routes/pricingRoutes";
 import externalIngestRoutes from "./routes/externalIngestRoutes";
+import jobRoutes from "./routes/jobRoutes";
 import { initSocket } from "./socket";
 
 dotenv.config();
@@ -78,6 +79,7 @@ app.use("/api/admin", adminRoutes);
 app.use("/api/hauler", haulerRoutes);
 app.use("/api/pricing", pricingRoutes);
 app.use("/api/external", externalIngestRoutes);
+app.use("/api/jobs", jobRoutes);
 
 async function bootstrapSuperAdmin() {
   const email = process.env.SUPER_ADMIN_EMAIL || "admin@test.com";

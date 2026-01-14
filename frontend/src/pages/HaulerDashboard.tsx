@@ -154,6 +154,17 @@ export function HaulerDashboard({ onLogout }: HaulerDashboardProps) {
   const [isLoadingServices, setIsLoadingServices] = useState(false);
   const [isBooking, setIsBooking] = useState<number | null>(null);
   const [payingId, setPayingId] = useState<number | null>(null);
+  
+  useEffect(() => {
+    const handleOpenPostTruck = () => {
+      setIsPostTruckOpen(true);
+    };
+    window.addEventListener('open-post-truck-dialog', handleOpenPostTruck);
+    return () => {
+      window.removeEventListener('open-post-truck-dialog', handleOpenPostTruck);
+    };
+  }, []);
+
   const activeBookingByServiceId = useMemo(() => {
     const map = new Map<number, ServiceBooking>();
     for (const booking of serviceBookings) {
