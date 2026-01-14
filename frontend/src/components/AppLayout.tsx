@@ -360,7 +360,7 @@ export function AppLayout({ children, userRole, onLogout }: AppLayoutProps) {
                     <button
                       className={`
                         w-full relative flex items-center gap-3 px-3 py-2.5 rounded-lg transition-colors
-                        text-gray-600 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-800
+                        bg-primary text-primary-foreground hover:bg-primary/90
                         ${!isSidebarOpen && 'justify-center'}
                       `}
                     >
@@ -427,6 +427,56 @@ export function AppLayout({ children, userRole, onLogout }: AppLayoutProps) {
                   </DropdownMenuContent>
                 </DropdownMenu>
               )}
+
+              {/* Boards Dropdown - Only for Hauler and Shipper */}
+              {(userRole === 'hauler' || userRole === 'shipper') && (
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <button
+                      className={`
+                        w-full relative flex items-center gap-3 px-3 py-2.5 rounded-lg transition-colors
+                        bg-primary text-primary-foreground hover:bg-primary/90
+                        ${!isSidebarOpen && 'justify-center'}
+                      `}
+                    >
+                      <Briefcase className="w-5 h-5 flex-shrink-0" />
+                      {isSidebarOpen && (
+                        <>
+                          <span>Boards</span>
+                          <ChevronDown className="w-4 h-4 ml-auto" />
+                        </>
+                      )}
+                    </button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="start" className="w-56">
+                    {userRole === 'hauler' && (
+                      <>
+                        <DropdownMenuItem onClick={() => navigate('/hauler/loadboard')}>
+                          <Package className="w-4 h-4 mr-2" />
+                          Loadboard
+                        </DropdownMenuItem>
+                        <DropdownMenuItem onClick={() => navigate('/hauler/job-board')}>
+                          <Briefcase className="w-4 h-4 mr-2" />
+                          Job Board
+                        </DropdownMenuItem>
+                      </>
+                    )}
+                    {userRole === 'shipper' && (
+                      <>
+                        <DropdownMenuItem onClick={() => navigate('/shipper/truck-board')}>
+                          <Truck className="w-4 h-4 mr-2" />
+                          Truck Board
+                        </DropdownMenuItem>
+                        <DropdownMenuItem onClick={() => navigate('/shipper/job-board')}>
+                          <Briefcase className="w-4 h-4 mr-2" />
+                          Job Board
+                        </DropdownMenuItem>
+                      </>
+                    )}
+                  </DropdownMenuContent>
+                </DropdownMenu>
+              )}
+
               {routes.map((route) => {
                 const Icon = route.icon;
                 const showBookingBadge =
@@ -584,48 +634,6 @@ export function AppLayout({ children, userRole, onLogout }: AppLayoutProps) {
             </div>
 
             <div className="flex items-center gap-2">
-              {/* Board Dropdown - Only for Hauler and Shipper */}
-              {(userRole === 'hauler' || userRole === 'shipper') && (
-                <DropdownMenu>
-                  <DropdownMenuTrigger asChild>
-                    <Button
-                      size="sm"
-                      className="gap-2 bg-primary text-primary-foreground hover:bg-primary/90"
-                    >
-                      <Briefcase className="w-4 h-4" />
-                      <span>Boards</span>
-                      <ChevronDown className="w-4 h-4" />
-                    </Button>
-                  </DropdownMenuTrigger>
-                  <DropdownMenuContent align="end" className="w-48">
-                    {userRole === 'hauler' && (
-                      <>
-                        <DropdownMenuItem onClick={() => navigate('/hauler/loadboard')}>
-                          <Package className="w-4 h-4 mr-2" />
-                          Loadboard
-                        </DropdownMenuItem>
-                        <DropdownMenuItem onClick={() => navigate('/hauler/job-board')}>
-                          <Briefcase className="w-4 h-4 mr-2" />
-                          Job Board
-                        </DropdownMenuItem>
-                      </>
-                    )}
-                    {userRole === 'shipper' && (
-                      <>
-                        <DropdownMenuItem onClick={() => navigate('/shipper/truck-board')}>
-                          <Truck className="w-4 h-4 mr-2" />
-                          Truck Board
-                        </DropdownMenuItem>
-                        <DropdownMenuItem onClick={() => navigate('/shipper/job-board')}>
-                          <Briefcase className="w-4 h-4 mr-2" />
-                          Job Board
-                        </DropdownMenuItem>
-                      </>
-                    )}
-                  </DropdownMenuContent>
-                </DropdownMenu>
-              )}
-
               {/* Theme Toggle */}
               <ThemeToggle />
 
