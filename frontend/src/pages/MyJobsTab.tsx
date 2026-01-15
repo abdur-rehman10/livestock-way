@@ -9,14 +9,16 @@ import { Input } from "../components/ui/input";
 import { Textarea } from "../components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../components/ui/select";
 import { Checkbox } from "../components/ui/checkbox";
-import { Eye, Edit, Trash2, Users, Clock, MapPin, DollarSign, Briefcase } from "lucide-react";
+import { Eye, Edit, Trash2, Users, Clock, MapPin, DollarSign, Briefcase, MessageSquare } from "lucide-react";
 import { fetchMyJobs, deleteJob, updateJob, fetchJobApplications, updateApplicationStatus, type JobListing, type JobApplication } from "../api/jobs";
+import { fetchThreadByJobAndApplication } from "../api/jobMessages";
 import { toast } from "sonner";
 import { storage, STORAGE_KEYS } from "../lib/storage";
 import { API_BASE_URL } from "../lib/api";
 
 export default function MyJobsTab() {
   const navigate = useNavigate();
+  const userRole = storage.get<string>(STORAGE_KEYS.USER_ROLE, "");
   const [jobs, setJobs] = useState<JobListing[]>([]);
   const [loading, setLoading] = useState(true);
   const [selectedJob, setSelectedJob] = useState<JobListing | null>(null);
@@ -321,6 +323,27 @@ export default function MyJobsTab() {
                       >
                         {app.status}
                       </Badge>
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        className="text-xs flex items-center gap-1"
+                        onClick={async () => {
+                          try {
+                            const thread = await fetchThreadByJobAndApplication(selectedJob!.id, app.id);
+                            navigate(`/${userRole}/messages`);
+                            // Optionally, you could open the chat directly here
+                            setTimeout(() => {
+                              window.dispatchEvent(new CustomEvent('open-job-thread', { detail: { threadId: thread.id } }));
+                            }, 100);
+                          } catch (err: any) {
+                            console.error("Error loading thread:", err);
+                            toast.error("Failed to open message thread");
+                          }
+                        }}
+                      >
+                        <MessageSquare className="w-3 h-3" />
+                        Message
+                      </Button>
                       {app.status === "pending" && (
                         <div className="flex flex-col gap-1">
                           <Button

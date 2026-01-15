@@ -29,6 +29,7 @@ import {
   Award,
   Calendar,
 } from "lucide-react";
+import { AddressSearch, type MappedAddress } from "../components/AddressSearch";
 
 export default function PostJob() {
   const navigate = useNavigate();
@@ -57,6 +58,7 @@ export default function PostJob() {
     preferredCallTime: "",
     email: "",
   });
+  const [addressSearchValue, setAddressSearchValue] = useState("");
 
   const [errors, setErrors] = useState<Record<string, string>>({});
 
@@ -145,6 +147,7 @@ export default function PostJob() {
         preferredCallTime: "",
         email: "",
       });
+      setAddressSearchValue("");
       setPhotos([]);
       setPhotoPreviews([]);
       setErrors({});
@@ -395,21 +398,26 @@ export default function PostJob() {
                     <MapPin className="w-4 h-4" />
                     Location <span className="text-red-500">*</span>
                   </Label>
-                  <div className="relative">
-                    <MapPin className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400" />
-                    <Input
-                      id="location"
-                      value={formData.location}
-                      onChange={(e) => {
-                        setFormData({ ...formData, location: e.target.value });
-                        if (errors.location) setErrors({ ...errors, location: "" });
-                      }}
-                      placeholder="City, State or Full Address"
-                      className={`pl-10 h-11 ${errors.location ? "border-red-500" : ""}`}
-                    />
-                  </div>
+                  <AddressSearch
+                    value={addressSearchValue}
+                    onChange={setAddressSearchValue}
+                    onSelect={(mapped: MappedAddress) => {
+                      // Format location as "City, State" or use full text
+                      const locationText = mapped.city && mapped.state 
+                        ? `${mapped.city}, ${mapped.state}${mapped.postalCode ? ` ${mapped.postalCode}` : ""}`
+                        : mapped.fullText;
+                      setFormData({ ...formData, location: locationText });
+                      setAddressSearchValue(locationText);
+                      // Clear location error
+                      if (errors.location) {
+                        const newErrors = { ...errors };
+                        delete newErrors.location;
+                        setErrors(newErrors);
+                      }
+                    }}
+                  />
                   {errors.location && (
-                    <p className="text-sm text-red-500 flex items-center gap-1">
+                    <p className="text-sm text-red-500 flex items-center gap-1 mt-1">
                       <X className="w-4 h-4" />
                       {errors.location}
                     </p>

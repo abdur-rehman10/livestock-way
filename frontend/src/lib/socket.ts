@@ -25,6 +25,12 @@ export const SOCKET_EVENTS = {
   DISPUTE_UPDATED: "marketplace:dispute:updated",
   DISPUTE_MESSAGE: "marketplace:dispute:message",
   TRUCK_CHAT_MESSAGE: "marketplace:truck-chat:message",
+  JOB_MESSAGE: "job:message",
+  JOB_THREAD_UPDATED: "job:thread:updated",
+  BUY_SELL_MESSAGE: "buy-sell:message",
+  BUY_SELL_THREAD_UPDATED: "buy-sell:thread:updated",
+  RESOURCES_MESSAGE: "resources:message",
+  RESOURCES_THREAD_UPDATED: "resources:thread:updated",
 } as const;
 
 export type SocketEventKey = typeof SOCKET_EVENTS[keyof typeof SOCKET_EVENTS];
@@ -49,6 +55,12 @@ type SocketEventPayloadMap = {
   [SOCKET_EVENTS.DISPUTE_UPDATED]: { dispute: Record<string, unknown> };
   [SOCKET_EVENTS.DISPUTE_MESSAGE]: { message: Record<string, unknown> };
   [SOCKET_EVENTS.TRUCK_CHAT_MESSAGE]: { message: unknown };
+  [SOCKET_EVENTS.JOB_MESSAGE]: { message: any; thread: any };
+  [SOCKET_EVENTS.JOB_THREAD_UPDATED]: { threads: any[] };
+  [SOCKET_EVENTS.BUY_SELL_MESSAGE]: { message: any; thread: any };
+  [SOCKET_EVENTS.BUY_SELL_THREAD_UPDATED]: { threads: any[] };
+  [SOCKET_EVENTS.RESOURCES_MESSAGE]: { message: any; thread: any };
+  [SOCKET_EVENTS.RESOURCES_THREAD_UPDATED]: { threads: any[] };
 };
 
 let socket: Socket | null = null;

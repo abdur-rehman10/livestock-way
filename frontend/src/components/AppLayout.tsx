@@ -26,6 +26,7 @@ import {
   Briefcase,
   Plus,
   ChevronDown,
+  Inbox,
 } from "lucide-react";
 import { ThemeToggle } from "./ThemeToggle";
 import { NotificationsCenter } from "./NotificationsCenter";
@@ -80,6 +81,7 @@ export function AppLayout({ children, userRole, onLogout }: AppLayoutProps) {
       routes: [
         { path: '/hauler/dashboard', icon: LayoutDashboard, label: 'Dashboard' },
         { path: '/hauler/truck-listings', icon: Truck, label: 'My Listing' },
+        { path: '/hauler/messages', icon: Inbox, label: 'Messages' },
         { path: '/hauler/bookings', icon: Calendar, label: 'Bookings' },
         { path: '/hauler/offers', icon: MessageSquare, label: 'Offers' },
         // { path: '/hauler/my-loads', icon: ClipboardList, label: 'My Loads' },
@@ -97,6 +99,7 @@ export function AppLayout({ children, userRole, onLogout }: AppLayoutProps) {
       routes: [
         { path: '/shipper/dashboard', icon: LayoutDashboard, label: 'Dashboard' },
         { path: '/shipper/my-loads', icon: Package, label: 'My Listing' },
+        { path: '/shipper/messages', icon: Inbox, label: 'Messages' },
         { path: '/shipper/offers', icon: MessageSquare, label: 'Offers' },
         { path: '/shipper/contracts', icon: FileText, label: 'Contracts' },
         { path: '/shipper/trips', icon: MapPin, label: 'My Trips' },
@@ -394,6 +397,18 @@ export function AppLayout({ children, userRole, onLogout }: AppLayoutProps) {
                           <Briefcase className="w-4 h-4 mr-2" />
                           Post a Job
                         </DropdownMenuItem>
+                        <DropdownMenuItem
+                          onClick={() => navigate('/shipper/post-buy-sell')}
+                        >
+                          <DollarSign className="w-4 h-4 mr-2" />
+                          Post Buy & Sell
+                        </DropdownMenuItem>
+                        <DropdownMenuItem
+                          onClick={() => navigate('/shipper/post-resource')}
+                        >
+                          <Wrench className="w-4 h-4 mr-2" />
+                          Post a Resource
+                        </DropdownMenuItem>
                       </>
                     )}
                     {userRole === 'hauler' && (
@@ -422,61 +437,23 @@ export function AppLayout({ children, userRole, onLogout }: AppLayoutProps) {
                           <Briefcase className="w-4 h-4 mr-2" />
                           Post a Job
                         </DropdownMenuItem>
-                      </>
-                    )}
-                  </DropdownMenuContent>
-                </DropdownMenu>
-              )}
-
-              {/* Boards Dropdown - Only for Hauler and Shipper */}
-              {(userRole === 'hauler' || userRole === 'shipper') && (
-                <DropdownMenu>
-                  <DropdownMenuTrigger asChild>
-                    <button
-                      className={`
-                        w-full relative flex items-center gap-3 px-3 py-2.5 rounded-lg transition-colors
-                        bg-primary text-primary-foreground hover:bg-primary/90
-                        ${!isSidebarOpen && 'justify-center'}
-                      `}
-                    >
-                      <Briefcase className="w-5 h-5 flex-shrink-0" />
-                      {isSidebarOpen && (
-                        <>
-                          <span>Boards</span>
-                          <ChevronDown className="w-4 h-4 ml-auto" />
-                        </>
-                      )}
-                    </button>
-                  </DropdownMenuTrigger>
-                  <DropdownMenuContent align="start" className="w-56">
-                    {userRole === 'hauler' && (
-                      <>
-                        <DropdownMenuItem onClick={() => navigate('/hauler/loadboard')}>
-                          <Package className="w-4 h-4 mr-2" />
-                          Loadboard
+                        <DropdownMenuItem
+                          onClick={() => navigate('/hauler/post-buy-sell')}
+                        >
+                          <DollarSign className="w-4 h-4 mr-2" />
+                          Post Buy & Sell
                         </DropdownMenuItem>
-                        <DropdownMenuItem onClick={() => navigate('/hauler/job-board')}>
-                          <Briefcase className="w-4 h-4 mr-2" />
-                          Job Board
-                        </DropdownMenuItem>
-                      </>
-                    )}
-                    {userRole === 'shipper' && (
-                      <>
-                        <DropdownMenuItem onClick={() => navigate('/shipper/truck-board')}>
-                          <Truck className="w-4 h-4 mr-2" />
-                          Truck Board
-                        </DropdownMenuItem>
-                        <DropdownMenuItem onClick={() => navigate('/shipper/job-board')}>
-                          <Briefcase className="w-4 h-4 mr-2" />
-                          Job Board
+                        <DropdownMenuItem
+                          onClick={() => navigate('/hauler/post-resource')}
+                        >
+                          <Wrench className="w-4 h-4 mr-2" />
+                          Post a Resource
                         </DropdownMenuItem>
                       </>
                     )}
                   </DropdownMenuContent>
                 </DropdownMenu>
               )}
-
               {routes.map((route) => {
                 const Icon = route.icon;
                 const showBookingBadge =
@@ -634,6 +611,85 @@ export function AppLayout({ children, userRole, onLogout }: AppLayoutProps) {
             </div>
 
             <div className="flex items-center gap-2">
+              {/* Board Dropdown - Only for Hauler and Shipper */}
+              {(userRole === 'hauler' || userRole === 'shipper') && (
+                <>
+                  <DropdownMenu>
+                    <DropdownMenuTrigger asChild>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        className="gap-2 bg-primary text-primary-foreground hover:bg-primary/90 border-primary"
+                      >
+                        <Briefcase className="w-4 h-4" />
+                        <span>Boards</span>
+                        <ChevronDown className="w-4 h-4" />
+                      </Button>
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent align="end" className="w-48">
+                      {userRole === 'hauler' && (
+                        <>
+                          <DropdownMenuItem onClick={() => navigate('/hauler/loadboard')}>
+                            <Package className="w-4 h-4 mr-2" />
+                            Loadboard
+                          </DropdownMenuItem>
+                          <DropdownMenuItem onClick={() => navigate('/hauler/job-board')}>
+                            <Briefcase className="w-4 h-4 mr-2" />
+                            Job Board
+                          </DropdownMenuItem>
+                        <DropdownMenuItem onClick={() => navigate('/hauler/buy-sell-board')}>
+                          <DollarSign className="w-4 h-4 mr-2" />
+                          Buy & Sell Board
+                        </DropdownMenuItem>
+                        <DropdownMenuItem onClick={() => navigate('/hauler/resources-board')}>
+                          <Wrench className="w-4 h-4 mr-2" />
+                          Resources Board
+                        </DropdownMenuItem>
+                      </>
+                    )}
+                    {userRole === 'shipper' && (
+                      <>
+                        <DropdownMenuItem onClick={() => navigate('/shipper/truck-board')}>
+                          <Truck className="w-4 h-4 mr-2" />
+                          Truck Board
+                        </DropdownMenuItem>
+                        <DropdownMenuItem onClick={() => navigate('/shipper/job-board')}>
+                          <Briefcase className="w-4 h-4 mr-2" />
+                          Job Board
+                        </DropdownMenuItem>
+                        <DropdownMenuItem onClick={() => navigate('/shipper/buy-sell-board')}>
+                          <DollarSign className="w-4 h-4 mr-2" />
+                          Buy & Sell Board
+                        </DropdownMenuItem>
+                        <DropdownMenuItem onClick={() => navigate('/shipper/resources-board')}>
+                          <Wrench className="w-4 h-4 mr-2" />
+                          Resources Board
+                        </DropdownMenuItem>
+                      </>
+                    )}
+                    </DropdownMenuContent>
+                  </DropdownMenu>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="gap-2 bg-primary text-primary-foreground hover:bg-primary/90 border-primary"
+                    onClick={() => userRole === 'shipper' ? navigate('/shipper/resources-board') : navigate('/hauler/resources-board')}
+                  >
+                    <Wrench className="w-4 h-4 mr-2" />
+                    Resources Board
+                  </Button>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="gap-2 bg-primary text-primary-foreground hover:bg-primary/90 border-primary"
+                    onClick={() => userRole === 'shipper' ? navigate('/shipper/buy-sell-board') : navigate('/hauler/buy-sell-board')}
+                  >
+                    <DollarSign className="w-4 h-4 mr-2" />
+                    Buy & Sell Board
+                  </Button>
+                </>
+              )}
+
               {/* Theme Toggle */}
               <ThemeToggle />
 
@@ -647,7 +703,6 @@ export function AppLayout({ children, userRole, onLogout }: AppLayoutProps) {
                   <Bell className="w-5 h-5" />
                   <span className="absolute top-1 right-1 w-2 h-2 bg-red-500 rounded-full"></span>
                 </Button>
-
                 {showNotifications && (
                   <div className="absolute right-0 mt-2 w-96 z-50">
                     <NotificationsCenter 

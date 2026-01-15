@@ -49,6 +49,11 @@ import ShipperOffersTab from '../pages/ShipperOffersTab';
 import ShipperContractsTab from '../pages/ShipperContractsTab';
 import PostJob from '../pages/PostJob';
 import JobBoard from '../pages/JobBoard';
+import JobMessages from '../pages/JobMessages';
+import PostBuyAndSell from '../pages/PostBuyAndSell';
+import BuyAndSellBoard from '../pages/BuyAndSellBoard';
+import PostResource from '../pages/PostResource';
+import ResourcesBoard from '../pages/ResourcesBoard';
 
 type UserRole = 'shipper' | 'driver' | 'hauler' | 'stakeholder' | 'super-admin' | null;
 type LandingRole = 'hauler' | 'shipper' | 'stakeholder';
@@ -270,8 +275,13 @@ export function AppRouter({ showKeyboardShortcuts, onKeyboardShortcutsToggle }: 
                   <Route path="loadboard" element={<Loadboard />} />
                   <Route path="truck-board" element={<TruckBoard />} />
                   <Route path="truck-listings" element={<HaulerTruckListings />} />
+                  <Route path="messages" element={<JobMessages />} />
                   <Route path="post-job" element={<PostJob />} />
                   <Route path="job-board" element={<JobBoard />} />
+                  <Route path="post-buy-sell" element={<PostBuyAndSell />} />
+                  <Route path="buy-sell-board" element={<BuyAndSellBoard />} />
+                  <Route path="post-resource" element={<PostResource />} />
+                  <Route path="resources-board" element={<ResourcesBoard />} />
                   <Route path="fleet" element={<FleetManagement />} />
                   <Route path="trips" element={<TripsTab role="hauler" onViewTrip={() => toast.info('Trip view coming soon')} />} />
                   <Route path="trips/:id/route-plan" element={<TripRoutePlan />} />
@@ -304,8 +314,13 @@ export function AppRouter({ showKeyboardShortcuts, onKeyboardShortcutsToggle }: 
                 <Routes>
                   <Route path="dashboard" element={<ShipperDashboard onLogout={handleLogout} onRoleSwitch={handleRoleSwitch} />} />
                   <Route path="my-loads" element={<MyLoadsTab />} />
+                  <Route path="messages" element={<JobMessages />} />
                   <Route path="post-job" element={<PostJob />} />
                   <Route path="job-board" element={<JobBoard />} />
+                  <Route path="post-buy-sell" element={<PostBuyAndSell />} />
+                  <Route path="buy-sell-board" element={<BuyAndSellBoard />} />
+                  <Route path="post-resource" element={<PostResource />} />
+                  <Route path="resources-board" element={<ResourcesBoard />} />
                   <Route path="offers" element={<ShipperOffersTab />} />
                   <Route path="contracts" element={<ShipperContractsTab />} />
                   <Route path="loadboard" element={<Navigate to="/shipper/dashboard" replace />} />

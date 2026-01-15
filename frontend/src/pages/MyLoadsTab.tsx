@@ -17,6 +17,8 @@ import { Label } from "../components/ui/label";
 import { Card } from "../components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "../components/ui/tabs";
 import MyJobsTab from "./MyJobsTab";
+import MyResourcesTab from "./MyResourcesTab";
+import MyBuyAndSellTab from "./MyBuyAndSellTab";
 import { Eye, MessageSquare, Power, PowerOff, TrendingUp } from "lucide-react";
 import {
   Dialog,
@@ -703,6 +705,8 @@ export default function MyLoadsTab() {
         <TabsList className="mb-6">
           <TabsTrigger value="loads">Load Listings</TabsTrigger>
           <TabsTrigger value="jobs">Jobs</TabsTrigger>
+          <TabsTrigger value="buy-sell">Buy & Sell</TabsTrigger>
+          <TabsTrigger value="resources">Resources</TabsTrigger>
         </TabsList>
 
         <TabsContent value="loads" className="space-y-6">
@@ -1021,6 +1025,14 @@ export default function MyLoadsTab() {
 
         <TabsContent value="jobs" className="space-y-6">
           <MyJobsTab />
+        </TabsContent>
+
+        <TabsContent value="buy-sell" className="space-y-6">
+          <MyBuyAndSellTab />
+        </TabsContent>
+
+        <TabsContent value="resources" className="space-y-6">
+          <MyResourcesTab />
         </TabsContent>
       </Tabs>
     </div>

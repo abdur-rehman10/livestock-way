@@ -22,6 +22,11 @@ import haulerRoutes from "./routes/haulerRoutes";
 import pricingRoutes from "./routes/pricingRoutes";
 import externalIngestRoutes from "./routes/externalIngestRoutes";
 import jobRoutes from "./routes/jobRoutes";
+import jobMessagesRoutes from "./routes/jobMessagesRoutes";
+import buyAndSellRoutes from "./routes/buyAndSellRoutes";
+import buySellMessagesRoutes from "./routes/buySellMessagesRoutes";
+import resourcesRoutes from "./routes/resourcesRoutes";
+import resourcesMessagesRoutes from "./routes/resourcesMessagesRoutes";
 import { initSocket } from "./socket";
 
 dotenv.config();
@@ -80,6 +85,11 @@ app.use("/api/hauler", haulerRoutes);
 app.use("/api/pricing", pricingRoutes);
 app.use("/api/external", externalIngestRoutes);
 app.use("/api/jobs", jobRoutes);
+app.use("/api/job-messages", jobMessagesRoutes);
+app.use("/api/buy-and-sell", buyAndSellRoutes);
+app.use("/api/buy-sell-messages", buySellMessagesRoutes);
+app.use("/api/resources", resourcesRoutes);
+app.use("/api/resources-messages", resourcesMessagesRoutes);
 
 async function bootstrapSuperAdmin() {
   const email = process.env.SUPER_ADMIN_EMAIL || "admin@test.com";

@@ -20,6 +20,8 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from ".
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "../components/ui/tabs";
 import { PostTruckDialog } from "./PostTruckDialog";
 import MyJobsTab from "./MyJobsTab";
+import MyBuyAndSellTab from "./MyBuyAndSellTab";
+import MyResourcesTab from "./MyResourcesTab";
 import { toast } from "sonner";
 
 function extractErrorMessage(error: unknown): string {
@@ -315,6 +317,8 @@ export default function HaulerTruckListings() {
         <TabsList className="mb-4">
           <TabsTrigger value="trucks">Truck Listings</TabsTrigger>
           <TabsTrigger value="jobs">Jobs</TabsTrigger>
+          <TabsTrigger value="buy-sell">Buy & Sell</TabsTrigger>
+          <TabsTrigger value="resources">Resources</TabsTrigger>
         </TabsList>
 
         <TabsContent value="trucks" className="space-y-4">
@@ -583,6 +587,14 @@ export default function HaulerTruckListings() {
 
         <TabsContent value="jobs" className="space-y-4">
           <MyJobsTab />
+        </TabsContent>
+
+        <TabsContent value="buy-sell" className="space-y-4">
+          <MyBuyAndSellTab />
+        </TabsContent>
+
+        <TabsContent value="resources" className="space-y-4">
+          <MyResourcesTab />
         </TabsContent>
       </Tabs>
     </div>

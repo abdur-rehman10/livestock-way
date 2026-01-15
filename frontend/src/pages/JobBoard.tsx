@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
-import { MapPin, Clock, Building, Bookmark, Briefcase } from "lucide-react";
+import { MapPin, Clock, Building, Bookmark, Briefcase, MessageSquare } from "lucide-react";
 import { Button } from "../components/ui/button";
 import { Badge } from "../components/ui/badge";
 import { Card } from "../components/ui/card";
@@ -10,6 +10,7 @@ import { Label } from "../components/ui/label";
 import { Textarea } from "../components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../components/ui/select";
 import { fetchJobs, type JobListing, applyForJob, type ApplyJobPayload, fetchMyApplication, type JobApplication } from "../api/jobs";
+import { fetchThreadByJobAndApplication } from "../api/jobMessages";
 import { toast } from "sonner";
 import { storage, STORAGE_KEYS } from "../lib/storage";
 import { API_BASE_URL } from "../lib/api";
@@ -34,6 +35,7 @@ export default function JobBoard() {
   const [myApplications, setMyApplications] = useState<Map<number, JobApplication>>(new Map());
 
   const userId = storage.get<string | null>(STORAGE_KEYS.USER_ID, null);
+  const userRole = storage.get<string>(STORAGE_KEYS.USER_ROLE, "");
 
   useEffect(() => {
     loadJobs();
@@ -359,26 +361,50 @@ export default function JobBoard() {
                     View Details
                   </Button>
                   {myApplications.has(job.id) && (
-                    <Badge
-                      className="px-3 py-1.5 text-xs font-medium whitespace-nowrap text-center"
-                      style={
-                        myApplications.get(job.id)?.status === "accepted"
-                          ? { backgroundColor: "#10b981", color: "white" }
+                    <div className="flex flex-col gap-2">
+                      <Badge
+                        className="px-3 py-1.5 text-xs font-medium whitespace-nowrap text-center"
+                        style={
+                          myApplications.get(job.id)?.status === "accepted"
+                            ? { backgroundColor: "#10b981", color: "white" }
+                            : myApplications.get(job.id)?.status === "rejected"
+                              ? { backgroundColor: "#ef4444", color: "white" }
+                              : myApplications.get(job.id)?.status === "reviewing"
+                                ? { backgroundColor: "#3b82f6", color: "white" }
+                                : { backgroundColor: "#6b7280", color: "white" }
+                        }
+                      >
+                        {myApplications.get(job.id)?.status === "accepted"
+                          ? "✓ Accepted"
                           : myApplications.get(job.id)?.status === "rejected"
-                            ? { backgroundColor: "#ef4444", color: "white" }
+                            ? "✗ Rejected"
                             : myApplications.get(job.id)?.status === "reviewing"
-                              ? { backgroundColor: "#3b82f6", color: "white" }
-                              : { backgroundColor: "#6b7280", color: "white" }
-                      }
-                    >
-                      {myApplications.get(job.id)?.status === "accepted"
-                        ? "✓ Accepted"
-                        : myApplications.get(job.id)?.status === "rejected"
-                          ? "✗ Rejected"
-                          : myApplications.get(job.id)?.status === "reviewing"
-                            ? "⏳ Under Review"
-                            : "📋 Applied"}
-                    </Badge>
+                              ? "⏳ Under Review"
+                              : "📋 Applied"}
+                      </Badge>
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        className="px-4 py-2 text-sm whitespace-nowrap flex items-center justify-center gap-1"
+                        onClick={async () => {
+                          const application = myApplications.get(job.id);
+                          if (!application) return;
+                          try {
+                            const thread = await fetchThreadByJobAndApplication(job.id, application.id);
+                            navigate(`/${userRole}/messages`);
+                            setTimeout(() => {
+                              window.dispatchEvent(new CustomEvent('open-job-thread', { detail: { threadId: thread.id } }));
+                            }, 100);
+                          } catch (err: any) {
+                            console.error("Error loading thread:", err);
+                            toast.error("Failed to open message thread");
+                          }
+                        }}
+                      >
+                        <MessageSquare className="w-3 h-3" />
+                        Send Message
+                      </Button>
+                    </div>
                   )}
                 </div>
               </div>
@@ -484,30 +510,53 @@ export default function JobBoard() {
 
               <div className="flex gap-3 pt-4">
                 {selectedJob && myApplications.has(selectedJob.id) ? (
-                  <div className="flex-1 flex items-center gap-3">
-                    <Badge
-                      className="px-4 py-2 text-sm font-medium"
-                      style={
-                        myApplications.get(selectedJob.id)?.status === "accepted"
-                          ? { backgroundColor: "#10b981", color: "white" }
+                  <div className="flex-1 flex flex-col gap-3">
+                    <div className="flex items-center gap-3">
+                      <Badge
+                        className="px-4 py-2 text-sm font-medium"
+                        style={
+                          myApplications.get(selectedJob.id)?.status === "accepted"
+                            ? { backgroundColor: "#10b981", color: "white" }
+                            : myApplications.get(selectedJob.id)?.status === "rejected"
+                              ? { backgroundColor: "#ef4444", color: "white" }
+                              : myApplications.get(selectedJob.id)?.status === "reviewing"
+                                ? { backgroundColor: "#3b82f6", color: "white" }
+                                : { backgroundColor: "#6b7280", color: "white" }
+                        }
+                      >
+                        {myApplications.get(selectedJob.id)?.status === "accepted"
+                          ? "✓ Accepted"
                           : myApplications.get(selectedJob.id)?.status === "rejected"
-                            ? { backgroundColor: "#ef4444", color: "white" }
+                            ? "✗ Rejected"
                             : myApplications.get(selectedJob.id)?.status === "reviewing"
-                              ? { backgroundColor: "#3b82f6", color: "white" }
-                              : { backgroundColor: "#6b7280", color: "white" }
-                      }
+                              ? "⏳ Under Review"
+                              : "📋 Applied"}
+                      </Badge>
+                      <span className="text-sm text-gray-500">
+                        Applied {new Date(myApplications.get(selectedJob.id)!.created_at).toLocaleDateString()}
+                      </span>
+                    </div>
+                    <Button
+                      variant="outline"
+                      className="px-6 py-3 flex items-center justify-center gap-2"
+                      onClick={async () => {
+                        const application = myApplications.get(selectedJob.id);
+                        if (!application) return;
+                        try {
+                          const thread = await fetchThreadByJobAndApplication(selectedJob.id, application.id);
+                          navigate(`/${userRole}/messages`);
+                          setTimeout(() => {
+                            window.dispatchEvent(new CustomEvent('open-job-thread', { detail: { threadId: thread.id } }));
+                          }, 100);
+                        } catch (err: any) {
+                          console.error("Error loading thread:", err);
+                          toast.error("Failed to open message thread");
+                        }
+                      }}
                     >
-                      {myApplications.get(selectedJob.id)?.status === "accepted"
-                        ? "✓ Accepted"
-                        : myApplications.get(selectedJob.id)?.status === "rejected"
-                          ? "✗ Rejected"
-                          : myApplications.get(selectedJob.id)?.status === "reviewing"
-                            ? "⏳ Under Review"
-                            : "📋 Applied"}
-                    </Badge>
-                    <span className="text-sm text-gray-500">
-                      Applied {new Date(myApplications.get(selectedJob.id)!.created_at).toLocaleDateString()}
-                    </span>
+                      <MessageSquare className="w-4 h-4" />
+                      Send Message
+                    </Button>
                   </div>
                 ) : (
                   <Button
