@@ -1,12 +1,13 @@
 import { pool } from "../config/database";
-import { ensureHaulerProfile, ensureShipperProfile } from "../utils/profileHelpers";
+import { ensureHaulerProfile, ensureShipperProfile, ensureStakeholderProfile } from "../utils/profileHelpers";
 
 export interface BuyAndSellListing {
   id: number;
   posted_by_user_id: number;
-  posted_by_role: "hauler" | "shipper";
+  posted_by_role: "hauler" | "shipper" | "stakeholder";
   hauler_id: number | null;
   shipper_id: number | null;
+  stakeholder_id: number | null;
   listing_type: "for-sale" | "wanted" | "for-rent";
   category: "equipment" | "livestock" | "supplies" | "services" | "vehicles" | "trailers";
   title: string;
@@ -52,6 +53,7 @@ function mapBuyAndSellListingRow(row: any): BuyAndSellListing {
     posted_by_role: row.posted_by_role,
     hauler_id: row.hauler_id ? Number(row.hauler_id) : null,
     shipper_id: row.shipper_id ? Number(row.shipper_id) : null,
+    stakeholder_id: row.stakeholder_id ? Number(row.stakeholder_id) : null,
     listing_type: row.listing_type,
     category: row.category,
     title: row.title,
@@ -138,7 +140,7 @@ export interface ApplyBuyAndSellPayload {
 
 export interface BuyAndSellListingFilters {
   status?: "active" | "closed" | "sold";
-  role?: "hauler" | "shipper";
+  role?: "hauler" | "shipper" | "stakeholder";
   listing_type?: "for-sale" | "wanted" | "for-rent";
   category?: string;
   city?: string;
@@ -252,11 +254,14 @@ export async function createBuyAndSellListing(
   // Ensure profile exists
   let haulerId: number | null = null;
   let shipperId: number | null = null;
+  let stakeholderId: number | null = null;
 
   if (userRole.toLowerCase() === "hauler") {
     haulerId = await ensureHaulerProfile(userId);
   } else if (userRole.toLowerCase() === "shipper") {
     shipperId = await ensureShipperProfile(userId);
+  } else if (userRole.toLowerCase() === "stakeholder") {
+    stakeholderId = await ensureStakeholderProfile(userId);
   }
 
   const photos = payload.photos && Array.isArray(payload.photos) ? payload.photos : [];
@@ -264,10 +269,10 @@ export async function createBuyAndSellListing(
   const result = await pool.query(
     `
     INSERT INTO buy_and_sell_listings (
-      posted_by_user_id, posted_by_role, hauler_id, shipper_id,
+      posted_by_user_id, posted_by_role, hauler_id, shipper_id, stakeholder_id,
       listing_type, category, title, description, price, price_type, payment_terms,
       city, state, zip_code, contact_name, contact_phone, contact_email, photos, status
-    ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, 'active')
+    ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, 'active')
     RETURNING *
     `,
     [
@@ -275,6 +280,7 @@ export async function createBuyAndSellListing(
       userRole.toLowerCase(),
       haulerId,
       shipperId,
+      stakeholderId,
       payload.listing_type,
       payload.category,
       payload.title,

@@ -1,12 +1,13 @@
 import { pool } from "../config/database";
-import { ensureHaulerProfile, ensureShipperProfile } from "../utils/profileHelpers";
+import { ensureHaulerProfile, ensureShipperProfile, ensureStakeholderProfile } from "../utils/profileHelpers";
 
 export interface ResourcesListing {
   id: number;
   posted_by_user_id: number;
-  posted_by_role: "hauler" | "shipper";
+  posted_by_role: "hauler" | "shipper" | "stakeholder";
   hauler_id: number | null;
   shipper_id: number | null;
+  stakeholder_id: number | null;
   resource_type: "logistics" | "insurance" | "washout" | "scale" | "hay" | "stud" | "salesyard" | "beefspotter";
   title: string;
   description: string | null;
@@ -48,6 +49,7 @@ function mapResourcesListingRow(row: any): ResourcesListing {
     posted_by_role: row.posted_by_role,
     hauler_id: row.hauler_id ? Number(row.hauler_id) : null,
     shipper_id: row.shipper_id ? Number(row.shipper_id) : null,
+    stakeholder_id: row.stakeholder_id ? Number(row.stakeholder_id) : null,
     resource_type: row.resource_type,
     title: row.title,
     description: row.description,
@@ -123,7 +125,7 @@ export interface ApplyResourcesPayload {
 
 export interface ResourcesListingFilters {
   status?: "active" | "closed" | "archived";
-  role?: "hauler" | "shipper";
+  role?: "hauler" | "shipper" | "stakeholder";
   resource_type?: string;
   city?: string;
   state?: string;
@@ -230,11 +232,14 @@ export async function createResourcesListing(
   // Ensure profile exists
   let haulerId: number | null = null;
   let shipperId: number | null = null;
+  let stakeholderId: number | null = null;
 
   if (userRole.toLowerCase() === "hauler") {
     haulerId = await ensureHaulerProfile(userId);
   } else if (userRole.toLowerCase() === "shipper") {
     shipperId = await ensureShipperProfile(userId);
+  } else if (userRole.toLowerCase() === "stakeholder") {
+    stakeholderId = await ensureStakeholderProfile(userId);
   }
 
   const photos = payload.photos && Array.isArray(payload.photos) ? payload.photos : [];
@@ -243,10 +248,10 @@ export async function createResourcesListing(
   const result = await pool.query(
     `
     INSERT INTO resources_listings (
-      posted_by_user_id, posted_by_role, hauler_id, shipper_id,
+      posted_by_user_id, posted_by_role, hauler_id, shipper_id, stakeholder_id,
       resource_type, title, description, contact_name, contact_phone, contact_email,
       city, state, zip_code, photos, type_specific_data, status
-    ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, 'active')
+    ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, 'active')
     RETURNING *
     `,
     [
@@ -254,6 +259,7 @@ export async function createResourcesListing(
       userRole.toLowerCase(),
       haulerId,
       shipperId,
+      stakeholderId,
       payload.resource_type,
       payload.title,
       payload.description ?? null,

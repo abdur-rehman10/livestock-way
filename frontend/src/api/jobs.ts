@@ -24,9 +24,10 @@ function buildHeaders(method: string, hasJsonBody = true): HeadersInit {
 export interface JobListing {
   id: number;
   posted_by_user_id: number;
-  posted_by_role: "hauler" | "shipper";
+  posted_by_role: "hauler" | "shipper" | "stakeholder";
   hauler_id: number | null;
   shipper_id: number | null;
+  stakeholder_id: number | null;
   title: string;
   description: string;
   required_skills: string | null;
@@ -102,7 +103,7 @@ export interface ApplyJobPayload {
 
 export async function fetchJobs(filters?: {
   status?: "active" | "closed" | "filled";
-  role?: "hauler" | "shipper";
+  role?: "hauler" | "shipper" | "stakeholder";
   limit?: number;
   offset?: number;
 }): Promise<{ items: JobListing[]; total: number }> {

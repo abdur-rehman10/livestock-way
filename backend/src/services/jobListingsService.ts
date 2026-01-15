@@ -1,12 +1,13 @@
 import { pool } from "../config/database";
-import { ensureHaulerProfile, ensureShipperProfile } from "../utils/profileHelpers";
+import { ensureHaulerProfile, ensureShipperProfile, ensureStakeholderProfile } from "../utils/profileHelpers";
 
 export interface JobListing {
   id: number;
   posted_by_user_id: number;
-  posted_by_role: "hauler" | "shipper";
+  posted_by_role: "hauler" | "shipper" | "stakeholder";
   hauler_id: number | null;
   shipper_id: number | null;
+  stakeholder_id: number | null;
   title: string;
   description: string;
   required_skills: string | null;
@@ -57,6 +58,7 @@ function mapJobListingRow(row: any): JobListing {
     posted_by_role: row.posted_by_role,
     hauler_id: row.hauler_id ? Number(row.hauler_id) : null,
     shipper_id: row.shipper_id ? Number(row.shipper_id) : null,
+    stakeholder_id: row.stakeholder_id ? Number(row.stakeholder_id) : null,
     title: row.title,
     description: row.description,
     required_skills: row.required_skills,
@@ -128,24 +130,27 @@ export async function createJobListing(input: {
 }): Promise<JobListing> {
   let haulerId: number | null = null;
   let shipperId: number | null = null;
+  let stakeholderId: number | null = null;
 
   if (input.role === "hauler") {
     haulerId = await ensureHaulerProfile(input.userId);
   } else if (input.role === "shipper") {
     shipperId = await ensureShipperProfile(input.userId);
+  } else if (input.role === "stakeholder") {
+    stakeholderId = await ensureStakeholderProfile(input.userId);
   }
 
   const result = await pool.query(
     `
     INSERT INTO job_listings (
-      posted_by_user_id, posted_by_role, hauler_id, shipper_id,
+      posted_by_user_id, posted_by_role, hauler_id, shipper_id, stakeholder_id,
       title, description, required_skills, job_type, location_type, location,
       salary, salary_frequency,
       benefits_accommodation, benefits_food, benefits_fuel, benefits_vehicle, benefits_bonus, benefits_others,
       contact_person, contact_phone, preferred_call_time, contact_email, photos,
       status, created_at, updated_at
     )
-    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, 'active', NOW(), NOW())
+    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, 'active', NOW(), NOW())
     RETURNING *
     `,
     [
@@ -153,6 +158,7 @@ export async function createJobListing(input: {
       input.role,
       haulerId,
       shipperId,
+      stakeholderId,
       input.title,
       input.description,
       input.requiredSkills ?? null,
@@ -179,7 +185,7 @@ export async function createJobListing(input: {
 }
 
 export async function listJobListings(filters?: {
-  role?: "hauler" | "shipper";
+  role?: "hauler" | "shipper" | "stakeholder";
   status?: "active" | "closed" | "filled";
   postedByUserId?: number;
   limit?: number;

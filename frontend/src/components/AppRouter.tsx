@@ -375,7 +375,14 @@ export function AppRouter({ showKeyboardShortcuts, onKeyboardShortcutsToggle }: 
                 <Routes>
                   <Route path="dashboard" element={<StakeholderDashboard />} />
                   <Route path="services" element={<StakeholderServices />} />
+                  <Route path="my-listings" element={<MyLoadsTab />} />
+                  <Route path="messages" element={<JobMessages />} />
+                  <Route path="post-job" element={<PostJob />} />
                   <Route path="job-board" element={<JobBoard />} />
+                  <Route path="post-buy-sell" element={<PostBuyAndSell />} />
+                  <Route path="buy-sell-board" element={<BuyAndSellBoard />} />
+                  <Route path="post-resource" element={<PostResource />} />
+                  <Route path="resources-board" element={<ResourcesBoard />} />
                   <Route path="bookings" element={<div>Bookings (Coming Soon)</div>} />
                   <Route path="marketplace" element={<MarketplaceTab userRole="stakeholder" />} />
                   <Route path="services/new" element={<PostService />} />

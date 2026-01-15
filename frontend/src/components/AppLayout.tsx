@@ -114,6 +114,8 @@ export function AppLayout({ children, userRole, onLogout }: AppLayoutProps) {
       routes: [
         { path: '/stakeholder/dashboard', icon: LayoutDashboard, label: 'Dashboard' },
         { path: '/stakeholder/services', icon: Wrench, label: 'My Services' },
+        { path: '/stakeholder/my-listings', icon: Package, label: 'My Listing' },
+        { path: '/stakeholder/messages', icon: Inbox, label: 'Messages' },
         { path: '/stakeholder/bookings', icon: Calendar, label: 'Bookings' },
         { path: '/stakeholder/marketplace', icon: ShoppingCart, label: 'Marketplace' },
         { path: '/stakeholder/earnings', icon: DollarSign, label: 'Earnings' },
@@ -356,8 +358,8 @@ export function AppLayout({ children, userRole, onLogout }: AppLayoutProps) {
           {/* Navigation */}
           <nav className="flex-1 overflow-y-auto p-2">
             <div className="space-y-1">
-              {/* Post a Dropdown - Only for Hauler and Shipper */}
-              {(userRole === 'hauler' || userRole === 'shipper') && (
+              {/* Post a Dropdown - For Hauler, Shipper, and Stakeholder */}
+              {(userRole === 'hauler' || userRole === 'shipper' || userRole === 'stakeholder') && (
                 <DropdownMenu>
                   <DropdownMenuTrigger asChild>
                     <button
@@ -445,6 +447,28 @@ export function AppLayout({ children, userRole, onLogout }: AppLayoutProps) {
                         </DropdownMenuItem>
                         <DropdownMenuItem
                           onClick={() => navigate('/hauler/post-resource')}
+                        >
+                          <Wrench className="w-4 h-4 mr-2" />
+                          Post a Resource
+                        </DropdownMenuItem>
+                      </>
+                    )}
+                    {userRole === 'stakeholder' && (
+                      <>
+                        <DropdownMenuItem
+                          onClick={() => navigate('/stakeholder/post-job')}
+                        >
+                          <Briefcase className="w-4 h-4 mr-2" />
+                          Post a Job
+                        </DropdownMenuItem>
+                        <DropdownMenuItem
+                          onClick={() => navigate('/stakeholder/post-buy-sell')}
+                        >
+                          <DollarSign className="w-4 h-4 mr-2" />
+                          Post Buy & Sell
+                        </DropdownMenuItem>
+                        <DropdownMenuItem
+                          onClick={() => navigate('/stakeholder/post-resource')}
                         >
                           <Wrench className="w-4 h-4 mr-2" />
                           Post a Resource
@@ -611,8 +635,8 @@ export function AppLayout({ children, userRole, onLogout }: AppLayoutProps) {
             </div>
 
             <div className="flex items-center gap-2">
-              {/* Board Dropdown - Only for Hauler and Shipper */}
-              {(userRole === 'hauler' || userRole === 'shipper') && (
+              {/* Board Dropdown - For Hauler, Shipper, and Stakeholder */}
+              {(userRole === 'hauler' || userRole === 'shipper' || userRole === 'stakeholder') && (
                 <>
                   <DropdownMenu>
                     <DropdownMenuTrigger asChild>
@@ -667,26 +691,24 @@ export function AppLayout({ children, userRole, onLogout }: AppLayoutProps) {
                         </DropdownMenuItem>
                       </>
                     )}
+                    {userRole === 'stakeholder' && (
+                      <>
+                        <DropdownMenuItem onClick={() => navigate('/stakeholder/job-board')}>
+                          <Briefcase className="w-4 h-4 mr-2" />
+                          Job Board
+                        </DropdownMenuItem>
+                        <DropdownMenuItem onClick={() => navigate('/stakeholder/buy-sell-board')}>
+                          <DollarSign className="w-4 h-4 mr-2" />
+                          Buy & Sell Board
+                        </DropdownMenuItem>
+                        <DropdownMenuItem onClick={() => navigate('/stakeholder/resources-board')}>
+                          <Wrench className="w-4 h-4 mr-2" />
+                          Resources Board
+                        </DropdownMenuItem>
+                      </>
+                    )}
                     </DropdownMenuContent>
                   </DropdownMenu>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    className="gap-2 bg-primary text-primary-foreground hover:bg-primary/90 border-primary"
-                    onClick={() => userRole === 'shipper' ? navigate('/shipper/resources-board') : navigate('/hauler/resources-board')}
-                  >
-                    <Wrench className="w-4 h-4 mr-2" />
-                    Resources Board
-                  </Button>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    className="gap-2 bg-primary text-primary-foreground hover:bg-primary/90 border-primary"
-                    onClick={() => userRole === 'shipper' ? navigate('/shipper/buy-sell-board') : navigate('/hauler/buy-sell-board')}
-                  >
-                    <DollarSign className="w-4 h-4 mr-2" />
-                    Buy & Sell Board
-                  </Button>
                 </>
               )}
 

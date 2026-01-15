@@ -24,9 +24,10 @@ function buildHeaders(method: string, hasJsonBody = true): HeadersInit {
 export interface ResourcesListing {
   id: number;
   posted_by_user_id: number;
-  posted_by_role: "hauler" | "shipper";
+  posted_by_role: "hauler" | "shipper" | "stakeholder";
   hauler_id: number | null;
   shipper_id: number | null;
+  stakeholder_id: number | null;
   resource_type: "logistics" | "insurance" | "washout" | "scale" | "hay" | "stud" | "salesyard" | "beefspotter";
   title: string;
   description: string | null;
@@ -84,7 +85,7 @@ export interface ApplyResourcesPayload {
 
 export interface ResourcesFilters {
   status?: "active" | "closed" | "archived";
-  role?: "hauler" | "shipper";
+  role?: "hauler" | "shipper" | "stakeholder";
   resource_type?: string;
   city?: string;
   state?: string;

@@ -24,9 +24,10 @@ function buildHeaders(method: string, hasJsonBody = true): HeadersInit {
 export interface BuyAndSellListing {
   id: number;
   posted_by_user_id: number;
-  posted_by_role: "hauler" | "shipper";
+  posted_by_role: "hauler" | "shipper" | "stakeholder";
   hauler_id: number | null;
   shipper_id: number | null;
+  stakeholder_id: number | null;
   listing_type: "for-sale" | "wanted" | "for-rent";
   category: "equipment" | "livestock" | "supplies" | "services" | "vehicles" | "trailers";
   title: string;
@@ -92,7 +93,7 @@ export interface ApplyBuyAndSellPayload {
 
 export interface BuyAndSellFilters {
   status?: "active" | "closed" | "sold";
-  role?: "hauler" | "shipper";
+  role?: "hauler" | "shipper" | "stakeholder";
   listing_type?: "for-sale" | "wanted" | "for-rent";
   category?: string;
   city?: string;
