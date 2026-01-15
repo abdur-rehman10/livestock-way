@@ -306,7 +306,7 @@ export default function JobMessages() {
         setBuySellThreads(threads);
         
         if (selectedThread && selectedThread.type === "buy-sell") {
-          const updatedThread = threads.find((t) => t.id === selectedThread.id);
+          const updatedThread = threads.find((t: BuySellApplicationThread) => t.id === selectedThread.id);
           if (updatedThread) {
             setSelectedThread((prev) => {
               if (prev && prev.type === "buy-sell" && prev.id === updatedThread.id) {
@@ -333,7 +333,7 @@ export default function JobMessages() {
   }, [userId, selectedThread]);
 
   const loadApplicantInfo = useCallback(async () => {
-    if (!selectedThread) return;
+    if (!selectedThread || selectedThread.type !== "job") return;
     try {
       const result = await fetchJobApplications(selectedThread.job_id);
       const application = result.items.find((app) => app.id === selectedThread.application_id);
@@ -525,13 +525,13 @@ export default function JobMessages() {
       }
     };
 
-    window.addEventListener("open-job-thread", handleOpenJobThread as EventListener);
-    window.addEventListener("open-buy-sell-thread", handleOpenBuySellThread as EventListener);
-    window.addEventListener("open-resources-thread", handleOpenResourcesThread as EventListener);
+    window.addEventListener("open-job-thread", handleOpenJobThread as unknown as EventListener);
+    window.addEventListener("open-buy-sell-thread", handleOpenBuySellThread as unknown as EventListener);
+    window.addEventListener("open-resources-thread", handleOpenResourcesThread as unknown as EventListener);
     return () => {
-      window.removeEventListener("open-job-thread", handleOpenJobThread as EventListener);
-      window.removeEventListener("open-buy-sell-thread", handleOpenBuySellThread as EventListener);
-      window.removeEventListener("open-resources-thread", handleOpenResourcesThread as EventListener);
+      window.removeEventListener("open-job-thread", handleOpenJobThread as unknown as EventListener);
+      window.removeEventListener("open-buy-sell-thread", handleOpenBuySellThread as unknown as EventListener);
+      window.removeEventListener("open-resources-thread", handleOpenResourcesThread as unknown as EventListener);
     };
   }, []);
 
@@ -1063,11 +1063,13 @@ export default function JobMessages() {
                     : resourcesDetails?.title}
               </DialogTitle>
               <DialogDescription>
-                {selectedThread?.type === "job" 
-                  ? `${jobDetails?.posted_by_role.charAt(0).toUpperCase() + jobDetails?.posted_by_role.slice(1)} Job`
-                  : selectedThread?.type === "buy-sell"
-                    ? `${buySellDetails?.listing_type.replace("-", " ").charAt(0).toUpperCase() + buySellDetails?.listing_type.replace("-", " ").slice(1)} • ${buySellDetails?.category.charAt(0).toUpperCase() + buySellDetails?.category.slice(1)}`
-                    : `Resource • ${resourcesDetails?.resource_type.charAt(0).toUpperCase() + resourcesDetails?.resource_type.slice(1)}`}
+                {selectedThread?.type === "job" && jobDetails
+                  ? `${jobDetails.posted_by_role?.charAt(0).toUpperCase() + jobDetails.posted_by_role?.slice(1)} Job`
+                  : selectedThread?.type === "buy-sell" && buySellDetails
+                    ? `${buySellDetails.listing_type?.replace("-", " ").charAt(0).toUpperCase() + buySellDetails.listing_type?.replace("-", " ").slice(1)} • ${buySellDetails.category?.charAt(0).toUpperCase() + buySellDetails.category?.slice(1)}`
+                    : selectedThread?.type === "resources" && resourcesDetails
+                      ? `Resource • ${resourcesDetails.resource_type?.charAt(0).toUpperCase() + resourcesDetails.resource_type?.slice(1)}`
+                      : ""}
               </DialogDescription>
             </DialogHeader>
 
