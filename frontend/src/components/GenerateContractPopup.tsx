@@ -162,7 +162,10 @@ export function GenerateContractPopup({ isOpen, onClose, onGenerate, onSaveDraft
             formDataFromInitial.priceType = value;
           } else {
             // For all other fields, use the value as-is (it should already be a string)
-            formDataFromInitial[key] = typeof value === 'string' ? value : String(value) as ContractFormData[typeof key];
+            const fieldValue = typeof value === 'string' ? value : String(value);
+            if (key !== 'priceType') {
+              (formDataFromInitial as any)[key] = fieldValue;
+            }
           }
         }
       });
@@ -201,7 +204,10 @@ export function GenerateContractPopup({ isOpen, onClose, onGenerate, onSaveDraft
           } else if (key === 'priceType' && (value === 'per-mile' || value === 'total')) {
             formDataFromInitial.priceType = value;
           } else {
-            formDataFromInitial[key] = typeof value === 'string' ? value : String(value) as ContractFormData[typeof key];
+            const fieldValue = typeof value === 'string' ? value : String(value);
+            if (key !== 'priceType') {
+              (formDataFromInitial as any)[key] = fieldValue;
+            }
           }
         }
       });

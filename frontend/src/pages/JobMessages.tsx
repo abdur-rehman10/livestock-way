@@ -731,7 +731,7 @@ export default function JobMessages() {
   // Only auto-scroll when messages are added, not when component re-renders
   const previousMessagesLengthRef = useRef<number>(0);
   const shouldScrollRef = useRef<boolean>(true);
-  const scrollTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const scrollTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   
   const scrollToBottom = useCallback((force = false) => {
     if (scrollTimeoutRef.current) {
@@ -1577,11 +1577,11 @@ export default function JobMessages() {
                             : "Not specified"}
                         </p>
                       </div>
-                      {loadOfferDetails.load.weight && (
+                      {(loadOfferDetails.load as any).weight && (
                         <div>
                           <p className="text-xs text-gray-500 dark:text-gray-400 mb-1">Estimated Weight</p>
                           <p className="text-sm text-gray-900 dark:text-white font-medium">
-                            {Number(loadOfferDetails.load.weight).toLocaleString()} kg
+                            {Number((loadOfferDetails.load as any).weight).toLocaleString()} kg
                           </p>
                         </div>
                       )}

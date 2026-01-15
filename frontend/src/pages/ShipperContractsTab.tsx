@@ -467,10 +467,10 @@ export default function ShipperContractsTab() {
                         <p className="text-sm font-medium">{selectedContract.load.quantity} head</p>
                       </div>
                     )}
-                    {selectedContract.load.weight && (
+                    {(selectedContract.load as any).weight && (
                       <div>
                         <p className="text-xs text-gray-500 mb-1">Weight</p>
-                        <p className="text-sm font-medium">{Number(selectedContract.load.weight).toLocaleString()} kg</p>
+                        <p className="text-sm font-medium">{Number((selectedContract.load as any).weight).toLocaleString()} kg</p>
                       </div>
                     )}
                     {selectedContract.load.pickup_date && (
