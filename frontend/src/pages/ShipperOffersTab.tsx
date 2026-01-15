@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import { toast } from "sonner";
 import { fetchLoadsByCreator, type Load as ApiLoad } from "../lib/api";
 import {
@@ -65,6 +66,7 @@ type ContractFormData = {
 };
 
 export default function ShipperOffersTab() {
+  const navigate = useNavigate();
   const shipperUserId = storage.get<string | null>(STORAGE_KEYS.USER_ID, null);
   const [loads, setLoads] = useState<ApiLoad[]>([]);
   const [selectedLoadId, setSelectedLoadId] = useState<number | null>(null);
@@ -887,6 +889,11 @@ export default function ShipperOffersTab() {
                                 variant="secondary"
                                 onClick={(e) => {
                                   e.stopPropagation();
+                                  // Navigate to messages page and open thread
+                                  window.dispatchEvent(new CustomEvent("open-load-offer-thread", {
+                                    detail: { offerId: Number(offer.id) }
+                                  }));
+                                  // Also open chat modal for backward compatibility
                                   handleOpenChatModal(offer.id);
                                 }}
                               >

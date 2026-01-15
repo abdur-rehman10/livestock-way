@@ -1,57 +1,33 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState, useMemo } from "react";
 import { toast } from "sonner";
-import { MessageSquare, FileText, CheckCircle, Clock, TruckIcon, MapPin, Plus, AlertCircle, Flag, Users, DollarSign, FileCheck, Activity } from 'lucide-react';
-import { Button } from "../components/ui/button";
-import { Badge } from "../components/ui/badge";
-import { Card } from "../components/ui/card";
-import { ScrollArea } from "../components/ui/scroll-area";
-import { GenerateContractPopup } from "../components/GenerateContractPopup";
-import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-  DialogDescription,
-} from "../components/ui/dialog";
+import { MessageSquare, FileText, CheckCircle, Clock, TruckIcon, AlertCircle, Flag, Users, DollarSign, FileCheck, Activity, X } from 'lucide-react';
+import { Button } from '../components/ui/button';
+import { Badge } from '../components/ui/badge';
+import { Card } from '../components/ui/card';
+import { ScrollArea } from '../components/ui/scroll-area';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '../components/ui/dialog';
 import {
   fetchContracts,
-  sendContract,
-  updateContract,
+  acceptContract,
+  rejectContract,
   type ContractRecord,
-} from "../api/marketplace";
-import { fetchLoadById, type LoadDetail } from "../lib/api";
-import { useNavigate } from "react-router-dom";
-
-type ContractFormData = {
-  priceAmount?: string | number;
-  priceType?: string;
-  paymentMethod?: string;
-  paymentSchedule?: string;
-  contractInfo?: {
-    haulerName?: string;
-    route?: { origin?: string; destination?: string };
-    animalType?: string;
-    headCount?: number;
-  };
-  [key: string]: unknown;
-};
+} from '../api/marketplace';
+import { fetchLoadById, type LoadDetail } from '../lib/api';
+import { useNavigate } from 'react-router-dom';
 
 interface ContractWithLoad extends ContractRecord {
   load?: LoadDetail | null;
+  shipperName?: string;
 }
 
-export default function ShipperContractsTab() {
+export default function HaulerContractsTab() {
   const [contracts, setContracts] = useState<ContractWithLoad[]>([]);
-  const [selectedId, setSelectedId] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
-  const [modalOpen, setModalOpen] = useState(false);
+  const [selectedContract, setSelectedContract] = useState<ContractWithLoad | null>(null);
   const [showViewDialog, setShowViewDialog] = useState(false);
+  const [showAcceptDialog, setShowAcceptDialog] = useState(false);
+  const [showRejectDialog, setShowRejectDialog] = useState(false);
   const navigate = useNavigate();
-
-  const selectedContract = useMemo(
-    () => contracts.find((contract) => contract.id === selectedId) ?? null,
-    [contracts, selectedId]
-  );
 
   const negotiationContracts = useMemo(() => 
     contracts.filter(c => ['DRAFT', 'SENT'].includes(c.status.toUpperCase())),
@@ -63,7 +39,12 @@ export default function ShipperContractsTab() {
     [contracts]
   );
 
-  const totalNegotiatedCost = useMemo(() => {
+  const receivedContracts = useMemo(() => 
+    negotiationContracts.filter(c => c.status.toUpperCase() === 'SENT'),
+    [negotiationContracts]
+  );
+
+  const totalEarnings = useMemo(() => {
     return confirmedContracts.reduce((total, contract) => {
       if (contract.price_amount) {
         const amount = Number(contract.price_amount);
@@ -76,7 +57,7 @@ export default function ShipperContractsTab() {
     }, 0);
   }, [confirmedContracts]);
 
-  const refresh = async () => {
+  const loadContracts = async () => {
     try {
       setLoading(true);
       const resp = await fetchContracts();
@@ -92,53 +73,51 @@ export default function ShipperContractsTab() {
         })
       );
       setContracts(contractsWithLoads);
-      if (!selectedId && contractsWithLoads.length) {
-        setSelectedId(contractsWithLoads[0].id);
-      }
     } catch (err: any) {
-      toast.error(err?.message ?? "Failed to load contracts.");
+      toast.error(err?.message ?? "Failed to load contracts");
     } finally {
       setLoading(false);
     }
   };
 
   useEffect(() => {
-    refresh();
+    loadContracts();
   }, []);
 
-  const handleSave = async (data: ContractFormData, sendNow: boolean) => {
+  const handleViewContract = (contract: ContractWithLoad) => {
+    setSelectedContract(contract);
+    setShowViewDialog(true);
+  };
+
+  const handleAccept = async () => {
     if (!selectedContract) return;
-    const priceAmountRaw = Number(data.priceAmount ?? 0);
-    const priceAmount = Number.isFinite(priceAmountRaw) ? priceAmountRaw : 0;
-    const payload: Record<string, unknown> = {
-      ...data,
-      contractInfo: data.contractInfo,
-    };
     try {
-      await updateContract(selectedContract.id, {
-        price_amount: priceAmount,
-        price_type: data.priceType,
-        payment_method: data.paymentMethod,
-        payment_schedule: data.paymentSchedule,
-        contract_payload: payload,
-      });
-      if (sendNow) {
-        await sendContract(selectedContract.id);
-      }
-      toast.success(sendNow ? "Contract sent." : "Contract updated.");
-      setModalOpen(false);
-      await refresh();
+      await acceptContract(selectedContract.id);
+      toast.success("Contract accepted successfully! You can now add this load to your trips.");
+      setShowAcceptDialog(false);
+      setShowViewDialog(false);
+      setSelectedContract(null);
+      await loadContracts();
+      // Navigate to trips after a short delay
+      setTimeout(() => {
+        navigate('/hauler/trips');
+      }, 1000);
     } catch (err: any) {
-      toast.error(err?.message ?? "Failed to update contract.");
+      toast.error(err?.message ?? "Failed to accept contract");
     }
   };
 
-  const handleViewContract = (contract: ContractWithLoad) => {
-    setSelectedId(contract.id);
-    if (contract.status.toUpperCase() === 'ACCEPTED') {
-      setShowViewDialog(true);
-    } else {
-      setModalOpen(true);
+  const handleReject = async () => {
+    if (!selectedContract) return;
+    try {
+      await rejectContract(selectedContract.id);
+      toast.success("Contract rejected");
+      setShowRejectDialog(false);
+      setShowViewDialog(false);
+      setSelectedContract(null);
+      await loadContracts();
+    } catch (err: any) {
+      toast.error(err?.message ?? "Failed to reject contract");
     }
   };
 
@@ -151,7 +130,7 @@ export default function ShipperContractsTab() {
       <div className="mb-8">
         <h1 className="mb-2 text-2xl font-semibold">My Contracts</h1>
         <p className="text-sm text-gray-500">
-          Once contract is generated and confirmed by hauler, Hauler can generate trip and you can view it in your Trips
+          Once contract is generated by shipper and confirmed by you, you can add this load to your trips
         </p>
       </div>
 
@@ -160,12 +139,12 @@ export default function ShipperContractsTab() {
         <Card className="p-4 hover:shadow-lg transition-shadow cursor-pointer">
           <div className="flex items-center justify-between mb-3">
             <div className="w-10 h-10 rounded-lg flex items-center justify-center" style={{ backgroundColor: '#e8f7f1' }}>
-              <Users className="w-5 h-5" style={{ color: '#53ca97' }} />
+              <Users className="w-5 h-5" style={{ color: '#42b883' }} />
             </div>
           </div>
           <div className="text-2xl mb-1">{contracts.length}</div>
-          <div className="text-sm text-gray-600">Total Connections Made</div>
-          <div className="text-xs text-gray-500 mt-2">With haulers</div>
+          <div className="text-sm text-gray-600">Total Contracts</div>
+          <div className="text-xs text-gray-500 mt-2">All contracts</div>
         </Card>
 
         <Card className="p-4 hover:shadow-lg transition-shadow cursor-pointer">
@@ -174,9 +153,9 @@ export default function ShipperContractsTab() {
               <DollarSign className="w-5 h-5 text-blue-600" />
             </div>
           </div>
-          <div className="text-2xl mb-1">${(totalNegotiatedCost / 1000).toFixed(1)}K</div>
-          <div className="text-sm text-gray-600">Total Cost Negotiated</div>
-          <div className="text-xs text-gray-500 mt-2">Across all contracts</div>
+          <div className="text-2xl mb-1">${(totalEarnings / 1000).toFixed(1)}K</div>
+          <div className="text-sm text-gray-600">Total Earnings</div>
+          <div className="text-xs text-gray-500 mt-2">From confirmed contracts</div>
         </Card>
 
         <Card className="p-4 hover:shadow-lg transition-shadow cursor-pointer">
@@ -186,8 +165,8 @@ export default function ShipperContractsTab() {
             </div>
           </div>
           <div className="text-2xl mb-1">{confirmedContracts.length}</div>
-          <div className="text-sm text-gray-600">Total Contracts Made</div>
-          <div className="text-xs text-gray-500 mt-2">Successfully confirmed</div>
+          <div className="text-sm text-gray-600">Confirmed Contracts</div>
+          <div className="text-xs text-gray-500 mt-2">Ready for trips</div>
         </Card>
 
         <Card className="p-4 hover:shadow-lg transition-shadow cursor-pointer">
@@ -202,166 +181,274 @@ export default function ShipperContractsTab() {
         </Card>
       </div>
 
+      {/* Action Required Notification */}
+      {receivedContracts.length > 0 && (
+        <Card className="p-5 mb-8 border-orange-200 bg-orange-50">
+          <div className="flex items-start gap-3">
+            <AlertCircle className="w-5 h-5 text-orange-500 mt-0.5" />
+            <div className="flex-1">
+              <p className="text-sm text-orange-700">
+                <strong>Action Required:</strong> You have {receivedContracts.length} contract(s) awaiting your response. Please review and accept or reject them.
+              </p>
+            </div>
+          </div>
+        </Card>
+      )}
+
       {/* Important Message */}
       <Card className="p-5 mb-8 border-blue-200 bg-blue-50">
         <div className="flex items-start gap-3">
           <AlertCircle className="w-5 h-5 text-blue-500 mt-0.5" />
           <div className="flex-1">
             <p className="text-sm text-blue-700">
-              <strong>Important:</strong> Please negotiate all terms, pricing, and conditions through messages or phone calls before submitting a contract. This ensures both parties are aligned on expectations.
+              <strong>Important:</strong> Please review all contract terms carefully before accepting. Once accepted, the contract will be added to your available trips.
             </p>
           </div>
         </div>
       </Card>
 
-      {/* Under Negotiation Section */}
+      {/* Two Box Layout for Negotiations */}
       <div className="mb-10">
-        <div className="flex items-center gap-2 mb-6">
-          <Clock className="w-5 h-5" style={{ color: '#53ca97' }} />
-          <h2 className="text-xl font-semibold">Under Negotiation ({negotiationContracts.length})</h2>
-        </div>
-
-        <div className="space-y-5">
-          {negotiationContracts.map((contract) => (
-            <Card key={contract.id} className="p-6 hover:shadow-md transition-all">
-              <div className="flex items-start justify-between gap-4">
-                <div className="flex-1">
-                  <div className="flex items-center gap-2 mb-4">
-                    <h3 className="text-lg font-semibold">Contract #{contract.id}</h3>
-                    <Badge
-                      className="text-xs px-2 py-0.5 capitalize"
-                      variant={contract.status.toUpperCase() === 'SENT' ? 'default' : 'outline'}
-                      style={contract.status.toUpperCase() === 'SENT' ? { backgroundColor: '#53ca97', color: 'white' } : {}}
-                    >
-                      {contract.status.toLowerCase()}
-                    </Badge>
-                  </div>
-                  
-                  {contract.load && (
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
-                      <div className="flex items-center gap-2 text-sm text-gray-600">
-                        <MapPin className="w-4 h-4" />
-                        <span>{contract.load.pickup_location} → {contract.load.dropoff_location}</span>
-                      </div>
-                      {contract.load.species && (
-                        <div className="flex items-center gap-2 text-sm text-gray-600">
-                          <TruckIcon className="w-4 h-4" />
-                          <span className="capitalize">{contract.load.species}{contract.load.quantity ? ` - ${contract.load.quantity} head` : ''}</span>
+        <h2 className="text-xl font-semibold mb-6">Negotiations</h2>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+          {/* Box 1: Awaiting Your Response */}
+          <Card className="p-6 border-2 flex flex-col" style={{ borderColor: '#42b883', minHeight: '600px' }}>
+            <h3 className="mb-5 flex items-center gap-2 flex-shrink-0 text-lg font-semibold">
+              <Clock className="w-5 h-5" style={{ color: '#42b883' }} />
+              Awaiting Your Response ({receivedContracts.length})
+            </h3>
+            <ScrollArea className="flex-1 pr-2">
+              <div className="space-y-4">
+                {receivedContracts.length > 0 ? (
+                  receivedContracts.map((contract) => (
+                    <Card key={contract.id} className="p-5 hover:shadow-md transition-all">
+                      <div className="flex items-start gap-4">
+                        <div className="w-12 h-12 rounded-full flex items-center justify-center flex-shrink-0" style={{ backgroundColor: '#e8f7f1' }}>
+                          <FileText className="w-6 h-6" style={{ color: '#42b883' }} />
                         </div>
-                      )}
-                    </div>
-                  )}
+                        
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-start justify-between gap-2 mb-3">
+                            <div className="flex-1 min-w-0">
+                              <h4 className="text-base font-semibold mb-2 truncate">Contract #{contract.id}</h4>
+                              {contract.load && (
+                                <div className="flex items-center gap-2 text-xs text-gray-600 flex-wrap">
+                                  <span className="flex items-center gap-1">
+                                    <TruckIcon className="w-3 h-3" />
+                                    {contract.load.pickup_location} → {contract.load.dropoff_location}
+                                  </span>
+                                  {contract.load.species && (
+                                    <>
+                                      <span>•</span>
+                                      <span className="capitalize">{contract.load.species}</span>
+                                    </>
+                                  )}
+                                  {contract.load.quantity && (
+                                    <>
+                                      <span>•</span>
+                                      <span>{contract.load.quantity} head</span>
+                                    </>
+                                  )}
+                                </div>
+                              )}
+                            </div>
+                            <Badge className="px-2 py-1 text-xs" style={{ backgroundColor: '#ef4444', color: 'white' }}>
+                              New
+                            </Badge>
+                          </div>
 
-                  <div className="flex items-center gap-4 mb-4">
-                    <p className="text-sm font-medium" style={{ color: '#53ca97' }}>
-                      Contract Value: ${contract.price_amount ? Number(contract.price_amount).toLocaleString() : '0.00'}{contract.price_type === 'per-mile' ? '/mile' : ' total'}
-                    </p>
-                    <p className="text-xs text-gray-400">
-                      {contract.sent_at ? `Sent: ${new Date(contract.sent_at).toLocaleDateString()}` : `Created: ${new Date(contract.created_at).toLocaleDateString()}`}
-                    </p>
+                          <div className="flex items-center justify-between gap-4 mb-4">
+                            <div>
+                              <p className="text-xs text-gray-500 mb-1">Contract Price</p>
+                              <p className="text-lg font-semibold" style={{ color: '#42b883' }}>
+                                ${contract.price_amount ? Number(contract.price_amount).toLocaleString() : '0.00'}{contract.price_type === 'per-mile' ? '/mi' : ''}
+                              </p>
+                            </div>
+                            <div className="text-right">
+                              <p className="text-xs text-gray-500 mb-1">Sent</p>
+                              <p className="text-xs text-gray-600">
+                                {contract.sent_at ? new Date(contract.sent_at).toLocaleDateString() : '—'}
+                              </p>
+                            </div>
+                          </div>
+
+                          <div className="flex gap-3 flex-wrap">
+                            <Button
+                              onClick={() => handleViewContract(contract)}
+                              variant="outline"
+                              className="px-4 py-2 text-sm flex items-center gap-1"
+                            >
+                              <FileText className="w-4 h-4" />
+                              View Contract
+                            </Button>
+                            <Button
+                              onClick={() => {
+                                setSelectedContract(contract);
+                                setShowAcceptDialog(true);
+                              }}
+                              className="px-4 py-2 text-sm"
+                              style={{ backgroundColor: '#42b883', color: 'white' }}
+                            >
+                              <CheckCircle className="w-4 h-4 mr-1" />
+                              Accept
+                            </Button>
+                            <Button
+                              onClick={() => {
+                                setSelectedContract(contract);
+                                setShowRejectDialog(true);
+                              }}
+                              variant="outline"
+                              className="px-4 py-2 text-sm text-red-600 border-red-600 hover:bg-red-50"
+                            >
+                              <X className="w-4 h-4 mr-1" />
+                              Reject
+                            </Button>
+                          </div>
+                        </div>
+                      </div>
+                    </Card>
+                  ))
+                ) : (
+                  <div className="text-center py-8 text-gray-500 text-sm">
+                    No contracts awaiting your response
                   </div>
-                </div>
-
-                <div className="flex flex-col gap-3 min-w-[140px]">
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    className="px-5 py-2.5 text-sm whitespace-nowrap"
-                    onClick={() => handleViewContract(contract)}
-                  >
-                    <FileText className="w-4 h-4 mr-2" />
-                    {['DRAFT', 'SENT'].includes(contract.status.toUpperCase()) ? 'View & Edit' : 'View Contract'}
-                  </Button>
-                  {contract.status.toUpperCase() === 'DRAFT' && (
-                    <Button
-                      size="sm"
-                      className="px-5 py-2.5 text-sm whitespace-nowrap"
-                      style={{ backgroundColor: '#53ca97', color: 'white' }}
-                      onClick={async () => {
-                        setSelectedId(contract.id);
-                        await handleSave(
-                          (contract.contract_payload ?? {}) as ContractFormData,
-                          true
-                        );
-                      }}
-                    >
-                      <FileText className="w-4 h-4 mr-2" />
-                      Send Contract
-                    </Button>
-                  )}
-                </div>
+                )}
               </div>
-            </Card>
-          ))}
+            </ScrollArea>
+          </Card>
+
+          {/* Box 2: Drafts (if any) */}
+          <Card className="p-6 border-2 border-gray-300 flex flex-col" style={{ minHeight: '600px' }}>
+            <h3 className="mb-5 flex items-center gap-2 flex-shrink-0 text-lg font-semibold">
+              <Clock className="w-5 h-5 text-gray-600" />
+              Draft Contracts ({negotiationContracts.filter(c => c.status.toUpperCase() === 'DRAFT').length})
+            </h3>
+            <ScrollArea className="flex-1 pr-2">
+              <div className="space-y-4">
+                {negotiationContracts.filter(c => c.status.toUpperCase() === 'DRAFT').length > 0 ? (
+                  negotiationContracts.filter(c => c.status.toUpperCase() === 'DRAFT').map((contract) => (
+                    <Card key={contract.id} className="p-5 hover:shadow-md transition-all bg-gray-50">
+                      <div className="flex items-start gap-4">
+                        <div className="w-12 h-12 rounded-full bg-gray-300 flex items-center justify-center flex-shrink-0">
+                          <FileText className="w-6 h-6 text-gray-600" />
+                        </div>
+                        
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-start justify-between gap-2 mb-3">
+                            <div className="flex-1 min-w-0">
+                              <h4 className="text-base font-semibold mb-2 truncate">Contract #{contract.id}</h4>
+                              {contract.load && (
+                                <div className="flex items-center gap-2 text-xs text-gray-600 flex-wrap">
+                                  <span className="flex items-center gap-1">
+                                    <TruckIcon className="w-3 h-3" />
+                                    {contract.load.pickup_location} → {contract.load.dropoff_location}
+                                  </span>
+                                </div>
+                              )}
+                            </div>
+                            <Badge variant="outline" className="px-2 py-1 text-xs">
+                              Draft
+                            </Badge>
+                          </div>
+
+                          <p className="text-xs text-gray-400 mt-2">
+                            Waiting for shipper to send contract...
+                          </p>
+                        </div>
+                      </div>
+                    </Card>
+                  ))
+                ) : (
+                  <div className="text-center py-8 text-gray-500 text-sm">
+                    No draft contracts
+                  </div>
+                )}
+              </div>
+            </ScrollArea>
+          </Card>
         </div>
       </div>
 
-      {/* Confirmed Contracts Section */}
-      <div className="pt-6">
-        <div className="flex items-center gap-2 mb-6">
-          <CheckCircle className="w-5 h-5" style={{ color: '#53ca97' }} />
-          <h2 className="text-xl font-semibold">Confirmed Contracts ({confirmedContracts.length})</h2>
+      {/* Confirmed Contracts */}
+      <div className="mb-10 pt-6">
+        <div className="flex items-center justify-between mb-6">
+          <h3 className="flex items-center gap-2 text-xl font-semibold">
+            <CheckCircle className="w-5 h-5 text-green-600" />
+            Confirmed Contracts ({confirmedContracts.length})
+          </h3>
         </div>
-
+        
         <div className="space-y-5">
           {confirmedContracts.map((contract) => (
-            <Card key={contract.id} className="p-6 border-green-200 bg-green-50">
-              <div className="flex items-start justify-between gap-4">
-                <div className="flex-1">
-                  <div className="flex items-center gap-2 mb-3">
-                    <h3 className="text-base">Contract #{contract.id}</h3>
-                    <Badge
-                      className="text-xs px-2 py-0.5"
-                      style={{ backgroundColor: '#53ca97', color: 'white' }}
-                    >
+            <Card key={contract.id} className="p-6 hover:shadow-md transition-all border-green-200 bg-green-50">
+              <div className="flex items-start gap-4">
+                <div className="w-12 h-12 rounded-full bg-green-200 flex items-center justify-center flex-shrink-0">
+                  <CheckCircle className="w-6 h-6 text-green-600" />
+                </div>
+                
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-start justify-between gap-2 mb-3">
+                    <div className="flex-1 min-w-0">
+                      <h4 className="text-base font-semibold mb-2 truncate">Contract #{contract.id}</h4>
+                      {contract.load && (
+                        <div className="flex items-center gap-2 text-xs text-gray-600 flex-wrap">
+                          <span className="flex items-center gap-1">
+                            <TruckIcon className="w-3 h-3" />
+                            {contract.load.pickup_location} → {contract.load.dropoff_location}
+                          </span>
+                          {contract.load.species && (
+                            <>
+                              <span>•</span>
+                              <span className="capitalize">{contract.load.species}</span>
+                            </>
+                          )}
+                          {contract.load.quantity && (
+                            <>
+                              <span>•</span>
+                              <span>{contract.load.quantity} head</span>
+                            </>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                    <Badge className="px-2 py-1 text-xs" style={{ backgroundColor: '#42b883', color: 'white' }}>
                       Confirmed
                     </Badge>
                   </div>
-                  
-                  {contract.load && (
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mb-3">
-                      <div className="flex items-center gap-2 text-sm text-gray-600">
-                        <MapPin className="w-4 h-4" />
-                        <span>{contract.load.pickup_location} → {contract.load.dropoff_location}</span>
-                      </div>
-                      {contract.load.species && (
-                        <div className="flex items-center gap-2 text-sm text-gray-600">
-                          <TruckIcon className="w-4 h-4" />
-                          <span className="capitalize">{contract.load.species}{contract.load.quantity ? ` - ${contract.load.quantity} head` : ''}</span>
-                        </div>
-                      )}
+
+                  <div className="flex items-center justify-between gap-4 mb-4">
+                    <div>
+                      <p className="text-xs text-gray-500 mb-1">Agreed Price</p>
+                      <p className="text-lg font-semibold text-green-600">
+                        ${contract.price_amount ? Number(contract.price_amount).toLocaleString() : '0.00'}{contract.price_type === 'per-mile' ? '/mi' : ''}
+                      </p>
                     </div>
-                  )}
-
-                  <div className="flex items-center gap-4 mb-4">
-                    <p className="text-sm font-medium" style={{ color: '#53ca97' }}>
-                      Contract Value: ${contract.price_amount ? Number(contract.price_amount).toLocaleString() : '0.00'}{contract.price_type === 'per-mile' ? '/mile' : ' total'}
-                    </p>
-                    <p className="text-xs text-gray-400">
-                      {contract.accepted_at ? `Accepted: ${new Date(contract.accepted_at).toLocaleDateString()}` : `Confirmed: ${new Date(contract.updated_at).toLocaleDateString()}`}
-                    </p>
+                    <div className="text-right">
+                      <p className="text-xs text-gray-500 mb-1">Confirmed</p>
+                      <p className="text-xs text-gray-600">
+                        {contract.accepted_at ? new Date(contract.accepted_at).toLocaleDateString() : '—'}
+                      </p>
+                    </div>
                   </div>
-                </div>
 
-                <div className="flex flex-col gap-3 min-w-[140px]">
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    className="px-5 py-2.5 text-sm whitespace-nowrap"
-                    onClick={() => handleViewContract(contract)}
-                  >
-                    <FileText className="w-4 h-4 mr-2" />
-                    View Contract
-                  </Button>
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    className="px-5 py-2.5 text-sm whitespace-nowrap"
-                    onClick={() => navigate('/shipper/trips')}
-                  >
-                    <TruckIcon className="w-4 h-4 mr-2" />
-                    View Trips
-                  </Button>
+                  <div className="flex gap-3 flex-wrap">
+                    <Button
+                      onClick={() => handleViewContract(contract)}
+                      variant="outline"
+                      className="px-5 py-2.5 text-sm flex items-center gap-1"
+                    >
+                      <FileText className="w-4 h-4" />
+                      View Contract
+                    </Button>
+                    <Button
+                      onClick={() => navigate('/hauler/trips')}
+                      variant="outline"
+                      className="px-5 py-2.5 text-sm flex items-center gap-1"
+                    >
+                      <TruckIcon className="w-4 h-4" />
+                      View Trips
+                    </Button>
+                  </div>
                 </div>
               </div>
             </Card>
@@ -369,80 +456,14 @@ export default function ShipperContractsTab() {
         </div>
       </div>
 
-      {selectedContract && ['DRAFT', 'SENT'].includes(selectedContract.status.toUpperCase()) && (
-        <GenerateContractPopup
-          isOpen={modalOpen}
-          onClose={() => setModalOpen(false)}
-          onGenerate={(data) => handleSave(data, true)}
-          onSaveDraft={(data) => handleSave(data, false)}
-          isEditMode={true}
-          contractInfo={
-            (() => {
-              const payload = selectedContract.contract_payload as ContractFormData | undefined;
-              const info = payload?.contractInfo;
-              if (!info && selectedContract.load) {
-                // Build from load data if contractInfo is missing
-                return {
-                  haulerName: 'Hauler',
-                  route: {
-                    origin: selectedContract.load.pickup_location || '',
-                    destination: selectedContract.load.dropoff_location || '',
-                  },
-                  animalType: selectedContract.load.species || '',
-                  headCount: selectedContract.load.quantity || 0,
-                  price: selectedContract.price_amount ? Number(selectedContract.price_amount) : 0,
-                  priceType: (selectedContract.price_type === 'per-mile' ? 'per-mile' : 'total') as 'per-mile' | 'total',
-                };
-              }
-              if (!info) return undefined;
-              // Ensure all required fields are present, otherwise return undefined
-              if (
-                info.haulerName &&
-                info.route?.origin &&
-                info.route?.destination &&
-                info.animalType &&
-                info.headCount !== undefined &&
-                info.headCount !== null
-              ) {
-                const price = selectedContract.price_amount 
-                  ? Number(selectedContract.price_amount) 
-                  : (typeof (payload as any)?.price === 'number' ? (payload as any).price : 0);
-                const priceType = selectedContract.price_type === 'per-mile' 
-                  ? 'per-mile' 
-                  : 'total';
-                return {
-                  haulerName: info.haulerName,
-                  route: {
-                    origin: info.route.origin,
-                    destination: info.route.destination,
-                  },
-                  animalType: info.animalType,
-                  headCount: info.headCount,
-                  price,
-                  priceType: priceType as 'per-mile' | 'total',
-                };
-              }
-              return undefined;
-            })()
-          }
-          initialData={{
-            ...(selectedContract.contract_payload ?? {}),
-            priceAmount: selectedContract.price_amount ? String(selectedContract.price_amount) : "",
-            priceType: (selectedContract.price_type === 'per-mile' ? 'per-mile' : 'total') as 'per-mile' | 'total',
-            paymentMethod: selectedContract.payment_method ?? undefined,
-            paymentSchedule: selectedContract.payment_schedule ?? undefined,
-          }}
-        />
-      )}
-
-      {/* View Contract Dialog for Confirmed Contracts */}
-      {selectedContract && selectedContract.status.toUpperCase() === 'ACCEPTED' && (
+      {/* View Contract Dialog */}
+      {selectedContract && (
         <Dialog open={showViewDialog} onOpenChange={setShowViewDialog}>
           <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
             <DialogHeader>
               <DialogTitle>Contract #{selectedContract.id}</DialogTitle>
               <DialogDescription>
-                Contract Status: <Badge className="capitalize" style={{ backgroundColor: '#53ca97', color: 'white' }}>Confirmed</Badge>
+                Contract Status: <Badge className="capitalize">{selectedContract.status.toLowerCase()}</Badge>
               </DialogDescription>
             </DialogHeader>
             <div className="space-y-4">
@@ -489,7 +510,7 @@ export default function ShipperContractsTab() {
                 <div className="space-y-2">
                   <div>
                     <p className="text-xs text-gray-500">Price</p>
-                    <p className="text-lg font-semibold" style={{ color: '#53ca97' }}>
+                    <p className="text-lg font-semibold" style={{ color: '#42b883' }}>
                       ${selectedContract.price_amount ? Number(selectedContract.price_amount).toLocaleString() : '0.00'}{selectedContract.price_type === 'per-mile' ? '/mile' : ' total'}
                     </p>
                   </div>
@@ -841,10 +862,83 @@ export default function ShipperContractsTab() {
                   </div>
                 </div>
               )}
+              {selectedContract.status.toUpperCase() === 'SENT' && (
+                <div className="flex gap-2 pt-4">
+                  <Button
+                    onClick={() => {
+                      setShowViewDialog(false);
+                      setShowAcceptDialog(true);
+                    }}
+                    className="flex-1"
+                    style={{ backgroundColor: '#42b883', color: 'white' }}
+                  >
+                    <CheckCircle className="w-4 h-4 mr-2" />
+                    Accept Contract
+                  </Button>
+                  <Button
+                    onClick={() => {
+                      setShowViewDialog(false);
+                      setShowRejectDialog(true);
+                    }}
+                    variant="outline"
+                    className="flex-1 text-red-600 border-red-600 hover:bg-red-50"
+                  >
+                    <X className="w-4 h-4 mr-2" />
+                    Reject Contract
+                  </Button>
+                </div>
+              )}
             </div>
           </DialogContent>
         </Dialog>
       )}
+
+      {/* Accept Confirmation Dialog */}
+      <Dialog open={showAcceptDialog} onOpenChange={setShowAcceptDialog}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Accept Contract</DialogTitle>
+            <DialogDescription>
+              Are you sure you want to accept this contract? Once accepted, it will be added to your trips.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="flex gap-2 justify-end pt-4">
+            <Button variant="outline" onClick={() => setShowAcceptDialog(false)}>
+              Cancel
+            </Button>
+            <Button
+              onClick={handleAccept}
+              style={{ backgroundColor: '#42b883', color: 'white' }}
+            >
+              Accept Contract
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Reject Confirmation Dialog */}
+      <Dialog open={showRejectDialog} onOpenChange={setShowRejectDialog}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Reject Contract</DialogTitle>
+            <DialogDescription>
+              Are you sure you want to reject this contract? This action cannot be undone.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="flex gap-2 justify-end pt-4">
+            <Button variant="outline" onClick={() => setShowRejectDialog(false)}>
+              Cancel
+            </Button>
+            <Button
+              onClick={handleReject}
+              variant="outline"
+              className="text-red-600 border-red-600 hover:bg-red-50"
+            >
+              Reject Contract
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

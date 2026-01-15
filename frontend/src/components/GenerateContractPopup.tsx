@@ -59,9 +59,10 @@ interface GenerateContractPopupProps {
     price: number;
     priceType: 'per-mile' | 'total';
   };
+  isEditMode?: boolean;
 }
 
-export function GenerateContractPopup({ isOpen, onClose, onGenerate, onSaveDraft, initialData, contractInfo }: GenerateContractPopupProps) {
+export function GenerateContractPopup({ isOpen, onClose, onGenerate, onSaveDraft, initialData, contractInfo, isEditMode = false }: GenerateContractPopupProps) {
   const [step, setStep] = useState(1);
   const [formData, setFormData] = useState<ContractFormData>({
     // Basic Contract Info
@@ -123,25 +124,107 @@ export function GenerateContractPopup({ isOpen, onClose, onGenerate, onSaveDraft
     priceType: contractInfo?.priceType ?? 'total',
   });
   const wasOpenRef = useRef(false);
+  const initialDataRef = useRef<typeof initialData>();
 
   useEffect(() => {
     const wasOpen = wasOpenRef.current;
     wasOpenRef.current = isOpen;
-    if (!isOpen || wasOpen) return;
-    if (contractInfo) {
+    
+    // When popup opens, populate form with initialData
+    if (isOpen && !wasOpen && initialData) {
+      // Convert initialData to proper format for form
+      const formDataFromInitial: Partial<ContractFormData> = {};
+      
+      // List of all ContractFormData fields
+      const formFields: (keyof ContractFormData)[] = [
+        'contractType', 'contractDuration', 'paymentMethod', 'paymentSchedule',
+        'depositRequired', 'depositPercentage', 'pickupDate', 'pickupTime',
+        'deliveryDate', 'deliveryTime', 'estimatedDistance', 'routeType',
+        'restStopsRequired', 'restStopInterval', 'temperatureMonitoring',
+        'temperatureRange', 'ventilationRequired', 'waterAccessRequired',
+        'feedingSchedule', 'insuranceCoverage', 'liabilityLimit',
+        'cargoInsurance', 'additionalInsurance', 'healthCertificates',
+        'movementPermits', 'dotCompliance', 'animalWelfareCompliance',
+        'specialHandling', 'equipmentRequirements', 'emergencyContact',
+        'emergencyPhone', 'veterinarianOnCall', 'cancellationPolicy',
+        'lateFeePolicy', 'disputeResolution', 'forcemajeure',
+        'additionalTerms', 'specialInstructions', 'priceAmount', 'priceType'
+      ];
+      
+      // Map all fields from initialData, converting types as needed
+      formFields.forEach((key) => {
+        const value = initialData[key];
+        if (value !== undefined && value !== null) {
+          // Convert priceAmount to string if it's a number
+          if (key === 'priceAmount') {
+            formDataFromInitial.priceAmount = String(value);
+          } else if (key === 'priceType' && (value === 'per-mile' || value === 'total')) {
+            formDataFromInitial.priceType = value;
+          } else {
+            // For all other fields, use the value as-is (it should already be a string)
+            formDataFromInitial[key] = typeof value === 'string' ? value : String(value) as ContractFormData[typeof key];
+          }
+        }
+      });
+      
+      setFormData((prev) => ({
+        ...prev,
+        ...formDataFromInitial,
+      }));
+      initialDataRef.current = initialData;
+    }
+    
+    // Also update when initialData changes while popup is open (for editing)
+    if (isOpen && initialData && initialData !== initialDataRef.current) {
+      const formDataFromInitial: Partial<ContractFormData> = {};
+      
+      const formFields: (keyof ContractFormData)[] = [
+        'contractType', 'contractDuration', 'paymentMethod', 'paymentSchedule',
+        'depositRequired', 'depositPercentage', 'pickupDate', 'pickupTime',
+        'deliveryDate', 'deliveryTime', 'estimatedDistance', 'routeType',
+        'restStopsRequired', 'restStopInterval', 'temperatureMonitoring',
+        'temperatureRange', 'ventilationRequired', 'waterAccessRequired',
+        'feedingSchedule', 'insuranceCoverage', 'liabilityLimit',
+        'cargoInsurance', 'additionalInsurance', 'healthCertificates',
+        'movementPermits', 'dotCompliance', 'animalWelfareCompliance',
+        'specialHandling', 'equipmentRequirements', 'emergencyContact',
+        'emergencyPhone', 'veterinarianOnCall', 'cancellationPolicy',
+        'lateFeePolicy', 'disputeResolution', 'forcemajeure',
+        'additionalTerms', 'specialInstructions', 'priceAmount', 'priceType'
+      ];
+      
+      formFields.forEach((key) => {
+        const value = initialData[key];
+        if (value !== undefined && value !== null) {
+          if (key === 'priceAmount') {
+            formDataFromInitial.priceAmount = String(value);
+          } else if (key === 'priceType' && (value === 'per-mile' || value === 'total')) {
+            formDataFromInitial.priceType = value;
+          } else {
+            formDataFromInitial[key] = typeof value === 'string' ? value : String(value) as ContractFormData[typeof key];
+          }
+        }
+      });
+      
+      setFormData((prev) => ({
+        ...prev,
+        ...formDataFromInitial,
+      }));
+      initialDataRef.current = initialData;
+    }
+    
+    // Handle contractInfo for price
+    if (isOpen && contractInfo) {
       setFormData((prev) => ({
         ...prev,
         priceAmount: contractInfo.price ? String(contractInfo.price) : prev.priceAmount,
         priceType: contractInfo.priceType ?? prev.priceType,
       }));
     }
-    if (initialData) {
-      setFormData((prev) => ({
-        ...prev,
-        ...initialData,
-      }));
+    
+    if (isOpen && !wasOpen) {
+      setStep(1);
     }
-    setStep(1);
   }, [contractInfo, initialData, isOpen]);
 
   if (!isOpen) return null;
@@ -1074,7 +1157,7 @@ export function GenerateContractPopup({ isOpen, onClose, onGenerate, onSaveDraft
                 style={{ backgroundColor: '#53ca97', color: 'white' }}
               >
                 <FileText className="w-4 h-4" />
-                Generate Contract
+                {isEditMode ? 'Update Contract' : 'Generate Contract'}
               </Button>
             </div>
           )}

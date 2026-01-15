@@ -209,6 +209,15 @@ export interface LoadOfferRecord {
   payment_mode?: PaymentMode;
   direct_payment_disclaimer_accepted_at?: string | null;
   direct_payment_disclaimer_version?: string | null;
+  truck_id?: string | null;
+  truck?: {
+    id: string;
+    plate_number: string;
+    truck_type: string;
+    truck_name: string | null;
+    capacity: number | null;
+    species_supported: string | null;
+  } | null;
 }
 
 export interface TruckAvailabilityRecord {
@@ -371,9 +380,15 @@ export async function getLoadOfferById(
       SELECT lo.*,
              l.payment_mode                           AS load_payment_mode,
              l.direct_payment_disclaimer_accepted_at  AS load_direct_payment_disclaimer_accepted_at,
-             l.direct_payment_disclaimer_version      AS load_direct_payment_disclaimer_version
+             l.direct_payment_disclaimer_version      AS load_direct_payment_disclaimer_version,
+             t.id::text                               AS truck_id_from_truck,
+             t.plate_number                           AS truck_plate_number,
+             t.truck_type                             AS truck_truck_type,
+             t.notes                                  AS truck_notes,
+             t.capacity_weight_kg                     AS truck_capacity
       FROM load_offers lo
       LEFT JOIN loads l ON l.id = lo.load_id
+      LEFT JOIN trucks t ON t.id = lo.truck_id
       WHERE lo.id = $1
     `,
     [offerId]
@@ -390,9 +405,15 @@ export async function getLatestOfferForHauler(
       SELECT lo.*,
              l.payment_mode                           AS load_payment_mode,
              l.direct_payment_disclaimer_accepted_at  AS load_direct_payment_disclaimer_accepted_at,
-             l.direct_payment_disclaimer_version      AS load_direct_payment_disclaimer_version
+             l.direct_payment_disclaimer_version      AS load_direct_payment_disclaimer_version,
+             t.id::text                               AS truck_id_from_truck,
+             t.plate_number                           AS truck_plate_number,
+             t.truck_type                             AS truck_truck_type,
+             t.notes                                  AS truck_notes,
+             t.capacity_weight_kg                     AS truck_capacity
       FROM load_offers lo
       LEFT JOIN loads l ON l.id = lo.load_id
+      LEFT JOIN trucks t ON t.id = lo.truck_id
       WHERE lo.load_id = $1
         AND lo.hauler_id = $2
       ORDER BY lo.created_at DESC
@@ -727,12 +748,41 @@ function mapTruckAvailabilityRow(row: any): TruckAvailabilityRecord {
   };
 }
 
+function parseTruckNotes(raw: string | null): { truck_name?: string | null; species_supported?: string | null } {
+  if (!raw) return {};
+  try {
+    const parsed = JSON.parse(raw);
+    if (typeof parsed === "object" && parsed !== null) {
+      return {
+        truck_name: parsed.truck_name ?? null,
+        species_supported: parsed.species_supported ?? null,
+      };
+    }
+  } catch {
+    // not JSON, return empty
+  }
+  return {};
+}
+
 export function mapOfferRow(row: any): LoadOfferRecord {
   const modeSource =
     row.payment_mode ??
     row.load_payment_mode ??
     row.load_paymentmode ??
     null;
+  const truckId = row.truck_id ? String(row.truck_id) : (row.truck_id_from_truck ? String(row.truck_id_from_truck) : null);
+  let truck = null;
+  if (truckId && row.truck_plate_number) {
+    const truckMeta = parseTruckNotes(row.truck_notes ?? null);
+    truck = {
+      id: truckId,
+      plate_number: row.truck_plate_number,
+      truck_type: row.truck_truck_type,
+      truck_name: truckMeta.truck_name ?? null,
+      capacity: row.truck_capacity ? Number(row.truck_capacity) : null,
+      species_supported: truckMeta.species_supported ?? null,
+    };
+  }
   return {
     id: row.id,
     load_id: row.load_id,
@@ -758,6 +808,8 @@ export function mapOfferRow(row: any): LoadOfferRecord {
       row.direct_payment_disclaimer_version ??
       row.load_direct_payment_disclaimer_version ??
       null,
+    truck_id: truckId,
+    truck: truck,
   };
 }
 
@@ -1135,6 +1187,7 @@ export interface CreateLoadOfferInput {
   currency?: string;
   message?: string;
   expiresAt?: string;
+  truckId?: string | null;
 }
 
 export async function getLoadById(loadId: string): Promise<LoadRecord | null> {
@@ -1163,8 +1216,21 @@ export async function getLoadById(loadId: string): Promise<LoadRecord | null> {
 }
 
 export async function createLoadOffer(input: CreateLoadOfferInput): Promise<LoadOfferRecord> {
-  const { loadId, haulerId, createdByUserId, offeredAmount, currency, message, expiresAt } =
+  const { loadId, haulerId, createdByUserId, offeredAmount, currency, message, expiresAt, truckId } =
     input;
+
+  if (!truckId) {
+    throw new Error("Truck selection is required when placing an offer");
+  }
+
+  // Verify truck belongs to hauler
+  const truckCheck = await pool.query(
+    `SELECT id FROM trucks WHERE id = $1 AND hauler_id = $2`,
+    [truckId, haulerId]
+  );
+  if (truckCheck.rowCount === 0) {
+    throw new Error("Truck not found or does not belong to you");
+  }
 
   const result = await pool.query<LoadOfferRecord>(
     `
@@ -1175,10 +1241,11 @@ export async function createLoadOffer(input: CreateLoadOfferInput): Promise<Load
         offered_amount,
         currency,
         message,
-        expires_at
+        expires_at,
+        truck_id
       )
       VALUES (
-        $1,$2,$3,$4,$5,$6,$7
+        $1,$2,$3,$4,$5,$6,$7,$8
       )
       RETURNING *
     `,
@@ -1190,6 +1257,7 @@ export async function createLoadOffer(input: CreateLoadOfferInput): Promise<Load
       currency ?? "USD",
       message ?? null,
       expiresAt ?? null,
+      truckId,
     ]
   );
   const row = result.rows[0];
@@ -1211,9 +1279,15 @@ export async function listLoadOffers(
       SELECT lo.*,
              l.payment_mode                           AS load_payment_mode,
              l.direct_payment_disclaimer_accepted_at  AS load_direct_payment_disclaimer_accepted_at,
-             l.direct_payment_disclaimer_version      AS load_direct_payment_disclaimer_version
+             l.direct_payment_disclaimer_version      AS load_direct_payment_disclaimer_version,
+             t.id::text                               AS truck_id_from_truck,
+             t.plate_number                           AS truck_plate_number,
+             t.truck_type                             AS truck_truck_type,
+             t.notes                                  AS truck_notes,
+             t.capacity_weight_kg                     AS truck_capacity
       FROM load_offers lo
       JOIN loads l ON l.id = lo.load_id
+      LEFT JOIN trucks t ON t.id = lo.truck_id
       WHERE lo.load_id = $1
       ORDER BY lo.created_at DESC
       LIMIT $2 OFFSET $3
@@ -3862,9 +3936,18 @@ export interface CreateOfferMessageInput {
 }
 
 export async function createOfferMessage(input: CreateOfferMessageInput) {
+  // Get thread_id for this offer
+  const threadResult = await pool.query(
+    "SELECT id FROM load_offer_threads WHERE offer_id = $1 LIMIT 1",
+    [input.offerId]
+  );
+  
+  const threadId = threadResult.rows[0]?.id ? Number(threadResult.rows[0].id) : null;
+  
   const result = await pool.query(
     `
       INSERT INTO load_offer_messages (
+        thread_id,
         offer_id,
         sender_user_id,
         sender_role,
@@ -3872,11 +3955,12 @@ export async function createOfferMessage(input: CreateOfferMessageInput) {
         attachments
       )
       VALUES (
-        $1,$2,$3,$4,$5
+        $1,$2,$3,$4,$5,$6
       )
       RETURNING *
     `,
     [
+      threadId,
       input.offerId,
       input.senderUserId,
       input.senderRole,

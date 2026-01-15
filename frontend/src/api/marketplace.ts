@@ -97,6 +97,15 @@ export interface LoadOffer {
    payment_mode?: "ESCROW" | "DIRECT";
    direct_payment_disclaimer_accepted_at?: string | null;
    direct_payment_disclaimer_version?: string | null;
+   truck_id?: string | null;
+   truck?: {
+     id: string;
+     plate_number: string;
+     truck_type: string;
+     truck_name: string | null;
+     capacity: number | null;
+     species_supported: string | null;
+   } | null;
 }
 
 export interface OfferMessage {
@@ -501,6 +510,7 @@ export async function createLoadOfferRequest(loadId: string, payload: {
   currency?: string;
   message?: string;
   expires_at?: string | null;
+  truck_id?: string;
 }) {
   return marketplaceRequest<{ offer: LoadOffer }>(`/loads/${loadId}/offers`, {
     method: "POST",

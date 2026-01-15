@@ -396,6 +396,7 @@ router.post(
         currency: req.body.currency,
         message: req.body.message,
         expiresAt: req.body.expires_at,
+        truckId: req.body.truck_id ? String(req.body.truck_id) : null,
       });
       emitOfferCreatedEvent(offer);
       res.status(201).json({ offer });

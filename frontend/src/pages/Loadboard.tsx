@@ -151,6 +151,11 @@ export function Loadboard() {
   const [offerSubmitting, setOfferSubmitting] = useState(false);
   const [offerDialogExistingOffer, setOfferDialogExistingOffer] = useState<LoadOffer | null>(null);
   const [offerDialogCheckingExisting, setOfferDialogCheckingExisting] = useState(false);
+  const [haulerTrucks, setHaulerTrucks] = useState<any[]>([]);
+  const [selectedTruckId, setSelectedTruckId] = useState<string>("");
+  const [trucksLoading, setTrucksLoading] = useState(false);
+  const [detailLoadOffer, setDetailLoadOffer] = useState<LoadOffer | null>(null);
+  const [detailLoadTruck, setDetailLoadTruck] = useState<any | null>(null);
   const [activeHaulerOffer, setActiveHaulerOffer] = useState<LoadOffer | null>(null);
   const [haulerChatMessages, setHaulerChatMessages] = useState<OfferMessage[]>([]);
   const [haulerChatDraft, setHaulerChatDraft] = useState("");
@@ -513,7 +518,29 @@ type LoadboardFilters = {
     const preset = load.price?.replace(/[^0-9.]/g, "");
     setOfferAmount(preset || "");
     setOfferMessage("");
+    setSelectedTruckId("");
     if (!currentHaulerId) return;
+    
+    // Fetch trucks for selection
+    setTrucksLoading(true);
+    try {
+      const trucksResult = await fetchTrucks();
+      setHaulerTrucks(trucksResult.items || []);
+      if (trucksResult.items.length === 0) {
+        toast.error("Add a vehicle in My Fleet before placing offers.");
+        navigate("/hauler/fleet");
+        setOfferDialogLoad(null);
+        return;
+      }
+    } catch (err: any) {
+      console.error("Error fetching trucks:", err);
+      toast.error("Failed to load trucks. Please try again.");
+      setOfferDialogLoad(null);
+      return;
+    } finally {
+      setTrucksLoading(false);
+    }
+    
     setOfferDialogCheckingExisting(true);
     let shouldClose = false;
     try {
@@ -523,6 +550,10 @@ type LoadboardFilters = {
           setOfferDialogExistingOffer(existing);
           setOfferAmount(existing.offered_amount);
           setOfferMessage(existing.message ?? "");
+          // Set selected truck if offer has truck_id
+          if ((existing as any).truck_id) {
+            setSelectedTruckId(String((existing as any).truck_id));
+          }
         } else if (existing.status === "ACCEPTED") {
           toast.error("This load already has an accepted offer from you.");
           shouldClose = true;
@@ -563,6 +594,10 @@ const submitOffer = async () => {
       toast.error("Enter a valid offer amount.");
       return;
     }
+    if (!selectedTruckId) {
+      toast.error("Please select a truck for this offer.");
+      return;
+    }
     try {
       setOfferSubmitting(true);
       const loadIdNumeric = String(offerDialogLoad.rawId ?? offerDialogLoad.id).replace(/\D/g, "");
@@ -574,17 +609,25 @@ const submitOffer = async () => {
         });
         toast.success("Offer updated.");
       } else {
-        await createLoadOfferRequest(loadIdNumeric, {
+        const result = await createLoadOfferRequest(loadIdNumeric, {
           offered_amount: amountValue,
           currency: "USD",
           message: offerMessage || undefined,
+          truck_id: selectedTruckId,
         });
         toast.success("Offer submitted to shipper.");
+        // Open message thread for the new offer
+        if (result?.offer?.id) {
+          window.dispatchEvent(new CustomEvent("open-load-offer-thread", {
+            detail: { offerId: Number(result.offer.id) }
+          }));
+        }
       }
       setOfferDialogLoad(null);
       setOfferDialogExistingOffer(null);
       setOfferAmount("");
       setOfferMessage("");
+      setSelectedTruckId("");
     } catch (err: any) {
       const parsed = parseApiError(err);
       const normalizedMessage = parsed.message?.toLowerCase() ?? "";
@@ -646,6 +689,14 @@ const loadUserOffer = async (load: Load, options: { silent?: boolean } = {}) => 
       );
       const refreshed = resp.items.find((o) => o.id === offer!.id);
       if (refreshed) offer = refreshed;
+      
+      // Navigate to messages page and open thread
+      window.dispatchEvent(new CustomEvent("open-load-offer-thread", {
+        detail: { offerId: Number(offer.id) }
+      }));
+      navigate("/hauler/messages");
+      
+      // Also open chat modal for backward compatibility
       const messagesResp = await fetchOfferMessages(offer.id);
       const chatAllowed =
         !["REJECTED", "WITHDRAWN", "EXPIRED"].includes(offer.status) &&
@@ -1213,7 +1264,50 @@ const loadUserOffer = async (load: Load, options: { silent?: boolean } = {}) => 
                           </Button>
                         </>
                       )}
-                      <Button size="sm" variant="outline" onClick={() => setDetailLoad(load)}>
+                      <Button 
+                        size="sm" 
+                        variant="outline" 
+                        onClick={async () => {
+                          setDetailLoad(load);
+                          // Load offer and truck details if hauler has an offer
+                          if (currentHaulerId && !load.isExternal) {
+                            try {
+                              const offersResult = await fetchLoadOffers(String(load.rawId ?? load.id).replace(/\D/g, ""));
+                              const offer = offersResult.items.find(
+                                (o) => o.created_by_user_id === String(currentHaulerId)
+                              );
+                              if (offer) {
+                                setDetailLoadOffer(offer);
+                                // Get truck from offer if truck_id exists
+                                if ((offer as any).truck_id) {
+                                  try {
+                                    const trucksResult = await fetchTrucks();
+                                    const truck = trucksResult.items.find(
+                                      (t) => String(t.id) === String((offer as any).truck_id)
+                                    );
+                                    setDetailLoadTruck(truck || null);
+                                  } catch (err) {
+                                    console.error("Error loading truck:", err);
+                                    setDetailLoadTruck(null);
+                                  }
+                                } else {
+                                  setDetailLoadTruck(null);
+                                }
+                              } else {
+                                setDetailLoadOffer(null);
+                                setDetailLoadTruck(null);
+                              }
+                            } catch (err) {
+                              console.error("Error loading offer:", err);
+                              setDetailLoadOffer(null);
+                              setDetailLoadTruck(null);
+                            }
+                          } else {
+                            setDetailLoadOffer(null);
+                            setDetailLoadTruck(null);
+                          }
+                        }}
+                      >
                         View Details
                       </Button>
                     </div>
@@ -1442,6 +1536,7 @@ const loadUserOffer = async (load: Load, options: { silent?: boolean } = {}) => 
             setOfferDialogExistingOffer(null);
             setOfferAmount("");
             setOfferMessage("");
+            setSelectedTruckId("");
             setOfferDialogCheckingExisting(false);
           }
         }}
@@ -1458,7 +1553,35 @@ const loadUserOffer = async (load: Load, options: { silent?: boolean } = {}) => 
           {offerDialogCheckingExisting && (
             <p className="text-xs text-gray-500">Checking your existing offer…</p>
           )}
+          {trucksLoading && (
+            <p className="text-xs text-gray-500">Loading trucks…</p>
+          )}
           <div className="space-y-4">
+            <div>
+              <Label className="text-sm text-gray-500">
+                Select Truck <span className="text-red-500">*</span>
+              </Label>
+              <Select
+                value={selectedTruckId}
+                onValueChange={setSelectedTruckId}
+                disabled={trucksLoading || offerDialogCheckingExisting}
+              >
+                <SelectTrigger>
+                  <SelectValue placeholder="Select a truck" />
+                </SelectTrigger>
+                <SelectContent>
+                  {haulerTrucks.map((truck) => (
+                    <SelectItem key={truck.id} value={String(truck.id)}>
+                      {truck.truck_name || truck.plate_number} ({truck.truck_type})
+                      {truck.capacity && ` - ${Number(truck.capacity).toLocaleString()} kg`}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              {!selectedTruckId && (
+                <p className="text-xs text-red-500 mt-1">Truck selection is required</p>
+              )}
+            </div>
             <div>
               <Label className="text-sm text-gray-500">Offer amount (USD)</Label>
               <Input
@@ -1483,14 +1606,17 @@ const loadUserOffer = async (load: Load, options: { silent?: boolean } = {}) => 
               <Button
                 variant="outline"
                 className="flex-1"
-                onClick={() => setOfferDialogLoad(null)}
+                onClick={() => {
+                  setOfferDialogLoad(null);
+                  setSelectedTruckId("");
+                }}
               >
                 Cancel
               </Button>
               <Button
                 className="flex-1 bg-[#29CA8D] hover:bg-[#24b67d]"
                 onClick={submitOffer}
-                disabled={offerSubmitting || offerDialogCheckingExisting}
+                disabled={offerSubmitting || offerDialogCheckingExisting || !selectedTruckId || trucksLoading}
               >
                 {offerSubmitting
                   ? isEditingOffer
@@ -1714,7 +1840,13 @@ const loadUserOffer = async (load: Load, options: { silent?: boolean } = {}) => 
           </div>
         </DialogContent>
       </Dialog>
-      <Dialog open={!!detailLoad} onOpenChange={(open) => !open && setDetailLoad(null)}>
+      <Dialog open={!!detailLoad} onOpenChange={(open) => {
+        if (!open) {
+          setDetailLoad(null);
+          setDetailLoadOffer(null);
+          setDetailLoadTruck(null);
+        }
+      }}>
         <DialogContent className="max-w-2xl">
           <DialogHeader>
             <DialogTitle>Load Details</DialogTitle>
@@ -1758,6 +1890,51 @@ const loadUserOffer = async (load: Load, options: { silent?: boolean } = {}) => 
                   <div className="text-gray-900">{detailLoad.postedDate}</div>
                 </div>
               </div>
+              {detailLoadOffer && detailLoadTruck && (
+                <div className="pt-4 border-t">
+                  <div className="text-xs uppercase text-gray-400 mb-2">Truck Selected for Your Offer</div>
+                  <div className="bg-gray-50 dark:bg-gray-800 rounded-lg p-3 space-y-2">
+                    <div>
+                      <div className="text-xs text-gray-500 dark:text-gray-400">Truck Name / Plate</div>
+                      <div className="text-sm font-semibold text-gray-900 dark:text-white">
+                        {detailLoadTruck.truck_name || detailLoadTruck.plate_number}
+                      </div>
+                    </div>
+                    <div className="grid grid-cols-2 gap-2">
+                      <div>
+                        <div className="text-xs text-gray-500 dark:text-gray-400">Truck Type</div>
+                        <div className="text-sm text-gray-900 dark:text-white capitalize">
+                          {detailLoadTruck.truck_type}
+                        </div>
+                      </div>
+                      {detailLoadTruck.capacity && (
+                        <div>
+                          <div className="text-xs text-gray-500 dark:text-gray-400">Capacity</div>
+                          <div className="text-sm text-gray-900 dark:text-white">
+                            {Number(detailLoadTruck.capacity).toLocaleString()} kg
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                    {detailLoadTruck.species_supported && (
+                      <div>
+                        <div className="text-xs text-gray-500 dark:text-gray-400">Species Supported</div>
+                        <div className="text-sm text-gray-900 dark:text-white">
+                          {detailLoadTruck.species_supported}
+                        </div>
+                      </div>
+                    )}
+                    {detailLoadOffer.offered_amount && (
+                      <div className="pt-2 border-t border-gray-200 dark:border-gray-700">
+                        <div className="text-xs text-gray-500 dark:text-gray-400">Your Offer</div>
+                        <div className="text-lg font-semibold" style={{ color: "#53ca97" }}>
+                          {detailLoadOffer.currency} {Number(detailLoadOffer.offered_amount).toLocaleString()}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
               {detailLoad.comments && (
                 <div>
                   <div className="text-xs uppercase text-gray-400">Notes</div>

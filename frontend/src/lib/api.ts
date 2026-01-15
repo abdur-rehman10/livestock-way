@@ -255,11 +255,14 @@ export async function fetchLoadById(id: number): Promise<LoadDetail> {
   const raw = json.data as Partial<Load> & {
     pickup_location_text?: string | null;
     dropoff_location_text?: string | null;
+    pickup_window_start?: string | null;
+    pickup_date?: string | null;
   };
   const normalized: Load = {
     ...(raw as Load),
     pickup_location: raw.pickup_location ?? raw.pickup_location_text ?? "",
     dropoff_location: raw.dropoff_location ?? raw.dropoff_location_text ?? "",
+    pickup_date: raw.pickup_date ?? raw.pickup_window_start ?? "",
   };
   return normalized as LoadDetail;
 }

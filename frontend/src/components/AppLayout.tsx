@@ -58,6 +58,7 @@ export function AppLayout({ children, userRole, onLogout }: AppLayoutProps) {
   const [showNotifications, setShowNotifications] = useState(false);
   const [haulerBookingCount, setHaulerBookingCount] = useState(0);
   const [haulerUnreadCount, setHaulerUnreadCount] = useState(0);
+  const [haulerContractCount, setHaulerContractCount] = useState(0);
   const [shipperOfferCount, setShipperOfferCount] = useState(0);
   const [shipperContractCount, setShipperContractCount] = useState(0);
   const navigate = useNavigate();
@@ -84,6 +85,7 @@ export function AppLayout({ children, userRole, onLogout }: AppLayoutProps) {
         { path: '/hauler/messages', icon: Inbox, label: 'Messages' },
         { path: '/hauler/bookings', icon: Calendar, label: 'Bookings' },
         { path: '/hauler/offers', icon: MessageSquare, label: 'Offers' },
+        { path: '/hauler/contracts', icon: FileText, label: 'Contracts' },
         // { path: '/hauler/my-loads', icon: ClipboardList, label: 'My Loads' },
         { path: '/hauler/fleet', icon: Truck, label: 'My Fleet' },
         { path: '/hauler/trips', icon: MapPin, label: 'My Trips' },
@@ -207,9 +209,15 @@ export function AppLayout({ children, userRole, onLogout }: AppLayoutProps) {
         const contractCount = contractResp.items.filter(
           (contract) => (contract.status ?? '').toUpperCase() === 'SENT'
         ).length;
-        if (isMounted) setHaulerBookingCount(requestedCount + contractCount);
+        if (isMounted) {
+          setHaulerBookingCount(requestedCount);
+          setHaulerContractCount(contractCount);
+        }
       } catch {
-        if (isMounted) setHaulerBookingCount(0);
+        if (isMounted) {
+          setHaulerBookingCount(0);
+          setHaulerContractCount(0);
+        }
       }
     };
 
@@ -488,6 +496,10 @@ export function AppLayout({ children, userRole, onLogout }: AppLayoutProps) {
                   userRole === 'hauler' &&
                   route.path === '/hauler/offers' &&
                   haulerUnreadCount > 0;
+                const showHaulerContractBadge =
+                  userRole === 'hauler' &&
+                  route.path === '/hauler/contracts' &&
+                  haulerContractCount > 0;
                 const showOfferBadge =
                   userRole === 'shipper' &&
                   route.path === '/shipper/offers' &&
@@ -525,6 +537,14 @@ export function AppLayout({ children, userRole, onLogout }: AppLayoutProps) {
                       (isSidebarOpen ? (
                         <span className="ml-auto rounded-full bg-primary px-2 py-0.5 text-xs font-semibold text-white">
                           {haulerUnreadCount}
+                        </span>
+                      ) : (
+                        <span className="absolute right-2 top-2 h-2 w-2 rounded-full bg-primary" />
+                      ))}
+                    {showHaulerContractBadge &&
+                      (isSidebarOpen ? (
+                        <span className="ml-auto rounded-full bg-primary px-2 py-0.5 text-xs font-semibold text-white">
+                          {haulerContractCount}
                         </span>
                       ) : (
                         <span className="absolute right-2 top-2 h-2 w-2 rounded-full bg-primary" />

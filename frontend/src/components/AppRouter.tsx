@@ -28,6 +28,7 @@ import TripTracking from '../pages/TripTracking';
 import TripChat from '../pages/TripChat';
 import HaulerBookingsTab from '../pages/HaulerBookingsTab';
 import HaulerOffersTab from '../pages/HaulerOffersTab';
+import HaulerContractsTab from '../pages/HaulerContractsTab';
 import SuperAdminLogin from '../pages/SuperAdminLogin';
 import { ExpensesTab } from '../pages/ExpensesTab';
 import SupportTab from '../pages/SupportTab';
@@ -271,6 +272,7 @@ export function AppRouter({ showKeyboardShortcuts, onKeyboardShortcutsToggle }: 
                   <Route path="dashboard" element={<HaulerDashboard onLogout={handleLogout} />} />
                   <Route path="bookings" element={<HaulerBookingsTab />} />
                   <Route path="offers" element={<HaulerOffersTab />} />
+                  <Route path="contracts" element={<HaulerContractsTab />} />
                   <Route path="my-loads" element={<HaulerMyLoads />} />
                   <Route path="loadboard" element={<Loadboard />} />
                   <Route path="truck-board" element={<TruckBoard />} />

@@ -1,41 +1,51 @@
 import { useState, useEffect, useCallback, useRef } from "react";
-import { Search, Send, MessageSquare, Briefcase, User, Clock, MapPin, DollarSign, Calendar, Building, Eye, Phone, Mail, X, FileText } from "lucide-react";
+import { Search, Send, MessageSquare, Briefcase, User, Clock, MapPin, DollarSign, Calendar, Building, Eye, Phone, Mail, X, FileText, Truck } from "lucide-react";
 import { Button } from "../components/ui/button";
 import { Badge } from "../components/ui/badge";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "../components/ui/dialog";
 import { fetchUserThreads, fetchThreadMessages, sendMessage, fetchThreadById, type JobApplicationThread, type JobApplicationMessage } from "../api/jobMessages";
 import { fetchUserBuySellThreads, fetchBuySellThreadMessages, sendBuySellMessage, fetchBuySellThreadById, type BuySellApplicationThread, type BuySellApplicationMessage } from "../api/buySellMessages";
 import { fetchUserResourcesThreads, fetchResourcesThreadMessages, sendResourcesMessage, fetchResourcesThreadById, type ResourcesApplicationThread, type ResourcesApplicationMessage } from "../api/resourcesMessages";
+import { fetchUserLoadOfferThreads, fetchLoadOfferThreadMessages, sendLoadOfferMessage, fetchLoadOfferThreadById, fetchLoadOfferThreadByOfferId, type LoadOfferThread, type LoadOfferMessage } from "../api/loadOfferMessages";
 import { fetchJobById, type JobListing } from "../api/jobs";
 import { fetchJobApplications } from "../api/jobs";
 import { fetchBuyAndSellById, type BuyAndSellListing } from "../api/buyAndSell";
 import { fetchBuyAndSellApplications } from "../api/buyAndSell";
 import { fetchResourcesById, type ResourcesListing } from "../api/resources";
 import { fetchResourcesApplications } from "../api/resources";
+import { fetchLoadById, type LoadDetail } from "../lib/api";
+import { fetchLoadOffers, type LoadOffer, fetchBookings, fetchTruckAvailability } from "../api/marketplace";
+import { fetchTrucks, type TruckRecord } from "../api/fleet";
+import { createContract, sendContract, updateContract, fetchContracts, type ContractRecord } from "../api/marketplace";
+import { GenerateContractPopup } from "../components/GenerateContractPopup";
 import { toast } from "sonner";
 import { storage, STORAGE_KEYS } from "../lib/storage";
 import { API_BASE_URL } from "../lib/api";
 import { getSocket, subscribeToSocketEvent, joinSocketRoom, SOCKET_EVENTS } from "../lib/socket";
 
-type ThreadType = "job" | "buy-sell" | "resources";
-type UnifiedThread = (JobApplicationThread & { type: "job" }) | (BuySellApplicationThread & { type: "buy-sell" }) | (ResourcesApplicationThread & { type: "resources" });
-type UnifiedMessage = (JobApplicationMessage & { type: "job" }) | (BuySellApplicationMessage & { type: "buy-sell" }) | (ResourcesApplicationMessage & { type: "resources" });
+type ThreadType = "job" | "buy-sell" | "resources" | "load-offer";
+type UnifiedThread = (JobApplicationThread & { type: "job" }) | (BuySellApplicationThread & { type: "buy-sell" }) | (ResourcesApplicationThread & { type: "resources" }) | (LoadOfferThread & { type: "load-offer" });
+type UnifiedMessage = (JobApplicationMessage & { type: "job" }) | (BuySellApplicationMessage & { type: "buy-sell" }) | (ResourcesApplicationMessage & { type: "resources" }) | (LoadOfferMessage & { type: "load-offer" });
 
 export default function JobMessages() {
   const [jobThreads, setJobThreads] = useState<JobApplicationThread[]>([]);
   const [buySellThreads, setBuySellThreads] = useState<BuySellApplicationThread[]>([]);
   const [resourcesThreads, setResourcesThreads] = useState<ResourcesApplicationThread[]>([]);
+  const [loadOfferThreads, setLoadOfferThreads] = useState<LoadOfferThread[]>([]);
   const [selectedThread, setSelectedThread] = useState<UnifiedThread | null>(null);
   const [messages, setMessages] = useState<UnifiedMessage[]>([]);
   const [jobDetails, setJobDetails] = useState<JobListing | null>(null);
   const [buySellDetails, setBuySellDetails] = useState<BuyAndSellListing | null>(null);
   const [resourcesDetails, setResourcesDetails] = useState<ResourcesListing | null>(null);
+  const [loadOfferDetails, setLoadOfferDetails] = useState<{ load: LoadDetail; offer: LoadOffer; truck: TruckRecord | null } | null>(null);
+  const [showContractDialog, setShowContractDialog] = useState(false);
   const [loading, setLoading] = useState(true);
   const [messagesLoading, setMessagesLoading] = useState(false);
   const [sending, setSending] = useState(false);
   const [messageText, setMessageText] = useState("");
   const [searchQuery, setSearchQuery] = useState("");
   const [showChat, setShowChat] = useState(false); // For mobile responsiveness
+  const [hideThreadList, setHideThreadList] = useState(false); // Hide thread list when opening from loadboard
   const [showJobDetails, setShowJobDetails] = useState(false);
   const [showProfile, setShowProfile] = useState(false);
   const [applicantInfo, setApplicantInfo] = useState<any>(null);
@@ -49,14 +59,16 @@ export default function JobMessages() {
   const loadThreads = useCallback(async () => {
     try {
       setLoading(true);
-      const [jobResult, buySellResult, resourcesResult] = await Promise.all([
+      const [jobResult, buySellResult, resourcesResult, loadOfferResult] = await Promise.all([
         fetchUserThreads().catch(() => []),
         fetchUserBuySellThreads().catch(() => []),
         fetchUserResourcesThreads().catch(() => []),
+        fetchUserLoadOfferThreads().catch(() => []),
       ]);
       setJobThreads(jobResult);
       setBuySellThreads(buySellResult);
       setResourcesThreads(resourcesResult);
+      setLoadOfferThreads(loadOfferResult);
       // Don't auto-select first thread - let user choose or open via custom event
     } catch (err: any) {
       console.error("Error loading threads:", err);
@@ -70,6 +82,7 @@ export default function JobMessages() {
     ...jobThreads.map(t => ({ ...t, type: "job" as const })),
     ...buySellThreads.map(t => ({ ...t, type: "buy-sell" as const })),
     ...resourcesThreads.map(t => ({ ...t, type: "resources" as const })),
+    ...loadOfferThreads.map(t => ({ ...t, type: "load-offer" as const })),
   ].sort((a, b) => {
     const aTime = a.last_message_at || a.updated_at;
     const bTime = b.last_message_at || b.updated_at;
@@ -79,6 +92,7 @@ export default function JobMessages() {
   const loadMessages = useCallback(async (thread: UnifiedThread) => {
     try {
       setMessagesLoading(true);
+      shouldScrollRef.current = true; // Enable scrolling when loading messages
       if (thread.type === "job") {
         const result = await fetchThreadMessages(thread.id);
         setMessages(result.map(m => ({ ...m, type: "job" as const })));
@@ -87,10 +101,14 @@ export default function JobMessages() {
         const result = await fetchBuySellThreadMessages(thread.id);
         setMessages(result.map(m => ({ ...m, type: "buy-sell" as const })));
         await loadBuySellDetails(thread.listing_id);
-      } else {
+      } else if (thread.type === "resources") {
         const result = await fetchResourcesThreadMessages(thread.id);
         setMessages(result.map(m => ({ ...m, type: "resources" as const })));
         await loadResourcesDetails(thread.listing_id);
+      } else if (thread.type === "load-offer") {
+        const result = await fetchLoadOfferThreadMessages(thread.id);
+        setMessages(result.map(m => ({ ...m, type: "load-offer" as const })));
+        await loadLoadOfferDetails(thread.offer_id, thread.load_id);
       }
     } catch (err: any) {
       console.error("Error loading messages:", err);
@@ -127,6 +145,79 @@ export default function JobMessages() {
     }
   }, []);
 
+  const loadLoadOfferDetails = useCallback(async (offerId: number, loadId: number) => {
+    try {
+      const [load, offersResult] = await Promise.all([
+        fetchLoadById(loadId),
+        fetchLoadOffers(String(loadId)),
+      ]);
+      const offer = offersResult.items.find(o => String(o.id) === String(offerId));
+      if (!offer) {
+        console.error("Offer not found");
+        return;
+      }
+      
+      // Get truck details - first from offer.truck (included in API response), then fallback
+      let truck: TruckRecord | null = null;
+      try {
+        // First, use truck details from offer response (available to both shipper and hauler)
+        if (offer.truck) {
+          truck = {
+            id: Number(offer.truck.id),
+            hauler_id: Number(offer.hauler_id),
+            plate_number: offer.truck.plate_number,
+            truck_type: offer.truck.truck_type,
+            truck_name: offer.truck.truck_name,
+            capacity: offer.truck.capacity,
+            species_supported: offer.truck.species_supported,
+            status: "active",
+            created_at: "",
+          } as TruckRecord;
+        } else if (offer.truck_id) {
+          // Fallback: try to fetch truck if not included in response (for backward compatibility)
+          try {
+            const trucksResult = await fetchTrucks();
+            truck = trucksResult.items.find(t => String(t.id) === String(offer.truck_id)) || null;
+          } catch (err) {
+            // If fetchTrucks fails (e.g., shipper can't access hauler's trucks), continue without truck
+            console.warn("Could not fetch truck details:", err);
+          }
+        }
+        
+        // Additional fallback: try to get truck from booking if still not found
+        if (!truck) {
+          try {
+            const bookingsResult = await fetchBookings();
+            const booking = bookingsResult.items.find(b => b.offer_id === String(offerId));
+            
+            if (booking?.truck_availability_id) {
+              const truckAvailability = await fetchTruckAvailability({});
+              const availability = truckAvailability.items.find(ta => String(ta.id) === booking.truck_availability_id);
+              
+              if (availability?.truck_id) {
+                try {
+                  const trucksResult = await fetchTrucks();
+                  truck = trucksResult.items.find(t => String(t.id) === availability.truck_id) || null;
+                } catch (err) {
+                  console.warn("Could not fetch truck from availability:", err);
+                }
+              }
+            }
+          } catch (err) {
+            console.warn("Could not fetch truck from booking:", err);
+          }
+        }
+      } catch (err) {
+        console.error("Error loading truck:", err);
+        // Continue without truck details if there's an error
+      }
+      
+      setLoadOfferDetails({ load, offer, truck });
+    } catch (err: any) {
+      console.error("Error loading load offer details:", err);
+    }
+  }, []);
+
   useEffect(() => {
     loadThreads();
   }, [loadThreads]);
@@ -144,7 +235,9 @@ export default function JobMessages() {
         ? `job-thread-${selectedThread.id}`
         : selectedThread.type === "buy-sell"
           ? `buy-sell-thread-${selectedThread.id}`
-          : `resources-thread-${selectedThread.id}`;
+          : selectedThread.type === "resources"
+            ? `resources-thread-${selectedThread.id}`
+            : `load-offer-thread-${selectedThread.id}`;
       if (currentThreadRoomRef.current !== threadRoom) {
         // Leave previous room if any
         if (currentThreadRoomRef.current) {
@@ -176,9 +269,7 @@ export default function JobMessages() {
             }
             return [...prev, { ...message, type: "job" as const }];
           });
-          setTimeout(() => {
-            messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
-          }, 100);
+          // Scroll will be handled by the messages.length useEffect
         }
         
         // Update thread in list
@@ -215,9 +306,7 @@ export default function JobMessages() {
             }
             return [...prev, { ...message, type: "buy-sell" as const }];
           });
-          setTimeout(() => {
-            messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
-          }, 100);
+          // Scroll will be handled by the messages.length useEffect
         }
         
         setBuySellThreads((prev) =>
@@ -253,9 +342,7 @@ export default function JobMessages() {
             }
             return [...prev, { ...message, type: "resources" as const }];
           });
-          setTimeout(() => {
-            messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
-          }, 100);
+          // Scroll will be handled by the messages.length useEffect
         }
         
         setResourcesThreads((prev) =>
@@ -319,11 +406,70 @@ export default function JobMessages() {
       }
     );
 
+    // Subscribe to load-offer message events
+    const unsubscribeLoadOfferMessage = subscribeToSocketEvent(
+      "load-offer:message" as any,
+      (payload: any) => {
+        const { message, thread } = payload;
+        
+        if (selectedThread && selectedThread.type === "load-offer" && thread.id === selectedThread.id) {
+          setMessages((prev) => {
+            if (prev.some((m) => m.id === message.id && m.type === "load-offer")) {
+              return prev;
+            }
+            return [...prev, { ...message, type: "load-offer" as const }];
+          });
+          // Scroll will be handled by the messages.length useEffect
+        }
+        
+        setLoadOfferThreads((prev) =>
+          prev.map((t) =>
+            t.id === thread.id
+              ? {
+                  ...t,
+                  last_message: message.message,
+                  last_message_at: message.created_at,
+                  first_message_sent: true,
+                  unread_count: 
+                    Number(message.sender_user_id) !== Number(userId) && 
+                    (!selectedThread || selectedThread.type !== "load-offer" || selectedThread.id !== thread.id)
+                      ? (t.unread_count || 0) + 1 
+                      : t.unread_count,
+                }
+              : t
+          )
+        );
+      }
+    );
+
+    const unsubscribeLoadOfferThreadUpdate = subscribeToSocketEvent(
+      "load-offer:thread:updated" as any,
+      (payload: any) => {
+        const { threads } = payload;
+        setLoadOfferThreads(threads);
+        
+        if (selectedThread && selectedThread.type === "load-offer") {
+          const updatedThread = threads.find((t: LoadOfferThread) => t.id === selectedThread.id);
+          if (updatedThread) {
+            setSelectedThread((prev) => {
+              if (prev && prev.type === "load-offer" && prev.id === updatedThread.id) {
+                return { ...prev, ...updatedThread };
+              }
+              return prev;
+            });
+          }
+        }
+      }
+    );
+
     return () => {
       unsubscribeJobMessage();
       unsubscribeBuySellMessage();
+      unsubscribeResourcesMessage();
       unsubscribeJobThreadUpdate();
       unsubscribeBuySellThreadUpdate();
+      unsubscribeLoadOfferMessage();
+      unsubscribeLoadOfferThreadUpdate();
       // Leave thread room on cleanup
       if (currentThreadRoomRef.current && socket) {
         socket.emit("leave", currentThreadRoomRef.current);
@@ -420,12 +566,15 @@ export default function JobMessages() {
           } else {
             setApplicantInfo(null);
           }
-        } else {
+        } else if (threadType === "resources") {
           if (Number(selectedThread.listing_poster_user_id) === Number(userId)) {
             loadResourcesApplicantInfo();
           } else {
             setApplicantInfo(null);
           }
+        } else if (threadType === "load-offer") {
+          // For load-offer, we don't need applicant info, but we might want to show hauler/shipper info
+          setApplicantInfo(null);
         }
         
         // Reload threads after a short delay to update unread counts
@@ -451,8 +600,14 @@ export default function JobMessages() {
             t.id === threadId ? { ...t, unread_count: 0 } : t
           )
         );
-      } else {
+      } else if (threadType === "resources") {
         setResourcesThreads((prev) =>
+          prev.map((t) =>
+            t.id === threadId ? { ...t, unread_count: 0 } : t
+          )
+        );
+      } else if (threadType === "load-offer") {
+        setLoadOfferThreads((prev) =>
           prev.map((t) =>
             t.id === threadId ? { ...t, unread_count: 0 } : t
           )
@@ -461,7 +616,7 @@ export default function JobMessages() {
     } else {
       previousThreadIdRef.current = null;
     }
-  }, [selectedThread, loadMessages, loadJobDetails, loadBuySellDetails, loadResourcesDetails, loadApplicantInfo, loadBuySellApplicantInfo, loadResourcesApplicantInfo, userId, loadThreads]);
+  }, [selectedThread, loadMessages, loadJobDetails, loadBuySellDetails, loadResourcesDetails, loadLoadOfferDetails, loadApplicantInfo, loadBuySellApplicantInfo, loadResourcesApplicantInfo, userId, loadThreads]);
 
   // Listen for custom events to open specific threads
   useEffect(() => {
@@ -469,8 +624,11 @@ export default function JobMessages() {
       const threadId = (event.detail as { threadId: number }).threadId;
       try {
         const thread = await fetchThreadById(threadId);
-        setSelectedThread({ ...thread, type: "job" });
+        const unifiedThread = { ...thread, type: "job" as const };
+        setSelectedThread(unifiedThread);
         setShowChat(true);
+        // Load messages immediately
+        await loadMessages(unifiedThread);
         const [updatedJobThreads, updatedBuySellThreads, updatedResourcesThreads] = await Promise.all([
           fetchUserThreads().catch(() => []),
           fetchUserBuySellThreads().catch(() => []),
@@ -489,8 +647,11 @@ export default function JobMessages() {
       const threadId = (event.detail as { threadId: number }).threadId;
       try {
         const thread = await fetchBuySellThreadById(threadId);
-        setSelectedThread({ ...thread, type: "buy-sell" });
+        const unifiedThread = { ...thread, type: "buy-sell" as const };
+        setSelectedThread(unifiedThread);
         setShowChat(true);
+        // Load messages immediately
+        await loadMessages(unifiedThread);
         const [updatedJobThreads, updatedBuySellThreads, updatedResourcesThreads] = await Promise.all([
           fetchUserThreads().catch(() => []),
           fetchUserBuySellThreads().catch(() => []),
@@ -509,8 +670,11 @@ export default function JobMessages() {
       const threadId = (event.detail as { threadId: number }).threadId;
       try {
         const thread = await fetchResourcesThreadById(threadId);
-        setSelectedThread({ ...thread, type: "resources" });
+        const unifiedThread = { ...thread, type: "resources" as const };
+        setSelectedThread(unifiedThread);
         setShowChat(true);
+        // Load messages immediately
+        await loadMessages(unifiedThread);
         const [updatedJobThreads, updatedBuySellThreads, updatedResourcesThreads] = await Promise.all([
           fetchUserThreads().catch(() => []),
           fetchUserBuySellThreads().catch(() => []),
@@ -525,29 +689,112 @@ export default function JobMessages() {
       }
     };
 
+    const handleOpenLoadOfferThread = async (event: CustomEvent) => {
+      const offerId = (event.detail as { offerId: number }).offerId;
+      try {
+        const thread = await fetchLoadOfferThreadByOfferId(offerId);
+        const unifiedThread = { ...thread, type: "load-offer" as const };
+        setSelectedThread(unifiedThread);
+        setShowChat(true); // Show chat view
+        setHideThreadList(true); // Hide thread list when opening from loadboard (show chat directly)
+        // Load messages immediately
+        await loadMessages(unifiedThread);
+        const [updatedJobThreads, updatedBuySellThreads, updatedResourcesThreads, updatedLoadOfferThreads] = await Promise.all([
+          fetchUserThreads().catch(() => []),
+          fetchUserBuySellThreads().catch(() => []),
+          fetchUserResourcesThreads().catch(() => []),
+          fetchUserLoadOfferThreads().catch(() => []),
+        ]);
+        setJobThreads(updatedJobThreads);
+        setBuySellThreads(updatedBuySellThreads);
+        setResourcesThreads(updatedResourcesThreads);
+        setLoadOfferThreads(updatedLoadOfferThreads);
+      } catch (err) {
+        console.error("Error loading thread:", err);
+        toast.error("Failed to load thread");
+      }
+    };
+
     window.addEventListener("open-job-thread", handleOpenJobThread as unknown as EventListener);
     window.addEventListener("open-buy-sell-thread", handleOpenBuySellThread as unknown as EventListener);
     window.addEventListener("open-resources-thread", handleOpenResourcesThread as unknown as EventListener);
+    window.addEventListener("open-load-offer-thread", handleOpenLoadOfferThread as unknown as EventListener);
     return () => {
       window.removeEventListener("open-job-thread", handleOpenJobThread as unknown as EventListener);
       window.removeEventListener("open-buy-sell-thread", handleOpenBuySellThread as unknown as EventListener);
       window.removeEventListener("open-resources-thread", handleOpenResourcesThread as unknown as EventListener);
+      window.removeEventListener("open-load-offer-thread", handleOpenLoadOfferThread as unknown as EventListener);
     };
-  }, []);
+  }, [loadMessages]);
 
 
   // Only auto-scroll when messages are added, not when component re-renders
   const previousMessagesLengthRef = useRef<number>(0);
+  const shouldScrollRef = useRef<boolean>(true);
+  const scrollTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  
+  const scrollToBottom = useCallback((force = false) => {
+    if (scrollTimeoutRef.current) {
+      clearTimeout(scrollTimeoutRef.current);
+    }
+    scrollTimeoutRef.current = setTimeout(() => {
+      if (messagesContainerRef.current) {
+        const container = messagesContainerRef.current;
+        // Only scroll if we should scroll or if forced
+        if (shouldScrollRef.current || force) {
+          // Use scrollTop for more reliable scrolling
+          container.scrollTop = container.scrollHeight;
+        }
+      }
+    }, 50);
+  }, []);
+  
+  // Check if user is near bottom of scroll (within 100px)
+  const isNearBottom = useCallback(() => {
+    if (!messagesContainerRef.current) return true;
+    const container = messagesContainerRef.current;
+    const threshold = 100;
+    return container.scrollHeight - container.scrollTop - container.clientHeight < threshold;
+  }, []);
+  
+  // Reset scroll state when thread changes (using existing previousThreadIdRef from line 543)
+  useEffect(() => {
+    if (selectedThread) {
+      const threadId = `${selectedThread.type}-${selectedThread.id}`;
+      // Check if this is a new thread (previousThreadIdRef is managed in the useEffect at line 545)
+      // We'll reset scroll state when messages are first loaded for a new thread
+      shouldScrollRef.current = true;
+      previousMessagesLengthRef.current = 0;
+    }
+  }, [selectedThread?.id, selectedThread?.type]);
   
   useEffect(() => {
     // Only scroll if new messages were added (length increased)
     if (messages.length > previousMessagesLengthRef.current) {
-      setTimeout(() => {
-        messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
-      }, 50);
+      // Check if user is near bottom - if so, auto-scroll. Otherwise, don't interrupt their reading.
+      if (isNearBottom() || previousMessagesLengthRef.current === 0) {
+        scrollToBottom();
+      }
     }
     previousMessagesLengthRef.current = messages.length;
-  }, [messages.length]);
+  }, [messages.length, scrollToBottom, isNearBottom]);
+  
+  // Scroll to bottom when messages finish loading initially
+  useEffect(() => {
+    if (!messagesLoading && messages.length > 0) {
+      // Small delay to ensure DOM is updated
+      scrollToBottom(true);
+    }
+  }, [messagesLoading, scrollToBottom]);
+  
+  // Cleanup timeout on unmount
+  useEffect(() => {
+    return () => {
+      if (scrollTimeoutRef.current) {
+        clearTimeout(scrollTimeoutRef.current);
+      }
+    };
+  }, []);
 
   const handleSendMessage = async () => {
     if (!messageText.trim() || !selectedThread) return;
@@ -555,9 +802,11 @@ export default function JobMessages() {
     if (!selectedThread.first_message_sent) {
       const isPoster = selectedThread.type === "job"
         ? Number(selectedThread.job_poster_user_id) === Number(userId)
-        : Number(selectedThread.listing_poster_user_id) === Number(userId);
+        : selectedThread.type === "load-offer"
+          ? Number(selectedThread.shipper_user_id) === Number(userId) // Only shipper can send first message
+          : Number(selectedThread.listing_poster_user_id) === Number(userId);
       if (!isPoster) {
-        toast.error(`Only the ${selectedThread.type === "job" ? "job poster" : "listing poster"} can send the first message`);
+        toast.error(`Only the ${selectedThread.type === "job" ? "job poster" : selectedThread.type === "load-offer" ? "shipper" : "listing poster"} can send the first message`);
         return;
       }
     }
@@ -568,7 +817,9 @@ export default function JobMessages() {
         ? await sendMessage(selectedThread.id, messageText.trim())
         : selectedThread.type === "buy-sell"
           ? await sendBuySellMessage(selectedThread.id, messageText.trim())
-          : await sendResourcesMessage(selectedThread.id, messageText.trim());
+          : selectedThread.type === "resources"
+            ? await sendResourcesMessage(selectedThread.id, messageText.trim())
+            : await sendLoadOfferMessage(selectedThread.id, messageText.trim());
       
       setMessages((prev) => {
         if (prev.some((m) => m.id === sentMessage.id && m.type === selectedThread.type)) {
@@ -591,9 +842,19 @@ export default function JobMessages() {
 
   const filteredThreads = allThreads.filter(
     (thread) => {
-      const title = thread.type === "job" ? thread.job_title : thread.listing_title;
-      const applicantName = thread.applicant_name;
-      const posterName = thread.type === "job" ? thread.job_poster_name : thread.listing_poster_name;
+      const title = thread.type === "job" 
+        ? thread.job_title 
+        : thread.type === "load-offer"
+          ? thread.load_title
+          : thread.listing_title;
+      const applicantName = thread.type === "load-offer" 
+        ? (Number(thread.shipper_user_id) === Number(userId) ? thread.hauler_name : thread.shipper_name)
+        : thread.applicant_name;
+      const posterName = thread.type === "job" 
+        ? thread.job_poster_name 
+        : thread.type === "load-offer"
+          ? (Number(thread.shipper_user_id) === Number(userId) ? thread.hauler_name : thread.shipper_name)
+          : thread.listing_poster_name;
       const query = searchQuery.toLowerCase();
       return (
         title?.toLowerCase().includes(query) ||
@@ -607,13 +868,21 @@ export default function JobMessages() {
   const isPoster = selectedThread 
     ? (selectedThread.type === "job"
         ? Number(selectedThread.job_poster_user_id) === Number(userId)
-        : Number(selectedThread.listing_poster_user_id) === Number(userId))
+        : selectedThread.type === "load-offer"
+          ? Number(selectedThread.shipper_user_id) === Number(userId)
+          : Number(selectedThread.listing_poster_user_id) === Number(userId))
     : false;
   const isJobPoster = isPoster;
   const otherPersonName = selectedThread
     ? isPoster
-      ? selectedThread.applicant_name
-      : (selectedThread.type === "job" ? selectedThread.job_poster_name : selectedThread.listing_poster_name)
+      ? (selectedThread.type === "load-offer" 
+          ? selectedThread.hauler_name 
+          : selectedThread.applicant_name)
+      : (selectedThread.type === "job" 
+          ? selectedThread.job_poster_name 
+          : selectedThread.type === "load-offer"
+            ? selectedThread.shipper_name
+            : selectedThread.listing_poster_name)
     : "";
 
   if (loading) {
@@ -627,7 +896,7 @@ export default function JobMessages() {
   return (
     <div className="flex h-[calc(100vh-4rem)] bg-white dark:bg-gray-900">
       {/* Left Sidebar - Chat List */}
-      <div className={`${showChat ? "hidden md:flex" : "flex"} w-full md:w-80 border-r border-gray-200 dark:border-gray-800 flex-col`}>
+      <div className={`${showChat && hideThreadList ? "hidden" : showChat ? "hidden md:flex" : "flex"} w-full md:w-80 border-r border-gray-200 dark:border-gray-800 flex-col`}>
         {/* Header */}
         <div className="p-4 border-b border-gray-200 dark:border-gray-800">
           <h2 className="text-xl font-semibold mb-3 text-gray-900 dark:text-white">Messages</h2>
@@ -658,11 +927,21 @@ export default function JobMessages() {
               const isSelected = selectedThread?.id === thread.id && selectedThread?.type === thread.type;
               const isPoster = thread.type === "job" 
                 ? Number(thread.job_poster_user_id) === Number(userId)
-                : Number(thread.listing_poster_user_id) === Number(userId);
+                : thread.type === "load-offer"
+                  ? Number(thread.shipper_user_id) === Number(userId)
+                  : Number(thread.listing_poster_user_id) === Number(userId);
               const otherName = isPoster 
-                ? thread.applicant_name
-                : (thread.type === "job" ? thread.job_poster_name : thread.listing_poster_name);
-              const threadTitle = thread.type === "job" ? thread.job_title : thread.listing_title;
+                ? (thread.type === "load-offer" ? thread.hauler_name : thread.applicant_name)
+                : (thread.type === "job" 
+                    ? thread.job_poster_name 
+                    : thread.type === "load-offer"
+                      ? thread.shipper_name
+                      : thread.listing_poster_name);
+              const threadTitle = thread.type === "job" 
+                ? thread.job_title 
+                : thread.type === "load-offer"
+                  ? thread.load_title
+                  : thread.listing_title;
 
               return (
                 <div
@@ -670,6 +949,7 @@ export default function JobMessages() {
                   onClick={() => {
                     setSelectedThread(thread);
                     setShowChat(true);
+                    setHideThreadList(false); // Show thread list when manually selecting a thread
                   }}
                   className={`p-4 border-b border-gray-200 dark:border-gray-800 cursor-pointer transition-all hover:bg-gray-50 dark:hover:bg-gray-800 ${
                     isSelected
@@ -686,6 +966,8 @@ export default function JobMessages() {
                           <Briefcase className="w-6 h-6 text-gray-500 dark:text-gray-400" />
                         ) : thread.type === "buy-sell" ? (
                           <DollarSign className="w-6 h-6 text-gray-500 dark:text-gray-400" />
+                        ) : thread.type === "load-offer" ? (
+                          <Truck className="w-6 h-6 text-gray-500 dark:text-gray-400" />
                         ) : (
                           <Briefcase className="w-6 h-6 text-gray-500 dark:text-gray-400" />
                         )}
@@ -709,7 +991,15 @@ export default function JobMessages() {
                       </div>
 
                       <p className="text-xs text-gray-600 dark:text-gray-400 mb-1 truncate">
-                        {isPoster ? "Applicant" : (thread.type === "job" ? "Job Poster" : thread.type === "buy-sell" ? "Listing Poster" : "Resource Poster")}: {otherName}
+                        {isPoster 
+                          ? (thread.type === "load-offer" ? "Hauler" : "Applicant")
+                          : (thread.type === "job" 
+                              ? "Job Poster" 
+                              : thread.type === "buy-sell" 
+                                ? "Listing Poster" 
+                                : thread.type === "load-offer"
+                                  ? "Shipper"
+                                  : "Resource Poster")}: {otherName}
                       </p>
 
                       <div className="flex items-center justify-between">
@@ -748,9 +1038,16 @@ export default function JobMessages() {
           <div className="border-b border-gray-200 dark:border-gray-800 px-4 md:px-6 py-4 bg-white dark:bg-gray-900">
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-3">
+                {/* Show back button when hideThreadList is true, or on mobile when chat is open */}
                 <button
-                  onClick={() => setShowChat(false)}
-                  className="md:hidden mr-2 p-1 hover:bg-gray-100 dark:hover:bg-gray-800 rounded"
+                  onClick={() => {
+                    setShowChat(false);
+                    setHideThreadList(false); // Show thread list when going back
+                  }}
+                  className={`mr-2 p-1 hover:bg-gray-100 dark:hover:bg-gray-800 rounded ${
+                    hideThreadList ? "block" : "block md:hidden"
+                  }`}
+                  title="Back to threads"
                 >
                   <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
@@ -764,7 +1061,15 @@ export default function JobMessages() {
                 <div>
                   <h3 className="text-base font-semibold text-gray-900 dark:text-white">{otherPersonName}</h3>
                   <p className="text-xs text-gray-500 dark:text-gray-400">
-                    {isPoster ? "Applicant" : (selectedThread.type === "job" ? "Job Poster" : selectedThread.type === "buy-sell" ? "Listing Poster" : "Resource Poster")}
+                    {isPoster 
+                      ? (selectedThread.type === "load-offer" ? "Hauler" : "Applicant")
+                      : (selectedThread.type === "job" 
+                          ? "Job Poster" 
+                          : selectedThread.type === "buy-sell" 
+                            ? "Listing Poster" 
+                            : selectedThread.type === "load-offer"
+                              ? "Shipper"
+                              : "Resource Poster")}
                   </p>
                 </div>
               </div>
@@ -784,8 +1089,8 @@ export default function JobMessages() {
             </div>
           </div>
 
-          {/* Job/Listing/Resource Details - Pinned */}
-          {((selectedThread?.type === "job" && jobDetails) || (selectedThread?.type === "buy-sell" && buySellDetails) || (selectedThread?.type === "resources" && resourcesDetails)) && (
+          {/* Job/Listing/Resource/Load Offer Details - Pinned */}
+          {((selectedThread?.type === "job" && jobDetails) || (selectedThread?.type === "buy-sell" && buySellDetails) || (selectedThread?.type === "resources" && resourcesDetails) || (selectedThread?.type === "load-offer" && loadOfferDetails)) && (
             <div className="px-4 md:px-6 py-4 bg-blue-50 dark:bg-blue-900/20 border-b border-blue-100 dark:border-blue-800">
               <div className="space-y-3">
                 <div className="flex items-center justify-between">
@@ -798,6 +1103,8 @@ export default function JobMessages() {
                         <Briefcase className="w-4 h-4 text-white" />
                       ) : selectedThread?.type === "buy-sell" ? (
                         <DollarSign className="w-4 h-4 text-white" />
+                      ) : selectedThread?.type === "load-offer" ? (
+                        <Truck className="w-4 h-4 text-white" />
                       ) : (
                         <Briefcase className="w-4 h-4 text-white" />
                       )}
@@ -805,19 +1112,38 @@ export default function JobMessages() {
                     <div>
                       <p className="text-xs text-blue-600 dark:text-blue-400">Regarding:</p>
                       <p className="text-sm font-semibold text-gray-900 dark:text-white">
-                        {selectedThread?.type === "job" ? jobDetails?.title : selectedThread?.type === "buy-sell" ? buySellDetails?.title : resourcesDetails?.title}
+                        {selectedThread?.type === "job" 
+                          ? jobDetails?.title 
+                          : selectedThread?.type === "buy-sell" 
+                            ? buySellDetails?.title 
+                            : selectedThread?.type === "load-offer"
+                              ? loadOfferDetails?.load?.title || `${loadOfferDetails?.load?.pickup_location} → ${loadOfferDetails?.load?.dropoff_location}`
+                              : resourcesDetails?.title}
                       </p>
                     </div>
                   </div>
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    className="text-xs"
-                    onClick={() => setShowJobDetails(true)}
-                  >
-                    <Eye className="w-3 h-3 mr-1" />
-                    View Details
-                  </Button>
+                  <div className="flex items-center gap-2">
+                    {selectedThread?.type === "load-offer" && isPoster && (
+                      <Button
+                        size="sm"
+                        className="text-xs"
+                        onClick={() => setShowContractDialog(true)}
+                        style={{ backgroundColor: "#53ca97", color: "white" }}
+                      >
+                        <FileText className="w-3 h-3 mr-1" />
+                        Create Contract
+                      </Button>
+                    )}
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      className="text-xs"
+                      onClick={() => setShowJobDetails(true)}
+                    >
+                      <Eye className="w-3 h-3 mr-1" />
+                      View Details
+                    </Button>
+                  </div>
                 </div>
 
                 {/* Job/Listing/Resource Details Card - Clickable */}
@@ -948,6 +1274,58 @@ export default function JobMessages() {
                       </div>
                     </div>
                   </div>
+                ) : selectedThread?.type === "load-offer" && loadOfferDetails ? (
+                  <div 
+                    className="grid grid-cols-2 gap-3 p-3 bg-white dark:bg-gray-800 rounded-lg border border-blue-100 dark:border-blue-800 hover:shadow-lg hover:border-blue-200 dark:hover:border-blue-700 transition-all cursor-pointer"
+                    onClick={() => setShowJobDetails(true)}
+                  >
+                    <div className="col-span-2">
+                      <div className="flex items-center gap-2 text-xs">
+                        <MapPin className="w-3 h-3 text-gray-500" />
+                        <span className="text-gray-600 dark:text-gray-400">
+                          {loadOfferDetails.load.pickup_location} → {loadOfferDetails.load.dropoff_location}
+                        </span>
+                      </div>
+                    </div>
+                    
+                    <div>
+                      <p className="text-xs text-gray-500 dark:text-gray-400">Species</p>
+                      <p className="text-sm text-gray-900 dark:text-white capitalize">
+                        {loadOfferDetails.load.species}
+                      </p>
+                    </div>
+                    
+                    <div>
+                      <p className="text-xs text-gray-500 dark:text-gray-400">Quantity</p>
+                      <p className="text-sm text-gray-900 dark:text-white">
+                        {loadOfferDetails.load.quantity} head
+                      </p>
+                    </div>
+                    
+                    {loadOfferDetails.offer && (
+                      <div className="col-span-2">
+                        <p className="text-xs text-gray-500 dark:text-gray-400">Offered Price</p>
+                        <p className="text-lg font-semibold" style={{ color: "#53ca97" }}>
+                          {loadOfferDetails.offer.currency} {Number(loadOfferDetails.offer.offered_amount).toLocaleString()}
+                        </p>
+                      </div>
+                    )}
+                    
+                    {loadOfferDetails.truck && (
+                      <div className="col-span-2">
+                        <p className="text-xs text-gray-500 dark:text-gray-400">Vehicle</p>
+                        <p className="text-sm text-gray-900 dark:text-white">
+                          {loadOfferDetails.truck.truck_name || loadOfferDetails.truck.plate_number} ({loadOfferDetails.truck.truck_type})
+                        </p>
+                      </div>
+                    )}
+                    
+                    <div className="col-span-2 mt-2 pt-2 border-t border-blue-100 dark:border-blue-800">
+                      <p className="text-xs text-center" style={{ color: "#53ca97" }}>
+                        Click to view full load offer details →
+                      </p>
+                    </div>
+                  </div>
                 ) : null}
               </div>
             </div>
@@ -962,12 +1340,18 @@ export default function JobMessages() {
               <div className="text-center text-gray-500 dark:text-gray-400">Loading messages...</div>
             ) : messages.length === 0 ? (
               <div className="text-center text-gray-500 dark:text-gray-400 mt-8">
-                <p className="text-sm">No messages yet</p>
+                  <p className="text-sm">No messages yet</p>
                 {!selectedThread.first_message_sent && (
                   <p className="text-xs mt-2">
                     {isPoster
                       ? "Start the conversation by sending the first message"
-                      : `Waiting for the ${selectedThread.type === "job" ? "job poster" : selectedThread.type === "buy-sell" ? "listing poster" : "resource poster"} to send the first message`}
+                      : `Waiting for the ${selectedThread.type === "job" 
+                          ? "job poster" 
+                          : selectedThread.type === "buy-sell" 
+                            ? "listing poster" 
+                            : selectedThread.type === "load-offer"
+                              ? "shipper"
+                              : "resource poster"} to send the first message`}
                   </p>
                 )}
               </div>
@@ -1021,7 +1405,13 @@ export default function JobMessages() {
                   }}
                   placeholder={
                     !selectedThread.first_message_sent && !isPoster
-                      ? `Waiting for ${selectedThread.type === "job" ? "job poster" : selectedThread.type === "buy-sell" ? "listing poster" : "resource poster"} to send first message...`
+                      ? `Waiting for ${selectedThread.type === "job" 
+                          ? "job poster" 
+                          : selectedThread.type === "buy-sell" 
+                            ? "listing poster" 
+                            : selectedThread.type === "load-offer"
+                              ? "shipper"
+                              : "resource poster"} to send first message...`
                       : "Type a message..."
                   }
                   rows={1}
@@ -1050,8 +1440,8 @@ export default function JobMessages() {
         </div>
       )}
 
-      {/* Job/Listing/Resource Details Dialog */}
-      {((selectedThread?.type === "job" && jobDetails) || (selectedThread?.type === "buy-sell" && buySellDetails) || (selectedThread?.type === "resources" && resourcesDetails)) && (
+      {/* Job/Listing/Resource/Load Offer Details Dialog */}
+      {((selectedThread?.type === "job" && jobDetails) || (selectedThread?.type === "buy-sell" && buySellDetails) || (selectedThread?.type === "resources" && resourcesDetails) || (selectedThread?.type === "load-offer" && loadOfferDetails)) && (
         <Dialog open={showJobDetails} onOpenChange={setShowJobDetails}>
           <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
             <DialogHeader>
@@ -1060,7 +1450,9 @@ export default function JobMessages() {
                   ? jobDetails?.title 
                   : selectedThread?.type === "buy-sell" 
                     ? buySellDetails?.title 
-                    : resourcesDetails?.title}
+                    : selectedThread?.type === "load-offer"
+                      ? loadOfferDetails?.load?.title || `Load Offer`
+                      : resourcesDetails?.title}
               </DialogTitle>
               <DialogDescription>
                 {selectedThread?.type === "job" && jobDetails
@@ -1069,7 +1461,9 @@ export default function JobMessages() {
                     ? `${buySellDetails.listing_type?.replace("-", " ").charAt(0).toUpperCase() + buySellDetails.listing_type?.replace("-", " ").slice(1)} • ${buySellDetails.category?.charAt(0).toUpperCase() + buySellDetails.category?.slice(1)}`
                     : selectedThread?.type === "resources" && resourcesDetails
                       ? `Resource • ${resourcesDetails.resource_type?.charAt(0).toUpperCase() + resourcesDetails.resource_type?.slice(1)}`
-                      : ""}
+                      : selectedThread?.type === "load-offer" && loadOfferDetails
+                        ? `Load Offer • ${loadOfferDetails.offer?.status}`
+                        : ""}
               </DialogDescription>
             </DialogHeader>
 
@@ -1125,6 +1519,128 @@ export default function JobMessages() {
                   >
                     {resourcesDetails.resource_type}
                   </Badge>
+                </div>
+              )}
+              {selectedThread?.type === "load-offer" && loadOfferDetails && (
+                <div className="space-y-4">
+                  {/* Offer Price - Prominently Displayed */}
+                  {loadOfferDetails.offer && (
+                    <div className="py-3 px-4 bg-gray-50 dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700">
+                      <div className="text-sm text-gray-600 dark:text-gray-400 mb-1">Offered Price</div>
+                      <div className="text-2xl font-bold" style={{ color: "#53ca97" }}>
+                        {loadOfferDetails.offer.currency} {Number(loadOfferDetails.offer.offered_amount).toLocaleString()}
+                      </div>
+                      <div className="mt-1">
+                        <Badge
+                          className="px-2 py-1 text-xs capitalize"
+                          style={{ backgroundColor: "#53ca97", color: "white" }}
+                        >
+                          {loadOfferDetails.offer.status || "PENDING"}
+                        </Badge>
+                      </div>
+                    </div>
+                  )}
+                  
+                  {/* Load Details Section */}
+                  <div className="pt-4 border-t">
+                    <h4 className="mb-3 font-semibold text-lg">Load Details</h4>
+                    
+                    <div className="flex items-center gap-4 text-sm mb-4">
+                      <div className="flex items-center gap-2">
+                        <MapPin className="w-4 h-4 text-gray-400" />
+                        <span className="font-medium">{loadOfferDetails.load.pickup_location} → {loadOfferDetails.load.dropoff_location}</span>
+                      </div>
+                    </div>
+                    
+                    <div className="grid grid-cols-2 gap-4">
+                      <div>
+                        <p className="text-xs text-gray-500 dark:text-gray-400 mb-1">Species</p>
+                        <p className="text-sm text-gray-900 dark:text-white capitalize font-medium">
+                          {loadOfferDetails.load.species}
+                        </p>
+                      </div>
+                      <div>
+                        <p className="text-xs text-gray-500 dark:text-gray-400 mb-1">Quantity</p>
+                        <p className="text-sm text-gray-900 dark:text-white font-medium">
+                          {loadOfferDetails.load.quantity} {loadOfferDetails.load.quantity === 1 ? 'head' : 'head'}
+                        </p>
+                      </div>
+                      <div>
+                        <p className="text-xs text-gray-500 dark:text-gray-400 mb-1">Pickup Date</p>
+                        <p className="text-sm text-gray-900 dark:text-white font-medium">
+                          {loadOfferDetails.load.pickup_date 
+                            ? new Date(loadOfferDetails.load.pickup_date).toLocaleDateString("en-US", {
+                                year: "numeric",
+                                month: "short",
+                                day: "numeric",
+                              })
+                            : "Not specified"}
+                        </p>
+                      </div>
+                      {loadOfferDetails.load.weight && (
+                        <div>
+                          <p className="text-xs text-gray-500 dark:text-gray-400 mb-1">Estimated Weight</p>
+                          <p className="text-sm text-gray-900 dark:text-white font-medium">
+                            {Number(loadOfferDetails.load.weight).toLocaleString()} kg
+                          </p>
+                        </div>
+                      )}
+                    </div>
+                    
+                    {loadOfferDetails.load.description && (
+                      <div className="mt-4">
+                        <h5 className="mb-2 text-sm font-semibold">Load Description</h5>
+                        <p className="text-sm text-gray-600 dark:text-gray-400 whitespace-pre-wrap">{loadOfferDetails.load.description}</p>
+                      </div>
+                    )}
+                  </div>
+                  
+                  {/* Vehicle Attached by Hauler Section */}
+                  {loadOfferDetails.truck && (
+                    <div className="pt-4 border-t">
+                      <h4 className="mb-3 font-semibold text-lg">Vehicle Attached by Hauler</h4>
+                      <div className="bg-gray-50 dark:bg-gray-800 rounded-lg p-4 space-y-2">
+                        <div className="grid grid-cols-2 gap-4">
+                          <div>
+                            <p className="text-xs text-gray-500 dark:text-gray-400 mb-1">Plate Number</p>
+                            <p className="text-sm text-gray-900 dark:text-white font-medium">{loadOfferDetails.truck.plate_number}</p>
+                          </div>
+                          <div>
+                            <p className="text-xs text-gray-500 dark:text-gray-400 mb-1">Truck Type</p>
+                            <p className="text-sm text-gray-900 dark:text-white font-medium capitalize">{loadOfferDetails.truck.truck_type}</p>
+                          </div>
+                          {loadOfferDetails.truck.truck_name && (
+                            <div>
+                              <p className="text-xs text-gray-500 dark:text-gray-400 mb-1">Truck Name</p>
+                              <p className="text-sm text-gray-900 dark:text-white font-medium">{loadOfferDetails.truck.truck_name}</p>
+                            </div>
+                          )}
+                          {loadOfferDetails.truck.capacity && (
+                            <div>
+                              <p className="text-xs text-gray-500 dark:text-gray-400 mb-1">Capacity</p>
+                              <p className="text-sm text-gray-900 dark:text-white font-medium">
+                                {Number(loadOfferDetails.truck.capacity).toLocaleString()} kg
+                              </p>
+                            </div>
+                          )}
+                          {loadOfferDetails.truck.species_supported && (
+                            <div className="col-span-2">
+                              <p className="text-xs text-gray-500 dark:text-gray-400 mb-1">Species Supported</p>
+                              <p className="text-sm text-gray-900 dark:text-white font-medium">{loadOfferDetails.truck.species_supported}</p>
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  )}
+                  
+                  {/* Offer Message Section */}
+                  {loadOfferDetails.offer?.message && (
+                    <div className="pt-4 border-t">
+                      <h4 className="mb-2 font-semibold">Offer Message</h4>
+                      <p className="text-sm text-gray-600 dark:text-gray-400 whitespace-pre-wrap">{loadOfferDetails.offer.message}</p>
+                    </div>
+                  )}
                 </div>
               )}
 
@@ -1320,6 +1836,107 @@ export default function JobMessages() {
             </div>
           </DialogContent>
         </Dialog>
+      )}
+
+      {/* Contract Creation Dialog for Load Offers */}
+      {selectedThread?.type === "load-offer" && loadOfferDetails && (
+        <GenerateContractPopup
+          isOpen={showContractDialog}
+          onClose={() => setShowContractDialog(false)}
+          onGenerate={async (data) => {
+            try {
+              const priceAmount = data.priceAmount 
+                ? (typeof data.priceAmount === "string" ? parseFloat(data.priceAmount) : data.priceAmount)
+                : parseFloat(loadOfferDetails.offer.offered_amount);
+              
+              const payload = {
+                priceAmount,
+                priceType: data.priceType,
+                paymentMethod: data.paymentMethod,
+                paymentSchedule: data.paymentSchedule,
+                contractInfo: {
+                  haulerName: loadOfferDetails.offer.hauler_id,
+                  route: {
+                    origin: loadOfferDetails.load.pickup_location,
+                    destination: loadOfferDetails.load.dropoff_location,
+                  },
+                  animalType: loadOfferDetails.load.species,
+                  headCount: loadOfferDetails.load.quantity,
+                },
+              };
+              
+              await createContract({
+                load_id: String(loadOfferDetails.load.id),
+                offer_id: String(loadOfferDetails.offer.id),
+                status: "SENT",
+                price_amount: priceAmount,
+                price_type: data.priceType,
+                payment_method: data.paymentMethod,
+                payment_schedule: data.paymentSchedule,
+                contract_payload: payload,
+              });
+              
+              toast.success("Contract sent to hauler.");
+              setShowContractDialog(false);
+              // Refresh threads to show updated status
+              loadThreads();
+            } catch (err: any) {
+              console.error("Error creating contract:", err);
+              toast.error(err?.message ?? "Failed to create contract");
+            }
+          }}
+          onSaveDraft={async (data) => {
+            try {
+              const priceAmount = data.priceAmount 
+                ? (typeof data.priceAmount === "string" ? parseFloat(data.priceAmount) : data.priceAmount)
+                : parseFloat(loadOfferDetails.offer.offered_amount);
+              
+              const payload = {
+                priceAmount,
+                priceType: data.priceType,
+                paymentMethod: data.paymentMethod,
+                paymentSchedule: data.paymentSchedule,
+                contractInfo: {
+                  haulerName: loadOfferDetails.offer.hauler_id,
+                  route: {
+                    origin: loadOfferDetails.load.pickup_location,
+                    destination: loadOfferDetails.load.dropoff_location,
+                  },
+                  animalType: loadOfferDetails.load.species,
+                  headCount: loadOfferDetails.load.quantity,
+                },
+              };
+              
+              await createContract({
+                load_id: String(loadOfferDetails.load.id),
+                offer_id: String(loadOfferDetails.offer.id),
+                status: "DRAFT",
+                price_amount: priceAmount,
+                price_type: data.priceType,
+                payment_method: data.paymentMethod,
+                payment_schedule: data.paymentSchedule,
+                contract_payload: payload,
+              });
+              
+              toast.success("Contract draft saved.");
+              setShowContractDialog(false);
+            } catch (err: any) {
+              console.error("Error saving contract draft:", err);
+              toast.error(err?.message ?? "Failed to save contract draft");
+            }
+          }}
+          contractInfo={{
+            haulerName: loadOfferDetails.offer.hauler_id,
+            route: {
+              origin: loadOfferDetails.load.pickup_location,
+              destination: loadOfferDetails.load.dropoff_location,
+            },
+            animalType: loadOfferDetails.load.species,
+            headCount: loadOfferDetails.load.quantity,
+            price: parseFloat(loadOfferDetails.offer.offered_amount),
+            priceType: "total",
+          }}
+        />
       )}
     </div>
   );

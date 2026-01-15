@@ -30,6 +30,8 @@ export const SOCKET_EVENTS = {
   BUY_SELL_THREAD_UPDATED: "buy-sell:thread:updated",
   RESOURCES_MESSAGE: "resources:message",
   RESOURCES_THREAD_UPDATED: "resources:thread:updated",
+  LOAD_OFFER_MESSAGE: "load-offer:message",
+  LOAD_OFFER_THREAD_UPDATED: "load-offer:thread:updated",
 } as const;
 
 export type SocketEvent = typeof SOCKET_EVENTS[keyof typeof SOCKET_EVENTS];
