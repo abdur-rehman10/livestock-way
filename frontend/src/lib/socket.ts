@@ -33,6 +33,8 @@ export const SOCKET_EVENTS = {
   RESOURCES_THREAD_UPDATED: "resources:thread:updated",
   LOAD_OFFER_MESSAGE: "load-offer:message",
   LOAD_OFFER_THREAD_UPDATED: "load-offer:thread:updated",
+  TRUCK_BOOKING_MESSAGE: "truck-booking:message",
+  TRUCK_BOOKING_THREAD_UPDATED: "truck-booking:thread:updated",
 } as const;
 
 export type SocketEventKey = typeof SOCKET_EVENTS[keyof typeof SOCKET_EVENTS];
@@ -65,6 +67,8 @@ type SocketEventPayloadMap = {
   [SOCKET_EVENTS.RESOURCES_THREAD_UPDATED]: { threads: any[] };
   [SOCKET_EVENTS.LOAD_OFFER_MESSAGE]: { message: any; thread: any };
   [SOCKET_EVENTS.LOAD_OFFER_THREAD_UPDATED]: { threads: any[] };
+  [SOCKET_EVENTS.TRUCK_BOOKING_MESSAGE]: { message: any; thread: any };
+  [SOCKET_EVENTS.TRUCK_BOOKING_THREAD_UPDATED]: { threads: any[] };
 };
 
 let socket: Socket | null = null;

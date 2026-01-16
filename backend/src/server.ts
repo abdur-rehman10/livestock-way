@@ -28,6 +28,7 @@ import buySellMessagesRoutes from "./routes/buySellMessagesRoutes";
 import resourcesRoutes from "./routes/resourcesRoutes";
 import resourcesMessagesRoutes from "./routes/resourcesMessagesRoutes";
 import loadOfferMessagesRoutes from "./routes/loadOfferMessagesRoutes";
+import truckBookingMessagesRoutes from "./routes/truckBookingMessagesRoutes";
 import { initSocket } from "./socket";
 
 dotenv.config();
@@ -92,6 +93,7 @@ app.use("/api/buy-sell-messages", buySellMessagesRoutes);
 app.use("/api/resources", resourcesRoutes);
 app.use("/api/resources-messages", resourcesMessagesRoutes);
 app.use("/api/load-offer-messages", loadOfferMessagesRoutes);
+app.use("/api/truck-booking-messages", truckBookingMessagesRoutes);
 
 async function bootstrapSuperAdmin() {
   const email = process.env.SUPER_ADMIN_EMAIL || "admin@test.com";

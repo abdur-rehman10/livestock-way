@@ -32,6 +32,8 @@ export const SOCKET_EVENTS = {
   RESOURCES_THREAD_UPDATED: "resources:thread:updated",
   LOAD_OFFER_MESSAGE: "load-offer:message",
   LOAD_OFFER_THREAD_UPDATED: "load-offer:thread:updated",
+  TRUCK_BOOKING_MESSAGE: "truck-booking:message",
+  TRUCK_BOOKING_THREAD_UPDATED: "truck-booking:thread:updated",
 } as const;
 
 export type SocketEvent = typeof SOCKET_EVENTS[keyof typeof SOCKET_EVENTS];

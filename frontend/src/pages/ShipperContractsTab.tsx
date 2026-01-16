@@ -17,10 +17,16 @@ import {
   fetchContracts,
   sendContract,
   updateContract,
+  createContract,
+  fetchLoadOffers,
   type ContractRecord,
+  type LoadOffer,
 } from "../api/marketplace";
-import { fetchLoadById, type LoadDetail } from "../lib/api";
+import { fetchLoadById, fetchLoadsForShipper, type LoadDetail } from "../lib/api";
+import { fetchUserLoadOfferThreads, type LoadOfferThread } from "../api/loadOfferMessages";
+import { fetchUserTruckBookingThreads, type TruckBookingThread } from "../api/truckBookingMessages";
 import { useNavigate } from "react-router-dom";
+import { storage, STORAGE_KEYS } from "../lib/storage";
 
 type ContractFormData = {
   priceAmount?: string | number;
@@ -40,21 +46,56 @@ interface ContractWithLoad extends ContractRecord {
   load?: LoadDetail | null;
 }
 
+interface AwaitingOffer {
+  offer: LoadOffer;
+  load: LoadDetail;
+}
+
+interface ActiveConversation {
+  thread: LoadOfferThread | TruckBookingThread;
+  load: LoadDetail;
+  type: 'load-offer' | 'truck-booking';
+}
+
 export default function ShipperContractsTab() {
   const [contracts, setContracts] = useState<ContractWithLoad[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [modalOpen, setModalOpen] = useState(false);
   const [showViewDialog, setShowViewDialog] = useState(false);
+  const [awaitingOffers, setAwaitingOffers] = useState<AwaitingOffer[]>([]);
+  const [loadingAwaiting, setLoadingAwaiting] = useState(false);
+  const [activeConversations, setActiveConversations] = useState<ActiveConversation[]>([]);
+  const [loadingConversations, setLoadingConversations] = useState(false);
+  const [selectedConversation, setSelectedConversation] = useState<ActiveConversation | null>(null);
+  const [showConversationContractDialog, setShowConversationContractDialog] = useState(false);
   const navigate = useNavigate();
+  const userId = storage.get<string | null>(STORAGE_KEYS.USER_ID, null);
 
   const selectedContract = useMemo(
     () => contracts.find((contract) => contract.id === selectedId) ?? null,
     [contracts, selectedId]
   );
 
-  const negotiationContracts = useMemo(() => 
-    contracts.filter(c => ['DRAFT', 'SENT'].includes(c.status.toUpperCase())),
+  // Under Negotiation: Contracts created by shipper (SENT) - excludes ACCEPTED contracts
+  const underNegotiationContracts = useMemo(() => {
+    return contracts.filter(c => {
+      const status = c.status.toUpperCase();
+      // Only contracts created by shipper with SENT status (ACCEPTED contracts appear in Confirmed Contracts)
+      return status === 'SENT' && c.created_by_user_id === userId;
+    });
+  }, [contracts, userId]);
+  
+  // Awaiting Your Response: Contracts sent by hauler waiting for shipper response
+  // (In this flow, shipper creates contracts, so this might be empty or for future use)
+  const awaitingYourResponseContracts = useMemo(() => {
+    return contracts.filter(c => {
+      return c.status.toUpperCase() === 'SENT' && c.created_by_user_id !== userId;
+    });
+  }, [contracts, userId]);
+  
+  const draftContracts = useMemo(() => 
+    contracts.filter(c => c.status.toUpperCase() === 'DRAFT'),
     [contracts]
   );
   
@@ -102,9 +143,115 @@ export default function ShipperContractsTab() {
     }
   };
 
+  const loadAwaitingOffers = async () => {
+    if (!userId) return;
+    try {
+      setLoadingAwaiting(true);
+      // Fetch all shipper loads
+      const loads = await fetchLoadsForShipper(userId);
+      
+      // For each load, fetch offers and check for PENDING offers without contracts
+      const offersWithLoads: AwaitingOffer[] = [];
+      const contractOfferIds = new Set(
+        contracts.filter(c => c.offer_id).map(c => c.offer_id!)
+      );
+      
+      for (const load of loads) {
+        try {
+          const offersResp = await fetchLoadOffers(String(load.id));
+          const pendingOffers = offersResp.items.filter(
+            offer => offer.status === "PENDING" && !contractOfferIds.has(offer.id)
+          );
+          
+          for (const offer of pendingOffers) {
+            const loadDetail = await fetchLoadById(Number(load.id));
+            offersWithLoads.push({ offer, load: loadDetail });
+          }
+        } catch (err) {
+          console.warn(`Failed to load offers for load ${load.id}:`, err);
+        }
+      }
+      
+      setAwaitingOffers(offersWithLoads);
+    } catch (err: any) {
+      console.error("Failed to load awaiting offers:", err);
+    } finally {
+      setLoadingAwaiting(false);
+    }
+  };
+
+  const loadActiveConversations = async () => {
+    if (!userId) return;
+    try {
+      setLoadingConversations(true);
+      
+      // Get contract IDs that already have contracts
+      const contractOfferIds = new Set(
+        contracts.filter(c => c.offer_id).map(c => String(c.offer_id!))
+      );
+      const contractBookingIds = new Set(
+        contracts.filter(c => c.booking_id).map(c => String(c.booking_id!))
+      );
+      
+      // Fetch active load-offer threads
+      const loadOfferThreads = await fetchUserLoadOfferThreads();
+      const activeLoadOfferThreads = loadOfferThreads.filter(
+        thread => 
+          thread.is_active && 
+          thread.first_message_sent && 
+          thread.shipper_user_id === Number(userId) &&
+          !contractOfferIds.has(String(thread.offer_id))
+      );
+      
+      // Fetch active truck-booking threads
+      const truckBookingThreads = await fetchUserTruckBookingThreads();
+      const activeTruckBookingThreads = truckBookingThreads.filter(
+        thread => 
+          thread.is_active && 
+          thread.first_message_sent && 
+          thread.shipper_user_id === Number(userId) &&
+          !contractBookingIds.has(String(thread.booking_id))
+      );
+      
+      // Fetch load details for all threads
+      const conversations: ActiveConversation[] = [];
+      
+      for (const thread of activeLoadOfferThreads) {
+        try {
+          const load = await fetchLoadById(thread.load_id);
+          conversations.push({ thread, load, type: 'load-offer' });
+        } catch (err) {
+          console.warn(`Failed to load load details for thread ${thread.id}:`, err);
+        }
+      }
+      
+      for (const thread of activeTruckBookingThreads) {
+        try {
+          const load = await fetchLoadById(thread.load_id);
+          conversations.push({ thread, load, type: 'truck-booking' });
+        } catch (err) {
+          console.warn(`Failed to load load details for thread ${thread.id}:`, err);
+        }
+      }
+      
+      setActiveConversations(conversations);
+    } catch (err: any) {
+      console.error("Failed to load active conversations:", err);
+    } finally {
+      setLoadingConversations(false);
+    }
+  };
+
   useEffect(() => {
     refresh();
   }, []);
+
+  useEffect(() => {
+    if (contracts.length >= 0) {
+      loadAwaitingOffers();
+      loadActiveConversations();
+    }
+  }, [contracts, userId]);
 
   const handleSave = async (data: ContractFormData, sendNow: boolean) => {
     if (!selectedContract) return;
@@ -186,8 +333,8 @@ export default function ShipperContractsTab() {
             </div>
           </div>
           <div className="text-2xl mb-1">{confirmedContracts.length}</div>
-          <div className="text-sm text-gray-600">Total Contracts Made</div>
-          <div className="text-xs text-gray-500 mt-2">Successfully confirmed</div>
+          <div className="text-sm text-gray-600">Confirmed Contracts</div>
+          <div className="text-xs text-gray-500 mt-2">Accepted by hauler</div>
         </Card>
 
         <Card className="p-4 hover:shadow-lg transition-shadow cursor-pointer">
@@ -196,8 +343,8 @@ export default function ShipperContractsTab() {
               <Activity className="w-5 h-5 text-orange-600" />
             </div>
           </div>
-          <div className="text-2xl mb-1">{negotiationContracts.length}</div>
-          <div className="text-sm text-gray-600">Active Negotiations</div>
+          <div className="text-2xl mb-1">{underNegotiationContracts.length}</div>
+          <div className="text-sm text-gray-600">Under Negotiation</div>
           <div className="text-xs text-gray-500 mt-2">In progress</div>
         </Card>
       </div>
@@ -214,85 +361,450 @@ export default function ShipperContractsTab() {
         </div>
       </Card>
 
-      {/* Under Negotiation Section */}
+
+      {/* Two Box Layout for Negotiations */}
       <div className="mb-10">
-        <div className="flex items-center gap-2 mb-6">
-          <Clock className="w-5 h-5" style={{ color: '#53ca97' }} />
-          <h2 className="text-xl font-semibold">Under Negotiation ({negotiationContracts.length})</h2>
-        </div>
-
-        <div className="space-y-5">
-          {negotiationContracts.map((contract) => (
-            <Card key={contract.id} className="p-6 hover:shadow-md transition-all">
-              <div className="flex items-start justify-between gap-4">
-                <div className="flex-1">
-                  <div className="flex items-center gap-2 mb-4">
-                    <h3 className="text-lg font-semibold">Contract #{contract.id}</h3>
-                    <Badge
-                      className="text-xs px-2 py-0.5 capitalize"
-                      variant={contract.status.toUpperCase() === 'SENT' ? 'default' : 'outline'}
-                      style={contract.status.toUpperCase() === 'SENT' ? { backgroundColor: '#53ca97', color: 'white' } : {}}
-                    >
-                      {contract.status.toLowerCase()}
-                    </Badge>
-                  </div>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+          {/* Box 1: Under Negotiation */}
+          <Card className="p-6 border-2 flex flex-col" style={{ borderColor: '#53ca97', minHeight: '600px' }}>
+            <h3 className="mb-5 flex items-center gap-2 flex-shrink-0 text-lg font-semibold">
+              <Clock className="w-5 h-5" style={{ color: '#53ca97' }} />
+              Under Negotiation ({underNegotiationContracts.length + activeConversations.length})
+            </h3>
+            <ScrollArea className="flex-1 pr-2">
+              <div className="space-y-4">
+                {/* Show active conversations first */}
+                {activeConversations.map((conv) => {
+                  const thread = conv.thread;
+                  const isLoadOffer = conv.type === 'load-offer';
+                  const loadOfferThread = isLoadOffer ? thread as LoadOfferThread : null;
+                  const truckBookingThread = !isLoadOffer ? thread as TruckBookingThread : null;
                   
-                  {contract.load && (
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
-                      <div className="flex items-center gap-2 text-sm text-gray-600">
-                        <MapPin className="w-4 h-4" />
-                        <span>{contract.load.pickup_location} → {contract.load.dropoff_location}</span>
-                      </div>
-                      {contract.load.species && (
-                        <div className="flex items-center gap-2 text-sm text-gray-600">
-                          <TruckIcon className="w-4 h-4" />
-                          <span className="capitalize">{contract.load.species}{contract.load.quantity ? ` - ${contract.load.quantity} head` : ''}</span>
+                  return (
+                    <Card key={`conv-${thread.id}`} className="p-6 hover:shadow-md transition-all border-blue-200 bg-blue-50">
+                      <div className="flex items-start gap-4">
+                        <div className="w-12 h-12 rounded-full flex items-center justify-center flex-shrink-0" style={{ backgroundColor: '#dbeafe' }}>
+                          <MessageSquare className="w-6 h-6" style={{ color: '#3b82f6' }} />
                         </div>
-                      )}
-                    </div>
-                  )}
+                        
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-start justify-between gap-2 mb-3">
+                            <div className="flex-1 min-w-0">
+                              <h4 className="text-base font-semibold mb-2 truncate">
+                                {isLoadOffer ? 'Active Conversation' : 'Truck Booking Conversation'}
+                              </h4>
+                              {conv.load && (
+                                <div className="flex items-center gap-2 text-xs text-gray-600 flex-wrap">
+                                  <span className="flex items-center gap-1">
+                                    <TruckIcon className="w-3 h-3" />
+                                    {conv.load.pickup_location} → {conv.load.dropoff_location}
+                                  </span>
+                                  {conv.load.species && (
+                                    <>
+                                      <span>•</span>
+                                      <span className="capitalize">{conv.load.species}</span>
+                                    </>
+                                  )}
+                                  {conv.load.quantity && (
+                                    <>
+                                      <span>•</span>
+                                      <span>{conv.load.quantity} head</span>
+                                    </>
+                                  )}
+                                </div>
+                              )}
+                              {loadOfferThread?.hauler_name && (
+                                <p className="text-xs text-gray-500 mt-1">With: {loadOfferThread.hauler_name}</p>
+                              )}
+                              {truckBookingThread?.hauler_name && (
+                                <p className="text-xs text-gray-500 mt-1">With: {truckBookingThread.hauler_name}</p>
+                              )}
+                            </div>
+                            <Badge className="px-2 py-1 text-xs" style={{ backgroundColor: '#3b82f6', color: 'white' }}>
+                              Active Chat
+                            </Badge>
+                          </div>
 
-                  <div className="flex items-center gap-4 mb-4">
-                    <p className="text-sm font-medium" style={{ color: '#53ca97' }}>
-                      Contract Value: ${contract.price_amount ? Number(contract.price_amount).toLocaleString() : '0.00'}{contract.price_type === 'per-mile' ? '/mile' : ' total'}
-                    </p>
-                    <p className="text-xs text-gray-400">
-                      {contract.sent_at ? `Sent: ${new Date(contract.sent_at).toLocaleDateString()}` : `Created: ${new Date(contract.created_at).toLocaleDateString()}`}
-                    </p>
+                          {thread.last_message && (
+                            <p className="text-xs text-gray-600 mb-3 italic truncate">
+                              "{thread.last_message}"
+                            </p>
+                          )}
+
+                          <div className="flex items-center justify-between gap-4 mb-4">
+                            <div className="text-xs text-gray-500">
+                              {thread.last_message_at 
+                                ? `Last message: ${new Date(thread.last_message_at).toLocaleDateString()}`
+                                : `Started: ${new Date(thread.created_at).toLocaleDateString()}`}
+                            </div>
+                            {loadOfferThread?.offer_amount && (
+                              <div className="text-right">
+                                <p className="text-xs text-gray-500 mb-1">Offered</p>
+                                <p className="text-sm font-semibold" style={{ color: '#3b82f6' }}>
+                                  {loadOfferThread.offer_currency || 'USD'} {Number(loadOfferThread.offer_amount).toLocaleString()}
+                                </p>
+                              </div>
+                            )}
+                            {truckBookingThread?.booking_amount && (
+                              <div className="text-right">
+                                <p className="text-xs text-gray-500 mb-1">Requested</p>
+                                <p className="text-sm font-semibold" style={{ color: '#3b82f6' }}>
+                                  {truckBookingThread.booking_currency || 'USD'} {Number(truckBookingThread.booking_amount).toLocaleString()}
+                                </p>
+                              </div>
+                            )}
+                          </div>
+
+                          <div className="flex gap-3 flex-wrap">
+                            <Button
+                              onClick={() => {
+                                navigate('/shipper/messages');
+                              }}
+                              variant="outline"
+                              className="px-4 py-2 text-sm flex items-center gap-1"
+                            >
+                              <MessageSquare className="w-4 h-4" />
+                              View Messages
+                            </Button>
+                            <Button
+                              onClick={() => {
+                                setSelectedConversation(conv);
+                                setShowConversationContractDialog(true);
+                              }}
+                              className="px-4 py-2 text-sm flex items-center gap-1"
+                              style={{ backgroundColor: '#53ca97', color: 'white' }}
+                            >
+                              <FileText className="w-4 h-4" />
+                              Generate Contract
+                            </Button>
+                          </div>
+                        </div>
+                      </div>
+                    </Card>
+                  );
+                })}
+                
+                {/* Show contracts */}
+                {underNegotiationContracts.length > 0 ? (
+                  underNegotiationContracts.map((contract) => (
+                    <Card key={contract.id} className="p-5 hover:shadow-md transition-all">
+                      <div className="flex items-start gap-4">
+                        <div className="w-12 h-12 rounded-full flex items-center justify-center flex-shrink-0" style={{ backgroundColor: '#e8f7f1' }}>
+                          <FileText className="w-6 h-6" style={{ color: '#53ca97' }} />
+                        </div>
+                        
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-start justify-between gap-2 mb-3">
+                            <div className="flex-1 min-w-0">
+                              <h4 className="text-base font-semibold mb-2 truncate">Contract #{contract.id}</h4>
+                              {contract.load && (
+                                <div className="flex items-center gap-2 text-xs text-gray-600 flex-wrap">
+                                  <span className="flex items-center gap-1">
+                                    <TruckIcon className="w-3 h-3" />
+                                    {contract.load.pickup_location} → {contract.load.dropoff_location}
+                                  </span>
+                                  {contract.load.species && (
+                                    <>
+                                      <span>•</span>
+                                      <span className="capitalize">{contract.load.species}</span>
+                                    </>
+                                  )}
+                                  {contract.load.quantity && (
+                                    <>
+                                      <span>•</span>
+                                      <span>{contract.load.quantity} head</span>
+                                    </>
+                                  )}
+                                </div>
+                              )}
+                            </div>
+                            <Badge className="px-2 py-1 text-xs" style={{ 
+                              backgroundColor: contract.status.toUpperCase() === 'ACCEPTED' ? '#53ca97' : '#3b82f6', 
+                              color: 'white' 
+                            }}>
+                              {contract.status.toUpperCase() === 'ACCEPTED' ? 'Accepted' : 'Sent'}
+                            </Badge>
+                          </div>
+
+                          <div className="flex items-center justify-between gap-4 mb-4">
+                            <div>
+                              <p className="text-xs text-gray-500 mb-1">Contract Price</p>
+                              <p className="text-lg font-semibold" style={{ color: '#53ca97' }}>
+                                ${contract.price_amount ? Number(contract.price_amount).toLocaleString() : '0.00'}{contract.price_type === 'per-mile' ? '/mile' : ''}
+                              </p>
+                            </div>
+                            <div className="text-right">
+                              <p className="text-xs text-gray-500 mb-1">
+                                {contract.status.toUpperCase() === 'ACCEPTED' ? 'Accepted' : 'Sent'}
+                              </p>
+                              <p className="text-xs text-gray-600">
+                                {contract.status.toUpperCase() === 'ACCEPTED' 
+                                  ? (contract.accepted_at ? new Date(contract.accepted_at).toLocaleDateString() : '—')
+                                  : (contract.sent_at ? new Date(contract.sent_at).toLocaleDateString() : '—')}
+                              </p>
+                            </div>
+                          </div>
+
+                          <div className="flex gap-3 flex-wrap">
+                            <Button
+                              onClick={() => handleViewContract(contract)}
+                              variant="outline"
+                              className="px-4 py-2 text-sm flex items-center gap-1"
+                            >
+                              <FileText className="w-4 h-4" />
+                              {contract.status.toUpperCase() === 'ACCEPTED' ? 'View Contract' : 'View & Edit'}
+                            </Button>
+                            {contract.status.toUpperCase() === 'ACCEPTED' && (
+                              <Button
+                                onClick={() => navigate('/shipper/trips')}
+                                variant="outline"
+                                className="px-4 py-2 text-sm flex items-center gap-1"
+                              >
+                                <TruckIcon className="w-4 h-4" />
+                                View Trips
+                              </Button>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+                    </Card>
+                  ))
+                ) : activeConversations.length === 0 ? (
+                  <div className="text-center py-8 text-gray-500 text-sm">
+                    No contracts under negotiation
                   </div>
-                </div>
-
-                <div className="flex flex-col gap-3 min-w-[140px]">
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    className="px-5 py-2.5 text-sm whitespace-nowrap"
-                    onClick={() => handleViewContract(contract)}
-                  >
-                    <FileText className="w-4 h-4 mr-2" />
-                    {['DRAFT', 'SENT'].includes(contract.status.toUpperCase()) ? 'View & Edit' : 'View Contract'}
-                  </Button>
-                  {contract.status.toUpperCase() === 'DRAFT' && (
-                    <Button
-                      size="sm"
-                      className="px-5 py-2.5 text-sm whitespace-nowrap"
-                      style={{ backgroundColor: '#53ca97', color: 'white' }}
-                      onClick={async () => {
-                        setSelectedId(contract.id);
-                        await handleSave(
-                          (contract.contract_payload ?? {}) as ContractFormData,
-                          true
-                        );
-                      }}
-                    >
-                      <FileText className="w-4 h-4 mr-2" />
-                      Send Contract
-                    </Button>
-                  )}
-                </div>
+                ) : null}
               </div>
-            </Card>
-          ))}
+            </ScrollArea>
+          </Card>
+
+          {/* Box 2: Awaiting Your Response (merged with Awaiting Counter Party Response) */}
+          <Card className="p-6 border-2 flex flex-col" style={{ borderColor: '#f59e0b', minHeight: '600px' }}>
+            <h3 className="mb-5 flex items-center gap-2 flex-shrink-0 text-lg font-semibold">
+              <Clock className="w-5 h-5" style={{ color: '#f59e0b' }} />
+              Awaiting Your Response ({awaitingOffers.length + draftContracts.length + awaitingYourResponseContracts.length})
+            </h3>
+            <ScrollArea className="flex-1 pr-2">
+              <div className="space-y-4">
+                {/* Show hauler offers awaiting response */}
+                {awaitingOffers.map(({ offer, load }) => (
+                  <Card key={offer.id} className="p-5 border-amber-200 bg-amber-50 hover:shadow-md transition-all">
+                    <div className="flex items-start gap-4 p-2">
+                      <div className="w-12 h-12 rounded-full flex items-center justify-center flex-shrink-0" style={{ backgroundColor: '#fef3c7' }}>
+                        <MessageSquare className="w-6 h-6" style={{ color: '#f59e0b' }} />
+                      </div>
+                      
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-start justify-between gap-2 mb-3">
+                          <div className="flex-1 min-w-0">
+                            <h4 className="text-base font-semibold mb-2 truncate">Hauler Offer #{offer.id}</h4>
+                            {load && (
+                              <div className="flex items-center gap-2 text-xs text-gray-600 flex-wrap">
+                                <span className="flex items-center gap-1">
+                                  <TruckIcon className="w-3 h-3" />
+                                  {load.pickup_location} → {load.dropoff_location}
+                                </span>
+                                {load.species && (
+                                  <>
+                                    <span>•</span>
+                                    <span className="capitalize">{load.species}</span>
+                                  </>
+                                )}
+                                {load.quantity && (
+                                  <>
+                                    <span>•</span>
+                                    <span>{load.quantity} head</span>
+                                  </>
+                                )}
+                              </div>
+                            )}
+                          </div>
+                          <Badge className="px-2 py-1 text-xs" style={{ backgroundColor: '#f59e0b', color: 'white' }}>
+                            Waiting for your response
+                          </Badge>
+                        </div>
+
+                        <div className="flex items-center justify-between gap-4 mb-4">
+                          <div>
+                            <p className="text-xs text-gray-500 mb-1">Offered Price</p>
+                            <p className="text-lg font-semibold" style={{ color: '#f59e0b' }}>
+                              {offer.currency} {Number(offer.offered_amount).toLocaleString()}
+                            </p>
+                          </div>
+                          <div className="text-right">
+                            <p className="text-xs text-gray-500 mb-1">Received</p>
+                            <p className="text-xs text-gray-600">
+                              {new Date(offer.created_at).toLocaleDateString()}
+                            </p>
+                          </div>
+                        </div>
+
+                        {offer.message && (
+                          <p className="text-xs text-gray-600 mb-3 italic truncate">"{offer.message}"</p>
+                        )}
+
+                        <div className="flex gap-3 flex-wrap">
+                          <Button
+                            onClick={() => {
+                              navigate('/shipper/messages');
+                            }}
+                            variant="outline"
+                            className="px-4 py-2 text-sm flex items-center gap-1"
+                          >
+                            <MessageSquare className="w-4 h-4" />
+                            View Messages
+                          </Button>
+                        </div>
+                      </div>
+                    </div>
+                  </Card>
+                ))}
+                
+                {/* Show draft contracts */}
+                {draftContracts.map((contract) => (
+                  <Card key={contract.id} className="p-5 border-amber-200 bg-amber-50 hover:shadow-md transition-all">
+                    <div className="flex items-start gap-4">
+                      <div className="w-12 h-12 rounded-full flex items-center justify-center flex-shrink-0" style={{ backgroundColor: '#fef3c7' }}>
+                        <FileText className="w-6 h-6" style={{ color: '#f59e0b' }} />
+                      </div>
+                      
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-start justify-between gap-2 mb-3">
+                          <div className="flex-1 min-w-0">
+                            <h4 className="text-base font-semibold mb-2 truncate">Draft Contract #{contract.id}</h4>
+                            {contract.load && (
+                              <div className="flex items-center gap-2 text-xs text-gray-600 flex-wrap">
+                                <span className="flex items-center gap-1">
+                                  <TruckIcon className="w-3 h-3" />
+                                  {contract.load.pickup_location} → {contract.load.dropoff_location}
+                                </span>
+                                {contract.load.species && (
+                                  <>
+                                    <span>•</span>
+                                    <span className="capitalize">{contract.load.species}</span>
+                                  </>
+                                )}
+                                {contract.load.quantity && (
+                                  <>
+                                    <span>•</span>
+                                    <span>{contract.load.quantity} head</span>
+                                  </>
+                                )}
+                              </div>
+                            )}
+                          </div>
+                          <Badge className="px-2 py-1 text-xs" style={{ backgroundColor: '#f59e0b', color: 'white' }}>
+                            Draft
+                          </Badge>
+                        </div>
+
+                        <div className="flex items-center justify-between gap-4 mb-4">
+                          <div>
+                            <p className="text-xs text-gray-500 mb-1">Draft Price</p>
+                            <p className="text-lg font-semibold" style={{ color: '#f59e0b' }}>
+                              ${contract.price_amount ? Number(contract.price_amount).toLocaleString() : '0.00'}{contract.price_type === 'per-mile' ? '/mile' : ''}
+                            </p>
+                          </div>
+                          <div className="text-right">
+                            <p className="text-xs text-gray-500 mb-1">Created</p>
+                            <p className="text-xs text-gray-600">
+                              {new Date(contract.created_at).toLocaleDateString()}
+                            </p>
+                          </div>
+                        </div>
+
+                        <div className="flex gap-3 flex-wrap">
+                          <Button
+                            onClick={() => handleViewContract(contract)}
+                            variant="outline"
+                            className="px-4 py-2 text-sm flex items-center gap-1"
+                          >
+                            <FileText className="w-4 h-4" />
+                            View & Edit
+                          </Button>
+                        </div>
+                      </div>
+                    </div>
+                  </Card>
+                ))}
+                
+                {/* Show contracts awaiting shipper response */}
+                {awaitingYourResponseContracts.map((contract) => (
+                    <Card key={contract.id} className="p-5 hover:shadow-md transition-all">
+                      <div className="flex items-start gap-4">
+                        <div className="w-12 h-12 rounded-full flex items-center justify-center flex-shrink-0" style={{ backgroundColor: '#fef3c7' }}>
+                          <FileText className="w-6 h-6" style={{ color: '#f59e0b' }} />
+                        </div>
+                        
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-start justify-between gap-2 mb-3">
+                            <div className="flex-1 min-w-0">
+                              <h4 className="text-base font-semibold mb-2 truncate">Contract #{contract.id}</h4>
+                              {contract.load && (
+                                <div className="flex items-center gap-2 text-xs text-gray-600 flex-wrap">
+                                  <span className="flex items-center gap-1">
+                                    <TruckIcon className="w-3 h-3" />
+                                    {contract.load.pickup_location} → {contract.load.dropoff_location}
+                                  </span>
+                                  {contract.load.species && (
+                                    <>
+                                      <span>•</span>
+                                      <span className="capitalize">{contract.load.species}</span>
+                                    </>
+                                  )}
+                                  {contract.load.quantity && (
+                                    <>
+                                      <span>•</span>
+                                      <span>{contract.load.quantity} head</span>
+                                    </>
+                                  )}
+                                </div>
+                              )}
+                            </div>
+                            <Badge className="px-2 py-1 text-xs" style={{ backgroundColor: '#ef4444', color: 'white' }}>
+                              New
+                            </Badge>
+                          </div>
+
+                          <div className="flex items-center justify-between gap-4 mb-4">
+                            <div>
+                              <p className="text-xs text-gray-500 mb-1">Contract Price</p>
+                              <p className="text-lg font-semibold" style={{ color: '#f59e0b' }}>
+                                ${contract.price_amount ? Number(contract.price_amount).toLocaleString() : '0.00'}{contract.price_type === 'per-mile' ? '/mile' : ''}
+                              </p>
+                            </div>
+                            <div className="text-right">
+                              <p className="text-xs text-gray-500 mb-1">Sent</p>
+                              <p className="text-xs text-gray-600">
+                                {contract.sent_at ? new Date(contract.sent_at).toLocaleDateString() : '—'}
+                              </p>
+                            </div>
+                          </div>
+
+                          <div className="flex gap-3 flex-wrap">
+                            <Button
+                              onClick={() => handleViewContract(contract)}
+                              variant="outline"
+                              className="px-4 py-2 text-sm flex items-center gap-1"
+                            >
+                              <FileText className="w-4 h-4" />
+                              View Contract
+                            </Button>
+                          </div>
+                        </div>
+                      </div>
+                    </Card>
+                  ))}
+                
+                {/* Show empty state if no items */}
+                {awaitingOffers.length === 0 && draftContracts.length === 0 && awaitingYourResponseContracts.length === 0 && (
+                  <div className="text-center py-8 text-gray-500 text-sm">
+                    No items awaiting your response
+                  </div>
+                )}
+              </div>
+            </ScrollArea>
+          </Card>
         </div>
       </div>
 
@@ -369,6 +881,7 @@ export default function ShipperContractsTab() {
         </div>
       </div>
 
+
       {selectedContract && ['DRAFT', 'SENT'].includes(selectedContract.status.toUpperCase()) && (
         <GenerateContractPopup
           isOpen={modalOpen}
@@ -431,6 +944,156 @@ export default function ShipperContractsTab() {
             priceType: (selectedContract.price_type === 'per-mile' ? 'per-mile' : 'total') as 'per-mile' | 'total',
             paymentMethod: selectedContract.payment_method ?? undefined,
             paymentSchedule: selectedContract.payment_schedule ?? undefined,
+          }}
+        />
+      )}
+
+      {/* Generate Contract Dialog for Active Conversations */}
+      {selectedConversation && (
+        <GenerateContractPopup
+          isOpen={showConversationContractDialog}
+          onClose={() => {
+            setShowConversationContractDialog(false);
+            setSelectedConversation(null);
+          }}
+          onGenerate={async (data) => {
+            try {
+              const isLoadOffer = selectedConversation.type === 'load-offer';
+              const loadOfferThread = isLoadOffer ? selectedConversation.thread as LoadOfferThread : null;
+              const truckBookingThread = !isLoadOffer ? selectedConversation.thread as TruckBookingThread : null;
+              
+              const priceAmount = data.priceAmount
+                ? (typeof data.priceAmount === "string" ? parseFloat(data.priceAmount) : data.priceAmount)
+                : (isLoadOffer && loadOfferThread?.offer_amount 
+                    ? parseFloat(loadOfferThread.offer_amount) 
+                    : (truckBookingThread?.booking_amount ? parseFloat(truckBookingThread.booking_amount) : 0));
+
+              const payload = {
+                priceAmount,
+                priceType: data.priceType,
+                paymentMethod: data.paymentMethod,
+                paymentSchedule: data.paymentSchedule,
+                contractInfo: {
+                  haulerName: isLoadOffer ? (loadOfferThread?.hauler_name || "Hauler") : (truckBookingThread?.hauler_name || "Hauler"),
+                  route: {
+                    origin: selectedConversation.load.pickup_location,
+                    destination: selectedConversation.load.dropoff_location,
+                  },
+                  animalType: selectedConversation.load.species || "",
+                  headCount: selectedConversation.load.quantity || 0,
+                },
+              };
+
+              if (isLoadOffer && loadOfferThread) {
+                await createContract({
+                  load_id: String(selectedConversation.load.id),
+                  offer_id: String(loadOfferThread.offer_id),
+                  status: "SENT",
+                  price_amount: priceAmount,
+                  price_type: data.priceType || "total",
+                  payment_method: data.paymentMethod || undefined,
+                  payment_schedule: data.paymentSchedule || undefined,
+                  contract_payload: payload,
+                });
+              } else if (truckBookingThread) {
+                await createContract({
+                  load_id: String(selectedConversation.load.id),
+                  booking_id: String(truckBookingThread.booking_id),
+                  status: "SENT",
+                  price_amount: priceAmount,
+                  price_type: data.priceType || "total",
+                  payment_method: data.paymentMethod || undefined,
+                  payment_schedule: data.paymentSchedule || undefined,
+                  contract_payload: payload,
+                });
+              }
+
+              toast.success("Contract sent to hauler.");
+              setShowConversationContractDialog(false);
+              setSelectedConversation(null);
+              await refresh();
+              await loadActiveConversations();
+            } catch (err: any) {
+              console.error("Error creating contract:", err);
+              toast.error(err?.message ?? "Failed to create contract");
+            }
+          }}
+          onSaveDraft={async (data) => {
+            try {
+              const isLoadOffer = selectedConversation.type === 'load-offer';
+              const loadOfferThread = isLoadOffer ? selectedConversation.thread as LoadOfferThread : null;
+              const truckBookingThread = !isLoadOffer ? selectedConversation.thread as TruckBookingThread : null;
+              
+              const priceAmount = data.priceAmount
+                ? (typeof data.priceAmount === "string" ? parseFloat(data.priceAmount) : data.priceAmount)
+                : (isLoadOffer && loadOfferThread?.offer_amount 
+                    ? parseFloat(loadOfferThread.offer_amount) 
+                    : (truckBookingThread?.booking_amount ? parseFloat(truckBookingThread.booking_amount) : 0));
+
+              const payload = {
+                priceAmount,
+                priceType: data.priceType,
+                paymentMethod: data.paymentMethod,
+                paymentSchedule: data.paymentSchedule,
+                contractInfo: {
+                  haulerName: isLoadOffer ? (loadOfferThread?.hauler_name || "Hauler") : (truckBookingThread?.hauler_name || "Hauler"),
+                  route: {
+                    origin: selectedConversation.load.pickup_location,
+                    destination: selectedConversation.load.dropoff_location,
+                  },
+                  animalType: selectedConversation.load.species || "",
+                  headCount: selectedConversation.load.quantity || 0,
+                },
+              };
+
+              if (isLoadOffer && loadOfferThread) {
+                await createContract({
+                  load_id: String(selectedConversation.load.id),
+                  offer_id: String(loadOfferThread.offer_id),
+                  status: "DRAFT",
+                  price_amount: priceAmount,
+                  price_type: data.priceType || "total",
+                  payment_method: data.paymentMethod || undefined,
+                  payment_schedule: data.paymentSchedule || undefined,
+                  contract_payload: payload,
+                });
+              } else if (truckBookingThread) {
+                await createContract({
+                  load_id: String(selectedConversation.load.id),
+                  booking_id: String(truckBookingThread.booking_id),
+                  status: "DRAFT",
+                  price_amount: priceAmount,
+                  price_type: data.priceType || "total",
+                  payment_method: data.paymentMethod || undefined,
+                  payment_schedule: data.paymentSchedule || undefined,
+                  contract_payload: payload,
+                });
+              }
+
+              toast.success("Contract draft saved.");
+              setShowConversationContractDialog(false);
+              setSelectedConversation(null);
+              await refresh();
+              await loadActiveConversations();
+            } catch (err: any) {
+              console.error("Error saving contract draft:", err);
+              toast.error(err?.message ?? "Failed to save contract draft");
+            }
+          }}
+          contractInfo={{
+            haulerName: selectedConversation.type === 'load-offer' 
+              ? ((selectedConversation.thread as LoadOfferThread)?.hauler_name || "Hauler")
+              : ((selectedConversation.thread as TruckBookingThread)?.hauler_name || "Hauler"),
+            route: {
+              origin: selectedConversation.load.pickup_location,
+              destination: selectedConversation.load.dropoff_location,
+            },
+            animalType: selectedConversation.load.species || "",
+            headCount: selectedConversation.load.quantity || 0,
+            price: selectedConversation.type === 'load-offer'
+              ? ((selectedConversation.thread as LoadOfferThread)?.offer_amount ? parseFloat(String((selectedConversation.thread as LoadOfferThread).offer_amount)) : 0)
+              : ((selectedConversation.thread as TruckBookingThread)?.booking_amount ? parseFloat(String((selectedConversation.thread as TruckBookingThread).booking_amount)) : 0),
+            priceType: "total",
           }}
         />
       )}

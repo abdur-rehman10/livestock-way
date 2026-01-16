@@ -3201,108 +3201,208 @@ export async function acceptContract(params: {
   if (["ACCEPTED", "REJECTED", "LOCKED"].includes(contract.status)) {
     throw new Error("Contract is already finalized.");
   }
-  if (!contract.offer_id) {
-    throw new Error("Contract must be linked to an offer.");
-  }
-  if (await loadHasActiveBooking(contract.load_id)) {
-    throw new Error("Load already has an active booking.");
-  }
-  const offer = await getLoadOfferById(contract.offer_id);
-  if (!offer) {
-    throw new Error("Offer not found for contract.");
-  }
-  const load = await getLoadById(offer.load_id);
+  
+  const load = await getLoadById(contract.load_id);
   if (!load) {
     throw new Error("Load not found.");
   }
-  const amount = Number(contract.price_amount ?? offer.offered_amount);
-  if (!amount || Number.isNaN(amount) || amount <= 0) {
-    throw new Error("Contract amount is invalid.");
-  }
-  const paymentModeSelection = load.payment_mode
-    ? {
-        paymentMode: load.payment_mode,
-        directDisclaimerAt: load.direct_payment_disclaimer_accepted_at ?? null,
-        directDisclaimerVersion: load.direct_payment_disclaimer_version ?? null,
-      }
-    : undefined;
-  const { trip, payment } = await acceptOfferAndCreateTrip({
-    offerId: offer.id,
-    loadId: offer.load_id,
-    haulerId: offer.hauler_id,
-    shipperId: load.shipper_id,
-    shipperUserId: load.shipper_user_id,
-    haulerUserId: offer.created_by_user_id,
-    amount,
-    currency: offer.currency,
-    ...(paymentModeSelection ? { paymentModeSelection } : {}),
-  });
-  const loadDetails = await getLoadDetails(offer.load_id);
-  const requestedHeadcount = ensureNumeric(loadDetails?.animal_count);
-  const requestedWeight = ensureNumeric(loadDetails?.estimated_weight_kg);
-  const bookingInsert = await pool.query(
-    `
-      INSERT INTO load_bookings (
-        load_id,
-        hauler_id,
-        shipper_id,
-        offer_id,
-        requested_headcount,
-        requested_weight_kg,
-        offered_amount,
-        offered_currency,
-        status,
-        notes,
-        created_by_user_id,
-        updated_by_user_id,
-        payment_mode,
-        direct_payment_disclaimer_accepted_at,
-        direct_payment_disclaimer_version
-      )
-      VALUES (
-        $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15
-      )
-      RETURNING *
-    `,
-    [
-      offer.load_id,
-      offer.hauler_id,
-      load.shipper_id,
-      offer.id,
-      requestedHeadcount,
-      requestedWeight,
+
+  // Handle contracts linked to offers
+  if (contract.offer_id) {
+    if (await loadHasActiveBooking(contract.load_id)) {
+      throw new Error("Load already has an active booking.");
+    }
+    const offer = await getLoadOfferById(contract.offer_id);
+    if (!offer) {
+      throw new Error("Offer not found for contract.");
+    }
+    const amount = Number(contract.price_amount ?? offer.offered_amount);
+    if (!amount || Number.isNaN(amount) || amount <= 0) {
+      throw new Error("Contract amount is invalid.");
+    }
+    const paymentModeSelection = load.payment_mode
+      ? {
+          paymentMode: load.payment_mode,
+          directDisclaimerAt: load.direct_payment_disclaimer_accepted_at ?? null,
+          directDisclaimerVersion: load.direct_payment_disclaimer_version ?? null,
+        }
+      : undefined;
+    const { trip, payment } = await acceptOfferAndCreateTrip({
+      offerId: offer.id,
+      loadId: offer.load_id,
+      haulerId: offer.hauler_id,
+      shipperId: load.shipper_id,
+      shipperUserId: load.shipper_user_id,
+      haulerUserId: offer.created_by_user_id,
       amount,
-      offer.currency,
+      currency: offer.currency,
+      ...(paymentModeSelection ? { paymentModeSelection } : {}),
+    });
+    const loadDetails = await getLoadDetails(offer.load_id);
+    const requestedHeadcount = ensureNumeric(loadDetails?.animal_count);
+    const requestedWeight = ensureNumeric(loadDetails?.estimated_weight_kg);
+    const bookingInsert = await pool.query(
+      `
+        INSERT INTO load_bookings (
+          load_id,
+          hauler_id,
+          shipper_id,
+          offer_id,
+          requested_headcount,
+          requested_weight_kg,
+          offered_amount,
+          offered_currency,
+          status,
+          notes,
+          created_by_user_id,
+          updated_by_user_id,
+          payment_mode,
+          direct_payment_disclaimer_accepted_at,
+          direct_payment_disclaimer_version
+        )
+        VALUES (
+          $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15
+        )
+        RETURNING *
+      `,
+      [
+        offer.load_id,
+        offer.hauler_id,
+        load.shipper_id,
+        offer.id,
+        requestedHeadcount,
+        requestedWeight,
+        amount,
+        offer.currency,
+        BookingStatus.ACCEPTED,
+        "Accepted via contract",
+        contract.created_by_user_id,
+        params.actingUserId,
+        load.payment_mode ?? "ESCROW",
+        load.direct_payment_disclaimer_accepted_at ?? null,
+        load.direct_payment_disclaimer_version ?? null,
+      ]
+    );
+    const booking = mapBookingRow(bookingInsert.rows[0]);
+    const updatedContract = await pool.query(
+      `
+        UPDATE contracts
+        SET status = 'ACCEPTED',
+            accepted_at = NOW(),
+            locked_at = NOW(),
+            booking_id = $2,
+            updated_by_user_id = $3,
+            updated_at = NOW()
+        WHERE id = $1
+        RETURNING *
+      `,
+      [contract.id, booking.id, params.actingUserId]
+    );
+    return {
+      contract: mapContractRow(updatedContract.rows[0]),
+      booking,
+      trip,
+      payment,
+    };
+  }
+  
+  // Handle contracts linked to bookings (truck bookings)
+  if (contract.booking_id) {
+    const existingBooking = await getBookingById(contract.booking_id);
+    if (!existingBooking) {
+      throw new Error("Booking not found for contract.");
+    }
+    if (existingBooking.status !== BookingStatus.REQUESTED) {
+      throw new Error("Booking is not in REQUESTED status.");
+    }
+    
+    const amount = Number(contract.price_amount ?? existingBooking.offered_amount ?? 0);
+    if (!amount || Number.isNaN(amount) || amount <= 0) {
+      throw new Error("Contract amount is invalid.");
+    }
+    
+    const paymentModeSelection = load.payment_mode
+      ? {
+          paymentMode: load.payment_mode,
+          directDisclaimerAt: load.direct_payment_disclaimer_accepted_at ?? null,
+          directDisclaimerVersion: load.direct_payment_disclaimer_version ?? null,
+        }
+      : undefined;
+    
+    let trip: TripRecord;
+    let payment: PaymentRecord;
+    
+    // If booking has an offer_id, use offer-based flow
+    if (existingBooking.offer_id) {
+      const offer = await getLoadOfferById(existingBooking.offer_id);
+      if (!offer) {
+        throw new Error("Offer not found for booking.");
+      }
+      const result = await acceptOfferAndCreateTrip({
+        offerId: offer.id,
+        loadId: offer.load_id,
+        haulerId: offer.hauler_id,
+        shipperId: load.shipper_id,
+        shipperUserId: load.shipper_user_id,
+        haulerUserId: offer.created_by_user_id,
+        amount: Number(offer.offered_amount),
+        currency: offer.currency,
+        ...(paymentModeSelection ? { paymentModeSelection } : {}),
+      });
+      trip = result.trip;
+      payment = result.payment;
+    } else if (existingBooking.truck_availability_id) {
+      // Use truck booking flow
+      const result = await createTripFromTruckBooking(
+        existingBooking,
+        paymentModeSelection || undefined
+      );
+      trip = result.trip;
+      payment = result.payment;
+    } else {
+      throw new Error("Booking is missing source information.");
+    }
+    
+    // Update booking status to ACCEPTED
+    const updatedBooking = await updateBookingStatus(
+      existingBooking.id,
       BookingStatus.ACCEPTED,
-      "Accepted via contract",
-      contract.created_by_user_id,
-      params.actingUserId,
-      load.payment_mode ?? "ESCROW",
-      load.direct_payment_disclaimer_accepted_at ?? null,
-      load.direct_payment_disclaimer_version ?? null,
-    ]
-  );
-  const booking = mapBookingRow(bookingInsert.rows[0]);
-  const updatedContract = await pool.query(
-    `
-      UPDATE contracts
-      SET status = 'ACCEPTED',
-          accepted_at = NOW(),
-          locked_at = NOW(),
-          booking_id = $2,
-          updated_by_user_id = $3,
-          updated_at = NOW()
-      WHERE id = $1
-      RETURNING *
-    `,
-    [contract.id, booking.id, params.actingUserId]
-  );
-  return {
-    contract: mapContractRow(updatedContract.rows[0]),
-    booking,
-    trip,
-    payment,
-  };
+      params.actingUserId
+    );
+    if (!updatedBooking) {
+      throw new Error("Failed to update booking status.");
+    }
+    
+    // Refresh truck availability if needed
+    if (existingBooking.truck_availability_id) {
+      await refreshTruckAvailabilityState(existingBooking.truck_availability_id);
+    }
+    
+    // Update contract
+    const updatedContract = await pool.query(
+      `
+        UPDATE contracts
+        SET status = 'ACCEPTED',
+            accepted_at = NOW(),
+            locked_at = NOW(),
+            updated_by_user_id = $2,
+            updated_at = NOW()
+        WHERE id = $1
+        RETURNING *
+      `,
+      [contract.id, params.actingUserId]
+    );
+    
+    return {
+      contract: mapContractRow(updatedContract.rows[0]),
+      booking: updatedBooking,
+      trip,
+      payment,
+    };
+  }
+  
+  // If contract has neither offer_id nor booking_id, throw error
+  throw new Error("Contract must be linked to either an offer or a booking.");
 }
 
 export async function rejectContract(params: {

@@ -7,6 +7,7 @@ import { fetchUserThreads, fetchThreadMessages, sendMessage, fetchThreadById, ty
 import { fetchUserBuySellThreads, fetchBuySellThreadMessages, sendBuySellMessage, fetchBuySellThreadById, type BuySellApplicationThread, type BuySellApplicationMessage } from "../api/buySellMessages";
 import { fetchUserResourcesThreads, fetchResourcesThreadMessages, sendResourcesMessage, fetchResourcesThreadById, type ResourcesApplicationThread, type ResourcesApplicationMessage } from "../api/resourcesMessages";
 import { fetchUserLoadOfferThreads, fetchLoadOfferThreadMessages, sendLoadOfferMessage, fetchLoadOfferThreadById, fetchLoadOfferThreadByOfferId, type LoadOfferThread, type LoadOfferMessage } from "../api/loadOfferMessages";
+import { fetchUserTruckBookingThreads, fetchTruckBookingThreadMessages, sendTruckBookingMessage, fetchTruckBookingThreadById, fetchTruckBookingThreadByBookingId, type TruckBookingThread, type TruckBookingMessage } from "../api/truckBookingMessages";
 import { fetchJobById, type JobListing } from "../api/jobs";
 import { fetchJobApplications } from "../api/jobs";
 import { fetchBuyAndSellById, type BuyAndSellListing } from "../api/buyAndSell";
@@ -23,21 +24,23 @@ import { storage, STORAGE_KEYS } from "../lib/storage";
 import { API_BASE_URL } from "../lib/api";
 import { getSocket, subscribeToSocketEvent, joinSocketRoom, SOCKET_EVENTS } from "../lib/socket";
 
-type ThreadType = "job" | "buy-sell" | "resources" | "load-offer";
-type UnifiedThread = (JobApplicationThread & { type: "job" }) | (BuySellApplicationThread & { type: "buy-sell" }) | (ResourcesApplicationThread & { type: "resources" }) | (LoadOfferThread & { type: "load-offer" });
-type UnifiedMessage = (JobApplicationMessage & { type: "job" }) | (BuySellApplicationMessage & { type: "buy-sell" }) | (ResourcesApplicationMessage & { type: "resources" }) | (LoadOfferMessage & { type: "load-offer" });
+type ThreadType = "job" | "buy-sell" | "resources" | "load-offer" | "truck-booking";
+type UnifiedThread = (JobApplicationThread & { type: "job" }) | (BuySellApplicationThread & { type: "buy-sell" }) | (ResourcesApplicationThread & { type: "resources" }) | (LoadOfferThread & { type: "load-offer" }) | (TruckBookingThread & { type: "truck-booking" });
+type UnifiedMessage = (JobApplicationMessage & { type: "job" }) | (BuySellApplicationMessage & { type: "buy-sell" }) | (ResourcesApplicationMessage & { type: "resources" }) | (LoadOfferMessage & { type: "load-offer" }) | (TruckBookingMessage & { type: "truck-booking" });
 
 export default function JobMessages() {
   const [jobThreads, setJobThreads] = useState<JobApplicationThread[]>([]);
   const [buySellThreads, setBuySellThreads] = useState<BuySellApplicationThread[]>([]);
   const [resourcesThreads, setResourcesThreads] = useState<ResourcesApplicationThread[]>([]);
   const [loadOfferThreads, setLoadOfferThreads] = useState<LoadOfferThread[]>([]);
+  const [truckBookingThreads, setTruckBookingThreads] = useState<TruckBookingThread[]>([]);
   const [selectedThread, setSelectedThread] = useState<UnifiedThread | null>(null);
   const [messages, setMessages] = useState<UnifiedMessage[]>([]);
   const [jobDetails, setJobDetails] = useState<JobListing | null>(null);
   const [buySellDetails, setBuySellDetails] = useState<BuyAndSellListing | null>(null);
   const [resourcesDetails, setResourcesDetails] = useState<ResourcesListing | null>(null);
   const [loadOfferDetails, setLoadOfferDetails] = useState<{ load: LoadDetail; offer: LoadOffer; truck: TruckRecord | null } | null>(null);
+  const [truckBookingDetails, setTruckBookingDetails] = useState<{ load: LoadDetail; booking: any; truckAvailability: any; truck: TruckRecord | null } | null>(null);
   const [showContractDialog, setShowContractDialog] = useState(false);
   const [loading, setLoading] = useState(true);
   const [messagesLoading, setMessagesLoading] = useState(false);
@@ -53,22 +56,25 @@ export default function JobMessages() {
   const messagesContainerRef = useRef<HTMLDivElement>(null);
 
   const userId = storage.get<string | null>(STORAGE_KEYS.USER_ID, null);
+  const userRole = storage.get<string | null>(STORAGE_KEYS.USER_ROLE, null);
   const socketRef = useRef<ReturnType<typeof getSocket> | null>(null);
   const currentThreadRoomRef = useRef<string | null>(null);
 
   const loadThreads = useCallback(async () => {
     try {
       setLoading(true);
-      const [jobResult, buySellResult, resourcesResult, loadOfferResult] = await Promise.all([
+      const [jobResult, buySellResult, resourcesResult, loadOfferResult, truckBookingResult] = await Promise.all([
         fetchUserThreads().catch(() => []),
         fetchUserBuySellThreads().catch(() => []),
         fetchUserResourcesThreads().catch(() => []),
         fetchUserLoadOfferThreads().catch(() => []),
+        fetchUserTruckBookingThreads().catch(() => []),
       ]);
       setJobThreads(jobResult);
       setBuySellThreads(buySellResult);
       setResourcesThreads(resourcesResult);
       setLoadOfferThreads(loadOfferResult);
+      setTruckBookingThreads(truckBookingResult);
       // Don't auto-select first thread - let user choose or open via custom event
     } catch (err: any) {
       console.error("Error loading threads:", err);
@@ -83,38 +89,19 @@ export default function JobMessages() {
     ...buySellThreads.map(t => ({ ...t, type: "buy-sell" as const })),
     ...resourcesThreads.map(t => ({ ...t, type: "resources" as const })),
     ...loadOfferThreads.map(t => ({ ...t, type: "load-offer" as const })),
+    ...truckBookingThreads.map(t => ({ ...t, type: "truck-booking" as const })),
   ].sort((a, b) => {
     const aTime = a.last_message_at || a.updated_at;
     const bTime = b.last_message_at || b.updated_at;
     return new Date(bTime).getTime() - new Date(aTime).getTime();
   });
 
-  const loadMessages = useCallback(async (thread: UnifiedThread) => {
+  const loadJobDetails = useCallback(async (jobId: number) => {
     try {
-      setMessagesLoading(true);
-      shouldScrollRef.current = true; // Enable scrolling when loading messages
-      if (thread.type === "job") {
-        const result = await fetchThreadMessages(thread.id);
-        setMessages(result.map(m => ({ ...m, type: "job" as const })));
-        await loadJobDetails(thread.job_id);
-      } else if (thread.type === "buy-sell") {
-        const result = await fetchBuySellThreadMessages(thread.id);
-        setMessages(result.map(m => ({ ...m, type: "buy-sell" as const })));
-        await loadBuySellDetails(thread.listing_id);
-      } else if (thread.type === "resources") {
-        const result = await fetchResourcesThreadMessages(thread.id);
-        setMessages(result.map(m => ({ ...m, type: "resources" as const })));
-        await loadResourcesDetails(thread.listing_id);
-      } else if (thread.type === "load-offer") {
-        const result = await fetchLoadOfferThreadMessages(thread.id);
-        setMessages(result.map(m => ({ ...m, type: "load-offer" as const })));
-        await loadLoadOfferDetails(thread.offer_id, thread.load_id);
-      }
+      const job = await fetchJobById(jobId);
+      setJobDetails(job);
     } catch (err: any) {
-      console.error("Error loading messages:", err);
-      toast.error(err?.message ?? "Failed to load messages");
-    } finally {
-      setMessagesLoading(false);
+      console.error("Error loading job details:", err);
     }
   }, []);
 
@@ -133,15 +120,6 @@ export default function JobMessages() {
       setResourcesDetails(listing);
     } catch (err: any) {
       console.error("Error loading resource details:", err);
-    }
-  }, []);
-
-  const loadJobDetails = useCallback(async (jobId: number) => {
-    try {
-      const job = await fetchJobById(jobId);
-      setJobDetails(job);
-    } catch (err: any) {
-      console.error("Error loading job details:", err);
     }
   }, []);
 
@@ -218,6 +196,149 @@ export default function JobMessages() {
     }
   }, []);
 
+  const loadTruckBookingDetails = useCallback(async (bookingId: number, loadId: number, truckAvailabilityId: number) => {
+    try {
+      // Fetch all data in parallel
+      const [load, bookingsResult, truckAvailabilityResult] = await Promise.all([
+        fetchLoadById(loadId).catch((err) => {
+          console.error("Error fetching load:", err);
+          return null;
+        }),
+        fetchBookings().catch((err) => {
+          console.error("Error fetching bookings:", err);
+          return { items: [] };
+        }),
+        fetchTruckAvailability({}).catch((err) => {
+          console.error("Error fetching truck availability:", err);
+          return { items: [] };
+        }),
+      ]);
+      
+      if (!load) {
+        console.error("Load not found for loadId:", loadId);
+        toast.error("Could not load load details");
+        return;
+      }
+      
+      const booking = bookingsResult.items.find(b => String(b.id) === String(bookingId));
+      const truckAvailability = truckAvailabilityResult.items.find(ta => String(ta.id) === String(truckAvailabilityId));
+      
+      if (!booking) {
+        console.error("Booking not found for bookingId:", bookingId);
+        toast.error("Could not load booking details");
+      }
+      
+      if (!truckAvailability) {
+        console.error("Truck availability not found for truckAvailabilityId:", truckAvailabilityId);
+        toast.error("Could not load truck availability details");
+      }
+      
+      // Set details even if some are missing (partial data is better than nothing)
+      if (!booking || !truckAvailability) {
+        // Still set what we have so at least load details show
+        setTruckBookingDetails({ 
+          load, 
+          booking: booking || null, 
+          truckAvailability: truckAvailability || null, 
+          truck: null 
+        });
+        return;
+      }
+      
+      // Get truck details if available
+      // Only haulers can fetch their own trucks via fetchTrucks()
+      // For shippers, we need to check if truck details are included in the booking/availability response
+      let truck: TruckRecord | null = null;
+      if (truckAvailability.truck_id) {
+        // Check if booking response includes truck details (similar to load offers)
+        if ((booking as any)?.truck) {
+          // Use truck details from booking response (available to both shipper and hauler)
+          const bookingTruck = (booking as any).truck;
+          truck = {
+            id: Number(bookingTruck.id),
+            hauler_id: Number(booking.hauler_id),
+            plate_number: bookingTruck.plate_number,
+            truck_type: bookingTruck.truck_type,
+            truck_name: bookingTruck.truck_name || null,
+            capacity: bookingTruck.capacity || null,
+            species_supported: bookingTruck.species_supported || null,
+            status: "active",
+            created_at: "",
+          } as TruckRecord;
+        } else if ((truckAvailability as any)?.truck) {
+          // Check if truck availability response includes truck details
+          const availabilityTruck = (truckAvailability as any).truck;
+          truck = {
+            id: Number(availabilityTruck.id),
+            hauler_id: Number(truckAvailability.hauler_id),
+            plate_number: availabilityTruck.plate_number,
+            truck_type: availabilityTruck.truck_type,
+            truck_name: availabilityTruck.truck_name || null,
+            capacity: availabilityTruck.capacity || null,
+            species_supported: availabilityTruck.species_supported || null,
+            status: "active",
+            created_at: "",
+          } as TruckRecord;
+        } else if (userRole === "hauler") {
+          // Only haulers can fetch their own trucks
+          try {
+            const trucksResult = await fetchTrucks();
+            truck = trucksResult.items.find(t => String(t.id) === String(truckAvailability.truck_id)) || null;
+          } catch (err) {
+            console.warn("Could not fetch truck details:", err);
+            // Continue without truck - it's optional
+          }
+        } else {
+          // For shippers, we can't fetch hauler's trucks, so truck will remain null
+          console.log("Truck details not available in booking/availability response, and user is not a hauler");
+        }
+      }
+      
+      setTruckBookingDetails({ load, booking, truckAvailability, truck });
+    } catch (err: any) {
+      console.error("Error loading truck booking details:", err);
+      toast.error(err?.message ?? "Failed to load truck booking details");
+    }
+  }, []);
+
+  const loadMessages = useCallback(async (thread: UnifiedThread) => {
+    try {
+      setMessagesLoading(true);
+      shouldScrollRef.current = true; // Enable scrolling when loading messages
+      if (thread.type === "job") {
+        const result = await fetchThreadMessages(thread.id);
+        setMessages(result.map(m => ({ ...m, type: "job" as const })));
+        await loadJobDetails(thread.job_id);
+      } else if (thread.type === "buy-sell") {
+        const result = await fetchBuySellThreadMessages(thread.id);
+        setMessages(result.map(m => ({ ...m, type: "buy-sell" as const })));
+        await loadBuySellDetails(thread.listing_id);
+      } else if (thread.type === "resources") {
+        const result = await fetchResourcesThreadMessages(thread.id);
+        setMessages(result.map(m => ({ ...m, type: "resources" as const })));
+        await loadResourcesDetails(thread.listing_id);
+      } else if (thread.type === "load-offer") {
+        const result = await fetchLoadOfferThreadMessages(thread.id);
+        setMessages(result.map(m => ({ ...m, type: "load-offer" as const })));
+        await loadLoadOfferDetails(thread.offer_id, thread.load_id);
+      } else if (thread.type === "truck-booking") {
+        const result = await fetchTruckBookingThreadMessages(thread.id);
+        setMessages(result.map(m => ({ ...m, type: "truck-booking" as const })));
+        if (thread.booking_id && thread.load_id && thread.truck_availability_id) {
+          await loadTruckBookingDetails(thread.booking_id, thread.load_id, thread.truck_availability_id);
+        } else {
+          console.error("Missing required IDs for truck booking:", { booking_id: thread.booking_id, load_id: thread.load_id, truck_availability_id: thread.truck_availability_id });
+          toast.error("Missing booking information");
+        }
+      }
+    } catch (err: any) {
+      console.error("Error loading messages:", err);
+      toast.error(err?.message ?? "Failed to load messages");
+    } finally {
+      setMessagesLoading(false);
+    }
+  }, [loadJobDetails, loadBuySellDetails, loadResourcesDetails, loadLoadOfferDetails, loadTruckBookingDetails]);
+
   useEffect(() => {
     loadThreads();
   }, [loadThreads]);
@@ -237,7 +358,9 @@ export default function JobMessages() {
           ? `buy-sell-thread-${selectedThread.id}`
           : selectedThread.type === "resources"
             ? `resources-thread-${selectedThread.id}`
-            : `load-offer-thread-${selectedThread.id}`;
+            : selectedThread.type === "load-offer"
+              ? `load-offer-thread-${selectedThread.id}`
+              : `truck-booking-thread-${selectedThread.id}`;
       if (currentThreadRoomRef.current !== threadRoom) {
         // Leave previous room if any
         if (currentThreadRoomRef.current) {
@@ -462,6 +585,62 @@ export default function JobMessages() {
       }
     );
 
+    // Subscribe to truck-booking message events
+    const unsubscribeTruckBookingMessage = subscribeToSocketEvent(
+      SOCKET_EVENTS.TRUCK_BOOKING_MESSAGE,
+      (payload: any) => {
+        const { message, thread } = payload;
+        
+        if (selectedThread && selectedThread.type === "truck-booking" && thread.id === selectedThread.id) {
+          setMessages((prev) => {
+            if (prev.some((m) => m.id === message.id && m.type === "truck-booking")) {
+              return prev;
+            }
+            return [...prev, { ...message, type: "truck-booking" as const }];
+          });
+          // Scroll will be handled by the messages.length useEffect
+        }
+        
+        setTruckBookingThreads((prev) =>
+          prev.map((t) =>
+            t.id === thread.id
+              ? {
+                  ...t,
+                  last_message: message.message,
+                  last_message_at: message.created_at,
+                  first_message_sent: true,
+                  unread_count: 
+                    Number(message.sender_user_id) !== Number(userId) && 
+                    (!selectedThread || selectedThread.type !== "truck-booking" || selectedThread.id !== thread.id)
+                      ? (t.unread_count || 0) + 1 
+                      : t.unread_count,
+                }
+              : t
+          )
+        );
+      }
+    );
+
+    const unsubscribeTruckBookingThreadUpdate = subscribeToSocketEvent(
+      SOCKET_EVENTS.TRUCK_BOOKING_THREAD_UPDATED,
+      (payload: any) => {
+        const { threads } = payload;
+        setTruckBookingThreads(threads);
+        
+        if (selectedThread && selectedThread.type === "truck-booking") {
+          const updatedThread = threads.find((t: TruckBookingThread) => t.id === selectedThread.id);
+          if (updatedThread) {
+            setSelectedThread((prev) => {
+              if (prev && prev.type === "truck-booking" && prev.id === updatedThread.id) {
+                return { ...prev, ...updatedThread };
+              }
+              return prev;
+            });
+          }
+        }
+      }
+    );
+
     return () => {
       unsubscribeJobMessage();
       unsubscribeBuySellMessage();
@@ -470,6 +649,8 @@ export default function JobMessages() {
       unsubscribeBuySellThreadUpdate();
       unsubscribeLoadOfferMessage();
       unsubscribeLoadOfferThreadUpdate();
+      unsubscribeTruckBookingMessage();
+      unsubscribeTruckBookingThreadUpdate();
       // Leave thread room on cleanup
       if (currentThreadRoomRef.current && socket) {
         socket.emit("leave", currentThreadRoomRef.current);
@@ -612,11 +793,17 @@ export default function JobMessages() {
             t.id === threadId ? { ...t, unread_count: 0 } : t
           )
         );
+      } else if (threadType === "truck-booking") {
+        setTruckBookingThreads((prev) =>
+          prev.map((t) =>
+            t.id === threadId ? { ...t, unread_count: 0 } : t
+          )
+        );
       }
     } else {
       previousThreadIdRef.current = null;
     }
-  }, [selectedThread, loadMessages, loadJobDetails, loadBuySellDetails, loadResourcesDetails, loadLoadOfferDetails, loadApplicantInfo, loadBuySellApplicantInfo, loadResourcesApplicantInfo, userId, loadThreads]);
+  }, [selectedThread, loadMessages, loadJobDetails, loadBuySellDetails, loadResourcesDetails, loadLoadOfferDetails, loadTruckBookingDetails, loadApplicantInfo, loadBuySellApplicantInfo, loadResourcesApplicantInfo, userId, loadThreads]);
 
   // Listen for custom events to open specific threads
   useEffect(() => {
@@ -699,16 +886,46 @@ export default function JobMessages() {
         setHideThreadList(true); // Hide thread list when opening from loadboard (show chat directly)
         // Load messages immediately
         await loadMessages(unifiedThread);
-        const [updatedJobThreads, updatedBuySellThreads, updatedResourcesThreads, updatedLoadOfferThreads] = await Promise.all([
+        const [updatedJobThreads, updatedBuySellThreads, updatedResourcesThreads, updatedLoadOfferThreads, updatedTruckBookingThreads] = await Promise.all([
           fetchUserThreads().catch(() => []),
           fetchUserBuySellThreads().catch(() => []),
           fetchUserResourcesThreads().catch(() => []),
           fetchUserLoadOfferThreads().catch(() => []),
+          fetchUserTruckBookingThreads().catch(() => []),
         ]);
         setJobThreads(updatedJobThreads);
         setBuySellThreads(updatedBuySellThreads);
         setResourcesThreads(updatedResourcesThreads);
         setLoadOfferThreads(updatedLoadOfferThreads);
+        setTruckBookingThreads(updatedTruckBookingThreads);
+      } catch (err) {
+        console.error("Error loading thread:", err);
+        toast.error("Failed to load thread");
+      }
+    };
+
+    const handleOpenTruckBookingThread = async (event: CustomEvent) => {
+      const bookingId = (event.detail as { bookingId: number }).bookingId;
+      try {
+        const thread = await fetchTruckBookingThreadByBookingId(bookingId);
+        const unifiedThread = { ...thread, type: "truck-booking" as const };
+        setSelectedThread(unifiedThread);
+        setShowChat(true); // Show chat view
+        setHideThreadList(true); // Hide thread list when opening from truck board (show chat directly)
+        // Load messages immediately
+        await loadMessages(unifiedThread);
+        const [updatedJobThreads, updatedBuySellThreads, updatedResourcesThreads, updatedLoadOfferThreads, updatedTruckBookingThreads] = await Promise.all([
+          fetchUserThreads().catch(() => []),
+          fetchUserBuySellThreads().catch(() => []),
+          fetchUserResourcesThreads().catch(() => []),
+          fetchUserLoadOfferThreads().catch(() => []),
+          fetchUserTruckBookingThreads().catch(() => []),
+        ]);
+        setJobThreads(updatedJobThreads);
+        setBuySellThreads(updatedBuySellThreads);
+        setResourcesThreads(updatedResourcesThreads);
+        setLoadOfferThreads(updatedLoadOfferThreads);
+        setTruckBookingThreads(updatedTruckBookingThreads);
       } catch (err) {
         console.error("Error loading thread:", err);
         toast.error("Failed to load thread");
@@ -719,11 +936,13 @@ export default function JobMessages() {
     window.addEventListener("open-buy-sell-thread", handleOpenBuySellThread as unknown as EventListener);
     window.addEventListener("open-resources-thread", handleOpenResourcesThread as unknown as EventListener);
     window.addEventListener("open-load-offer-thread", handleOpenLoadOfferThread as unknown as EventListener);
+    window.addEventListener("open-truck-booking-thread", handleOpenTruckBookingThread as unknown as EventListener);
     return () => {
       window.removeEventListener("open-job-thread", handleOpenJobThread as unknown as EventListener);
       window.removeEventListener("open-buy-sell-thread", handleOpenBuySellThread as unknown as EventListener);
       window.removeEventListener("open-resources-thread", handleOpenResourcesThread as unknown as EventListener);
       window.removeEventListener("open-load-offer-thread", handleOpenLoadOfferThread as unknown as EventListener);
+      window.removeEventListener("open-truck-booking-thread", handleOpenTruckBookingThread as unknown as EventListener);
     };
   }, [loadMessages]);
 
@@ -800,14 +1019,23 @@ export default function JobMessages() {
     if (!messageText.trim() || !selectedThread) return;
 
     if (!selectedThread.first_message_sent) {
-      const isPoster = selectedThread.type === "job"
-        ? Number(selectedThread.job_poster_user_id) === Number(userId)
-        : selectedThread.type === "load-offer"
-          ? Number(selectedThread.shipper_user_id) === Number(userId) // Only shipper can send first message
-          : Number(selectedThread.listing_poster_user_id) === Number(userId);
-      if (!isPoster) {
-        toast.error(`Only the ${selectedThread.type === "job" ? "job poster" : selectedThread.type === "load-offer" ? "shipper" : "listing poster"} can send the first message`);
-        return;
+      if (selectedThread.type === "truck-booking") {
+        // For truck-booking, only hauler can send first message
+        const isShipper = Number(selectedThread.shipper_user_id) === Number(userId);
+        if (isShipper) {
+          toast.error("Waiting for the hauler to send the first message");
+          return;
+        }
+      } else {
+        const isPoster = selectedThread.type === "job"
+          ? Number(selectedThread.job_poster_user_id) === Number(userId)
+          : selectedThread.type === "load-offer"
+            ? Number(selectedThread.shipper_user_id) === Number(userId) // Only shipper can send first message
+            : Number(selectedThread.listing_poster_user_id) === Number(userId);
+        if (!isPoster) {
+          toast.error(`Only the ${selectedThread.type === "job" ? "job poster" : selectedThread.type === "load-offer" ? "shipper" : "listing poster"} can send the first message`);
+          return;
+        }
       }
     }
 
@@ -819,7 +1047,9 @@ export default function JobMessages() {
           ? await sendBuySellMessage(selectedThread.id, messageText.trim())
           : selectedThread.type === "resources"
             ? await sendResourcesMessage(selectedThread.id, messageText.trim())
-            : await sendLoadOfferMessage(selectedThread.id, messageText.trim());
+            : selectedThread.type === "load-offer"
+              ? await sendLoadOfferMessage(selectedThread.id, messageText.trim())
+              : await sendTruckBookingMessage(selectedThread.id, messageText.trim());
       
       setMessages((prev) => {
         if (prev.some((m) => m.id === sentMessage.id && m.type === selectedThread.type)) {
@@ -844,15 +1074,15 @@ export default function JobMessages() {
     (thread) => {
       const title = thread.type === "job" 
         ? thread.job_title 
-        : thread.type === "load-offer"
+        : thread.type === "load-offer" || thread.type === "truck-booking"
           ? thread.load_title
           : thread.listing_title;
-      const applicantName = thread.type === "load-offer" 
+      const applicantName = thread.type === "load-offer" || thread.type === "truck-booking"
         ? (Number(thread.shipper_user_id) === Number(userId) ? thread.hauler_name : thread.shipper_name)
         : thread.applicant_name;
       const posterName = thread.type === "job" 
         ? thread.job_poster_name 
-        : thread.type === "load-offer"
+        : thread.type === "load-offer" || thread.type === "truck-booking"
           ? (Number(thread.shipper_user_id) === Number(userId) ? thread.hauler_name : thread.shipper_name)
           : thread.listing_poster_name;
       const query = searchQuery.toLowerCase();
@@ -868,19 +1098,19 @@ export default function JobMessages() {
   const isPoster = selectedThread 
     ? (selectedThread.type === "job"
         ? Number(selectedThread.job_poster_user_id) === Number(userId)
-        : selectedThread.type === "load-offer"
+        : selectedThread.type === "load-offer" || selectedThread.type === "truck-booking"
           ? Number(selectedThread.shipper_user_id) === Number(userId)
           : Number(selectedThread.listing_poster_user_id) === Number(userId))
     : false;
   const isJobPoster = isPoster;
   const otherPersonName = selectedThread
     ? isPoster
-      ? (selectedThread.type === "load-offer" 
+      ? (selectedThread.type === "load-offer" || selectedThread.type === "truck-booking"
           ? selectedThread.hauler_name 
           : selectedThread.applicant_name)
       : (selectedThread.type === "job" 
           ? selectedThread.job_poster_name 
-          : selectedThread.type === "load-offer"
+          : selectedThread.type === "load-offer" || selectedThread.type === "truck-booking"
             ? selectedThread.shipper_name
             : selectedThread.listing_poster_name)
     : "";
@@ -927,19 +1157,19 @@ export default function JobMessages() {
               const isSelected = selectedThread?.id === thread.id && selectedThread?.type === thread.type;
               const isPoster = thread.type === "job" 
                 ? Number(thread.job_poster_user_id) === Number(userId)
-                : thread.type === "load-offer"
+                : thread.type === "load-offer" || thread.type === "truck-booking"
                   ? Number(thread.shipper_user_id) === Number(userId)
                   : Number(thread.listing_poster_user_id) === Number(userId);
               const otherName = isPoster 
-                ? (thread.type === "load-offer" ? thread.hauler_name : thread.applicant_name)
+                ? (thread.type === "load-offer" || thread.type === "truck-booking" ? thread.hauler_name : thread.applicant_name)
                 : (thread.type === "job" 
                     ? thread.job_poster_name 
-                    : thread.type === "load-offer"
+                    : thread.type === "load-offer" || thread.type === "truck-booking"
                       ? thread.shipper_name
                       : thread.listing_poster_name);
               const threadTitle = thread.type === "job" 
                 ? thread.job_title 
-                : thread.type === "load-offer"
+                : thread.type === "load-offer" || thread.type === "truck-booking"
                   ? thread.load_title
                   : thread.listing_title;
 
@@ -966,7 +1196,7 @@ export default function JobMessages() {
                           <Briefcase className="w-6 h-6 text-gray-500 dark:text-gray-400" />
                         ) : thread.type === "buy-sell" ? (
                           <DollarSign className="w-6 h-6 text-gray-500 dark:text-gray-400" />
-                        ) : thread.type === "load-offer" ? (
+                        ) : thread.type === "load-offer" || thread.type === "truck-booking" ? (
                           <Truck className="w-6 h-6 text-gray-500 dark:text-gray-400" />
                         ) : (
                           <Briefcase className="w-6 h-6 text-gray-500 dark:text-gray-400" />
@@ -992,12 +1222,12 @@ export default function JobMessages() {
 
                       <p className="text-xs text-gray-600 dark:text-gray-400 mb-1 truncate">
                         {isPoster 
-                          ? (thread.type === "load-offer" ? "Hauler" : "Applicant")
+                          ? (thread.type === "load-offer" || thread.type === "truck-booking" ? "Hauler" : "Applicant")
                           : (thread.type === "job" 
                               ? "Job Poster" 
                               : thread.type === "buy-sell" 
                                 ? "Listing Poster" 
-                                : thread.type === "load-offer"
+                                : thread.type === "load-offer" || thread.type === "truck-booking"
                                   ? "Shipper"
                                   : "Resource Poster")}: {otherName}
                       </p>
@@ -1062,12 +1292,12 @@ export default function JobMessages() {
                   <h3 className="text-base font-semibold text-gray-900 dark:text-white">{otherPersonName}</h3>
                   <p className="text-xs text-gray-500 dark:text-gray-400">
                     {isPoster 
-                      ? (selectedThread.type === "load-offer" ? "Hauler" : "Applicant")
+                      ? (selectedThread.type === "load-offer" || selectedThread.type === "truck-booking" ? "Hauler" : "Applicant")
                       : (selectedThread.type === "job" 
                           ? "Job Poster" 
                           : selectedThread.type === "buy-sell" 
                             ? "Listing Poster" 
-                            : selectedThread.type === "load-offer"
+                            : selectedThread.type === "load-offer" || selectedThread.type === "truck-booking"
                               ? "Shipper"
                               : "Resource Poster")}
                   </p>
@@ -1089,8 +1319,8 @@ export default function JobMessages() {
             </div>
           </div>
 
-          {/* Job/Listing/Resource/Load Offer Details - Pinned */}
-          {((selectedThread?.type === "job" && jobDetails) || (selectedThread?.type === "buy-sell" && buySellDetails) || (selectedThread?.type === "resources" && resourcesDetails) || (selectedThread?.type === "load-offer" && loadOfferDetails)) && (
+          {/* Job/Listing/Resource/Load Offer/Truck Booking Details - Pinned */}
+          {((selectedThread?.type === "job" && jobDetails) || (selectedThread?.type === "buy-sell" && buySellDetails) || (selectedThread?.type === "resources" && resourcesDetails) || (selectedThread?.type === "load-offer" && loadOfferDetails) || (selectedThread?.type === "truck-booking" && truckBookingDetails)) && (
             <div className="px-4 md:px-6 py-4 bg-blue-50 dark:bg-blue-900/20 border-b border-blue-100 dark:border-blue-800">
               <div className="space-y-3">
                 <div className="flex items-center justify-between">
@@ -1103,7 +1333,7 @@ export default function JobMessages() {
                         <Briefcase className="w-4 h-4 text-white" />
                       ) : selectedThread?.type === "buy-sell" ? (
                         <DollarSign className="w-4 h-4 text-white" />
-                      ) : selectedThread?.type === "load-offer" ? (
+                      ) : selectedThread?.type === "load-offer" || selectedThread?.type === "truck-booking" ? (
                         <Truck className="w-4 h-4 text-white" />
                       ) : (
                         <Briefcase className="w-4 h-4 text-white" />
@@ -1118,12 +1348,25 @@ export default function JobMessages() {
                             ? buySellDetails?.title 
                             : selectedThread?.type === "load-offer"
                               ? loadOfferDetails?.load?.title || `${loadOfferDetails?.load?.pickup_location} → ${loadOfferDetails?.load?.dropoff_location}`
-                              : resourcesDetails?.title}
+                              : selectedThread?.type === "truck-booking"
+                                ? truckBookingDetails?.load?.title || `${truckBookingDetails?.load?.pickup_location} → ${truckBookingDetails?.load?.dropoff_location}`
+                                : resourcesDetails?.title}
                       </p>
                     </div>
                   </div>
                   <div className="flex items-center gap-2">
                     {selectedThread?.type === "load-offer" && isPoster && (
+                      <Button
+                        size="sm"
+                        className="text-xs"
+                        onClick={() => setShowContractDialog(true)}
+                        style={{ backgroundColor: "#53ca97", color: "white" }}
+                      >
+                        <FileText className="w-3 h-3 mr-1" />
+                        Create Contract
+                      </Button>
+                    )}
+                    {selectedThread?.type === "truck-booking" && userRole === "shipper" && (
                       <Button
                         size="sm"
                         className="text-xs"
@@ -1326,6 +1569,68 @@ export default function JobMessages() {
                       </p>
                     </div>
                   </div>
+                ) : selectedThread?.type === "truck-booking" && truckBookingDetails ? (
+                  <div 
+                    className="grid grid-cols-2 gap-3 p-3 bg-white dark:bg-gray-800 rounded-lg border border-blue-100 dark:border-blue-800 hover:shadow-lg hover:border-blue-200 dark:hover:border-blue-700 transition-all cursor-pointer"
+                    onClick={() => setShowJobDetails(true)}
+                  >
+                    <div className="col-span-2">
+                      <div className="flex items-center gap-2 text-xs">
+                        <MapPin className="w-3 h-3 text-gray-500" />
+                        <span className="text-gray-600 dark:text-gray-400">
+                          {truckBookingDetails.load.pickup_location} → {truckBookingDetails.load.dropoff_location}
+                        </span>
+                      </div>
+                    </div>
+                    
+                    <div>
+                      <p className="text-xs text-gray-500 dark:text-gray-400">Species</p>
+                      <p className="text-sm text-gray-900 dark:text-white capitalize">
+                        {truckBookingDetails.load.species}
+                      </p>
+                    </div>
+                    
+                    <div>
+                      <p className="text-xs text-gray-500 dark:text-gray-400">Quantity</p>
+                      <p className="text-sm text-gray-900 dark:text-white">
+                        {truckBookingDetails.load.quantity} head
+                      </p>
+                    </div>
+                    
+                    {truckBookingDetails.booking && (
+                      <div className="col-span-2">
+                        <p className="text-xs text-gray-500 dark:text-gray-400">Offered Price</p>
+                        <p className="text-lg font-semibold" style={{ color: "#53ca97" }}>
+                          {truckBookingDetails.booking.offered_currency || "USD"} {truckBookingDetails.booking.offered_amount ? Number(truckBookingDetails.booking.offered_amount).toLocaleString() : "0.00"}
+                        </p>
+                      </div>
+                    )}
+                    
+                    {truckBookingDetails.truckAvailability && (
+                      <div className="col-span-2">
+                        <p className="text-xs text-gray-500 dark:text-gray-400">Truck Route</p>
+                        <p className="text-sm text-gray-900 dark:text-white">
+                          {truckBookingDetails.truckAvailability.origin_location_text}
+                          {truckBookingDetails.truckAvailability.destination_location_text ? ` → ${truckBookingDetails.truckAvailability.destination_location_text}` : ''}
+                        </p>
+                      </div>
+                    )}
+                    
+                    {truckBookingDetails.truck && (
+                      <div className="col-span-2">
+                        <p className="text-xs text-gray-500 dark:text-gray-400">Vehicle</p>
+                        <p className="text-sm text-gray-900 dark:text-white">
+                          {truckBookingDetails.truck.truck_name || truckBookingDetails.truck.plate_number} ({truckBookingDetails.truck.truck_type})
+                        </p>
+                      </div>
+                    )}
+                    
+                    <div className="col-span-2 mt-2 pt-2 border-t border-blue-100 dark:border-blue-800">
+                      <p className="text-xs text-center" style={{ color: "#53ca97" }}>
+                        Click to view full truck booking details →
+                      </p>
+                    </div>
+                  </div>
                 ) : null}
               </div>
             </div>
@@ -1343,15 +1648,19 @@ export default function JobMessages() {
                   <p className="text-sm">No messages yet</p>
                 {!selectedThread.first_message_sent && (
                   <p className="text-xs mt-2">
-                    {isPoster
-                      ? "Start the conversation by sending the first message"
-                      : `Waiting for the ${selectedThread.type === "job" 
-                          ? "job poster" 
-                          : selectedThread.type === "buy-sell" 
-                            ? "listing poster" 
-                            : selectedThread.type === "load-offer"
-                              ? "shipper"
-                              : "resource poster"} to send the first message`}
+                    {selectedThread.type === "truck-booking" && isPoster
+                      ? "Waiting for the hauler to send the first message"
+                      : selectedThread.type === "truck-booking" && !isPoster
+                        ? "Start the conversation by sending the first message"
+                        : isPoster
+                          ? "Start the conversation by sending the first message"
+                          : `Waiting for the ${selectedThread.type === "job" 
+                              ? "job poster" 
+                              : selectedThread.type === "buy-sell" 
+                                ? "listing poster" 
+                                : selectedThread.type === "load-offer"
+                                  ? "shipper"
+                                  : "resource poster"} to send the first message`}
                   </p>
                 )}
               </div>
@@ -1404,25 +1713,38 @@ export default function JobMessages() {
                     }
                   }}
                   placeholder={
-                    !selectedThread.first_message_sent && !isPoster
-                      ? `Waiting for ${selectedThread.type === "job" 
-                          ? "job poster" 
-                          : selectedThread.type === "buy-sell" 
-                            ? "listing poster" 
-                            : selectedThread.type === "load-offer"
-                              ? "shipper"
-                              : "resource poster"} to send first message...`
-                      : "Type a message..."
+                    selectedThread.type === "truck-booking" && !selectedThread.first_message_sent && isPoster
+                      ? "Waiting for the hauler to send the first message"
+                      : selectedThread.type === "truck-booking" && !selectedThread.first_message_sent && !isPoster
+                        ? "Type a message to start the conversation..."
+                        : !selectedThread.first_message_sent && !isPoster
+                          ? `Waiting for ${selectedThread.type === "job" 
+                              ? "job poster" 
+                              : selectedThread.type === "buy-sell" 
+                                ? "listing poster" 
+                                : selectedThread.type === "load-offer"
+                                  ? "shipper"
+                                  : "resource poster"} to send first message...`
+                          : "Type a message..."
                   }
                   rows={1}
-                  disabled={!selectedThread.first_message_sent && !isPoster}
+                  disabled={
+                    selectedThread.type === "truck-booking" && !selectedThread.first_message_sent && isPoster
+                      ? true
+                      : selectedThread.type !== "truck-booking" && !selectedThread.first_message_sent && !isPoster
+                  }
                   className="w-full px-4 py-2 text-sm border border-gray-300 dark:border-gray-700 rounded-lg focus:outline-none focus:ring-2 resize-none bg-white dark:bg-gray-800 text-gray-900 dark:text-white disabled:opacity-50 disabled:cursor-not-allowed"
                   style={{ "--tw-ring-color": "#53ca97" } as any}
                 />
               </div>
               <Button
                 onClick={handleSendMessage}
-                disabled={!messageText.trim() || sending || (!selectedThread.first_message_sent && !isPoster)}
+                disabled={
+                  !messageText.trim() || 
+                  sending || 
+                  (selectedThread.type === "truck-booking" && !selectedThread.first_message_sent && isPoster) ||
+                  (!selectedThread.first_message_sent && !isPoster && selectedThread.type !== "truck-booking")
+                }
                 className="px-4 py-2 text-sm"
                 style={{ backgroundColor: "#53ca97", color: "white" }}
               >
@@ -1440,8 +1762,8 @@ export default function JobMessages() {
         </div>
       )}
 
-      {/* Job/Listing/Resource/Load Offer Details Dialog */}
-      {((selectedThread?.type === "job" && jobDetails) || (selectedThread?.type === "buy-sell" && buySellDetails) || (selectedThread?.type === "resources" && resourcesDetails) || (selectedThread?.type === "load-offer" && loadOfferDetails)) && (
+      {/* Job/Listing/Resource/Load Offer/Truck Booking Details Dialog */}
+      {((selectedThread?.type === "job" && jobDetails) || (selectedThread?.type === "buy-sell" && buySellDetails) || (selectedThread?.type === "resources" && resourcesDetails) || (selectedThread?.type === "load-offer" && loadOfferDetails) || (selectedThread?.type === "truck-booking" && truckBookingDetails)) && (
         <Dialog open={showJobDetails} onOpenChange={setShowJobDetails}>
           <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
             <DialogHeader>
@@ -1452,7 +1774,9 @@ export default function JobMessages() {
                     ? buySellDetails?.title 
                     : selectedThread?.type === "load-offer"
                       ? loadOfferDetails?.load?.title || `Load Offer`
-                      : resourcesDetails?.title}
+                      : selectedThread?.type === "truck-booking"
+                        ? truckBookingDetails?.load?.title || `Truck Booking`
+                        : resourcesDetails?.title}
               </DialogTitle>
               <DialogDescription>
                 {selectedThread?.type === "job" && jobDetails
@@ -1463,7 +1787,9 @@ export default function JobMessages() {
                       ? `Resource • ${resourcesDetails.resource_type?.charAt(0).toUpperCase() + resourcesDetails.resource_type?.slice(1)}`
                       : selectedThread?.type === "load-offer" && loadOfferDetails
                         ? `Load Offer • ${loadOfferDetails.offer?.status}`
-                        : ""}
+                        : selectedThread?.type === "truck-booking" && truckBookingDetails
+                          ? `Truck Booking • ${truckBookingDetails.booking?.status || "REQUESTED"}`
+                          : ""}
               </DialogDescription>
             </DialogHeader>
 
@@ -1639,6 +1965,201 @@ export default function JobMessages() {
                     <div className="pt-4 border-t">
                       <h4 className="mb-2 font-semibold">Offer Message</h4>
                       <p className="text-sm text-gray-600 dark:text-gray-400 whitespace-pre-wrap">{loadOfferDetails.offer.message}</p>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {selectedThread?.type === "truck-booking" && truckBookingDetails && (
+                <div className="space-y-4">
+                  {/* Booking Price - Prominently Displayed */}
+                  {truckBookingDetails.booking && (
+                    <div className="py-3 px-4 bg-gray-50 dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700">
+                      <div className="text-sm text-gray-600 dark:text-gray-400 mb-1">Offered Price</div>
+                      <div className="text-2xl font-bold" style={{ color: "#53ca97" }}>
+                        {truckBookingDetails.booking.offered_currency || "USD"} {truckBookingDetails.booking.offered_amount ? Number(truckBookingDetails.booking.offered_amount).toLocaleString() : "0.00"}
+                      </div>
+                      <div className="mt-1">
+                        <Badge
+                          className="px-2 py-1 text-xs capitalize"
+                          style={{ backgroundColor: "#53ca97", color: "white" }}
+                        >
+                          {truckBookingDetails.booking.status || "REQUESTED"}
+                        </Badge>
+                      </div>
+                    </div>
+                  )}
+                  
+                  {/* Load Details Section */}
+                  <div className="pt-4 border-t">
+                    <h4 className="mb-3 font-semibold text-lg">Load Details</h4>
+                    
+                    <div className="flex items-center gap-4 text-sm mb-4">
+                      <div className="flex items-center gap-2">
+                        <MapPin className="w-4 h-4 text-gray-400" />
+                        <span className="font-medium">{truckBookingDetails.load.pickup_location} → {truckBookingDetails.load.dropoff_location}</span>
+                      </div>
+                    </div>
+                    
+                    <div className="grid grid-cols-2 gap-4">
+                      <div>
+                        <p className="text-xs text-gray-500 dark:text-gray-400 mb-1">Species</p>
+                        <p className="text-sm text-gray-900 dark:text-white capitalize font-medium">
+                          {truckBookingDetails.load.species}
+                        </p>
+                      </div>
+                      <div>
+                        <p className="text-xs text-gray-500 dark:text-gray-400 mb-1">Quantity</p>
+                        <p className="text-sm text-gray-900 dark:text-white font-medium">
+                          {truckBookingDetails.load.quantity} {truckBookingDetails.load.quantity === 1 ? 'head' : 'head'}
+                        </p>
+                      </div>
+                      <div>
+                        <p className="text-xs text-gray-500 dark:text-gray-400 mb-1">Pickup Date</p>
+                        <p className="text-sm text-gray-900 dark:text-white font-medium">
+                          {truckBookingDetails.load.pickup_date 
+                            ? new Date(truckBookingDetails.load.pickup_date).toLocaleDateString("en-US", {
+                                year: "numeric",
+                                month: "short",
+                                day: "numeric",
+                              })
+                            : "Not specified"}
+                        </p>
+                      </div>
+                      {truckBookingDetails.booking?.requested_weight_kg && (
+                        <div>
+                          <p className="text-xs text-gray-500 dark:text-gray-400 mb-1">Requested Weight</p>
+                          <p className="text-sm text-gray-900 dark:text-white font-medium">
+                            {Number(truckBookingDetails.booking.requested_weight_kg).toLocaleString()} kg
+                          </p>
+                        </div>
+                      )}
+                      {truckBookingDetails.booking?.requested_headcount && (
+                        <div>
+                          <p className="text-xs text-gray-500 dark:text-gray-400 mb-1">Requested Headcount</p>
+                          <p className="text-sm text-gray-900 dark:text-white font-medium">
+                            {truckBookingDetails.booking.requested_headcount} head
+                          </p>
+                        </div>
+                      )}
+                    </div>
+                    
+                    {truckBookingDetails.load.description && (
+                      <div className="mt-4">
+                        <h5 className="mb-2 text-sm font-semibold">Load Description</h5>
+                        <p className="text-sm text-gray-600 dark:text-gray-400 whitespace-pre-wrap">{truckBookingDetails.load.description}</p>
+                      </div>
+                    )}
+                  </div>
+                  
+                  {/* Truck Availability Details Section */}
+                  {truckBookingDetails.truckAvailability && (
+                    <div className="pt-4 border-t">
+                      <h4 className="mb-3 font-semibold text-lg">Truck Availability Details</h4>
+                      <div className="bg-gray-50 dark:bg-gray-800 rounded-lg p-4 space-y-3">
+                        <div className="flex items-center gap-2 text-sm">
+                          <MapPin className="w-4 h-4 text-gray-400" />
+                          <span className="font-medium">
+                            {truckBookingDetails.truckAvailability.origin_location_text}
+                            {truckBookingDetails.truckAvailability.destination_location_text 
+                              ? ` → ${truckBookingDetails.truckAvailability.destination_location_text}`
+                              : ''}
+                          </span>
+                        </div>
+                        <div className="grid grid-cols-2 gap-4">
+                          <div>
+                            <p className="text-xs text-gray-500 dark:text-gray-400 mb-1">Available From</p>
+                            <p className="text-sm text-gray-900 dark:text-white font-medium">
+                              {new Date(truckBookingDetails.truckAvailability.available_from).toLocaleDateString("en-US", {
+                                year: "numeric",
+                                month: "short",
+                                day: "numeric",
+                              })}
+                            </p>
+                          </div>
+                          {truckBookingDetails.truckAvailability.available_until && (
+                            <div>
+                              <p className="text-xs text-gray-500 dark:text-gray-400 mb-1">Available Until</p>
+                              <p className="text-sm text-gray-900 dark:text-white font-medium">
+                                {new Date(truckBookingDetails.truckAvailability.available_until).toLocaleDateString("en-US", {
+                                  year: "numeric",
+                                  month: "short",
+                                  day: "numeric",
+                                })}
+                              </p>
+                            </div>
+                          )}
+                          {truckBookingDetails.truckAvailability.capacity_headcount && (
+                            <div>
+                              <p className="text-xs text-gray-500 dark:text-gray-400 mb-1">Capacity (Headcount)</p>
+                              <p className="text-sm text-gray-900 dark:text-white font-medium">
+                                {truckBookingDetails.truckAvailability.capacity_headcount} head
+                              </p>
+                            </div>
+                          )}
+                          {truckBookingDetails.truckAvailability.capacity_weight_kg && (
+                            <div>
+                              <p className="text-xs text-gray-500 dark:text-gray-400 mb-1">Capacity (Weight)</p>
+                              <p className="text-sm text-gray-900 dark:text-white font-medium">
+                                {Number(truckBookingDetails.truckAvailability.capacity_weight_kg).toLocaleString()} kg
+                              </p>
+                            </div>
+                          )}
+                        </div>
+                        {truckBookingDetails.truckAvailability.notes && (
+                          <div className="pt-2 border-t">
+                            <p className="text-xs text-gray-500 dark:text-gray-400 mb-1">Notes</p>
+                            <p className="text-sm text-gray-900 dark:text-white">{truckBookingDetails.truckAvailability.notes}</p>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  )}
+                  
+                  {/* Vehicle Attached by Hauler Section */}
+                  {truckBookingDetails.truck && (
+                    <div className="pt-4 border-t">
+                      <h4 className="mb-3 font-semibold text-lg">Vehicle Attached by Hauler</h4>
+                      <div className="bg-gray-50 dark:bg-gray-800 rounded-lg p-4 space-y-2">
+                        <div className="grid grid-cols-2 gap-4">
+                          <div>
+                            <p className="text-xs text-gray-500 dark:text-gray-400 mb-1">Plate Number</p>
+                            <p className="text-sm text-gray-900 dark:text-white font-medium">{truckBookingDetails.truck.plate_number}</p>
+                          </div>
+                          <div>
+                            <p className="text-xs text-gray-500 dark:text-gray-400 mb-1">Truck Type</p>
+                            <p className="text-sm text-gray-900 dark:text-white font-medium capitalize">{truckBookingDetails.truck.truck_type}</p>
+                          </div>
+                          {truckBookingDetails.truck.truck_name && (
+                            <div>
+                              <p className="text-xs text-gray-500 dark:text-gray-400 mb-1">Truck Name</p>
+                              <p className="text-sm text-gray-900 dark:text-white font-medium">{truckBookingDetails.truck.truck_name}</p>
+                            </div>
+                          )}
+                          {truckBookingDetails.truck.capacity && (
+                            <div>
+                              <p className="text-xs text-gray-500 dark:text-gray-400 mb-1">Capacity</p>
+                              <p className="text-sm text-gray-900 dark:text-white font-medium">
+                                {Number(truckBookingDetails.truck.capacity).toLocaleString()} kg
+                              </p>
+                            </div>
+                          )}
+                          {truckBookingDetails.truck.species_supported && (
+                            <div className="col-span-2">
+                              <p className="text-xs text-gray-500 dark:text-gray-400 mb-1">Species Supported</p>
+                              <p className="text-sm text-gray-900 dark:text-white font-medium">{truckBookingDetails.truck.species_supported}</p>
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  )}
+                  
+                  {/* Booking Notes Section */}
+                  {truckBookingDetails.booking?.notes && (
+                    <div className="pt-4 border-t">
+                      <h4 className="mb-2 font-semibold">Booking Notes</h4>
+                      <p className="text-sm text-gray-600 dark:text-gray-400 whitespace-pre-wrap">{truckBookingDetails.booking.notes}</p>
                     </div>
                   )}
                 </div>
@@ -1934,6 +2455,107 @@ export default function JobMessages() {
             animalType: loadOfferDetails.load.species,
             headCount: loadOfferDetails.load.quantity,
             price: parseFloat(loadOfferDetails.offer.offered_amount),
+            priceType: "total",
+          }}
+        />
+      )}
+
+      {/* Contract Creation Dialog for Truck Bookings */}
+      {selectedThread?.type === "truck-booking" && truckBookingDetails && (
+        <GenerateContractPopup
+          isOpen={showContractDialog}
+          onClose={() => setShowContractDialog(false)}
+          onGenerate={async (data) => {
+            try {
+              const priceAmount = data.priceAmount 
+                ? (typeof data.priceAmount === "string" ? parseFloat(data.priceAmount) : data.priceAmount)
+                : (truckBookingDetails.booking?.offered_amount ? parseFloat(truckBookingDetails.booking.offered_amount) : 0);
+              
+              const payload = {
+                priceAmount,
+                priceType: data.priceType,
+                paymentMethod: data.paymentMethod,
+                paymentSchedule: data.paymentSchedule,
+                contractInfo: {
+                  haulerName: truckBookingDetails.booking?.hauler_id || "Hauler",
+                  route: {
+                    origin: truckBookingDetails.load.pickup_location,
+                    destination: truckBookingDetails.load.dropoff_location,
+                  },
+                  animalType: truckBookingDetails.load.species,
+                  headCount: truckBookingDetails.load.quantity,
+                },
+              };
+              
+              await createContract({
+                load_id: String(truckBookingDetails.load.id),
+                booking_id: String(truckBookingDetails.booking.id),
+                status: "SENT",
+                price_amount: priceAmount,
+                price_type: data.priceType,
+                payment_method: data.paymentMethod,
+                payment_schedule: data.paymentSchedule,
+                contract_payload: payload,
+              });
+              
+              toast.success("Contract sent to hauler.");
+              setShowContractDialog(false);
+              // Refresh threads to show updated status
+              loadThreads();
+            } catch (err: any) {
+              console.error("Error creating contract:", err);
+              toast.error(err?.message ?? "Failed to create contract");
+            }
+          }}
+          onSaveDraft={async (data) => {
+            try {
+              const priceAmount = data.priceAmount 
+                ? (typeof data.priceAmount === "string" ? parseFloat(data.priceAmount) : data.priceAmount)
+                : (truckBookingDetails.booking?.offered_amount ? parseFloat(truckBookingDetails.booking.offered_amount) : 0);
+              
+              const payload = {
+                priceAmount,
+                priceType: data.priceType,
+                paymentMethod: data.paymentMethod,
+                paymentSchedule: data.paymentSchedule,
+                contractInfo: {
+                  haulerName: truckBookingDetails.booking?.hauler_id || "Hauler",
+                  route: {
+                    origin: truckBookingDetails.load.pickup_location,
+                    destination: truckBookingDetails.load.dropoff_location,
+                  },
+                  animalType: truckBookingDetails.load.species,
+                  headCount: truckBookingDetails.load.quantity,
+                },
+              };
+              
+              await createContract({
+                load_id: String(truckBookingDetails.load.id),
+                booking_id: String(truckBookingDetails.booking.id),
+                status: "DRAFT",
+                price_amount: priceAmount,
+                price_type: data.priceType,
+                payment_method: data.paymentMethod,
+                payment_schedule: data.paymentSchedule,
+                contract_payload: payload,
+              });
+              
+              toast.success("Contract draft saved.");
+              setShowContractDialog(false);
+            } catch (err: any) {
+              console.error("Error saving contract draft:", err);
+              toast.error(err?.message ?? "Failed to save contract draft");
+            }
+          }}
+          contractInfo={{
+            haulerName: truckBookingDetails.booking?.hauler_id || "Hauler",
+            route: {
+              origin: truckBookingDetails.load.pickup_location,
+              destination: truckBookingDetails.load.dropoff_location,
+            },
+            animalType: truckBookingDetails.load.species,
+            headCount: truckBookingDetails.load.quantity,
+            price: truckBookingDetails.booking?.offered_amount ? parseFloat(truckBookingDetails.booking.offered_amount) : 0,
             priceType: "total",
           }}
         />
