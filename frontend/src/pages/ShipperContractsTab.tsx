@@ -23,8 +23,9 @@ import {
   type LoadOffer,
 } from "../api/marketplace";
 import { fetchLoadById, fetchLoadsForShipper, type LoadDetail } from "../lib/api";
-import { fetchUserLoadOfferThreads, type LoadOfferThread } from "../api/loadOfferMessages";
-import { fetchUserTruckBookingThreads, type TruckBookingThread } from "../api/truckBookingMessages";
+import { fetchUserLoadOfferThreads, fetchLoadOfferThreadByOfferId, type LoadOfferThread } from "../api/loadOfferMessages";
+import { fetchUserTruckBookingThreads, fetchTruckBookingThreadByBookingId, type TruckBookingThread } from "../api/truckBookingMessages";
+import { fetchBookings, type LoadBooking } from "../api/marketplace";
 import { useNavigate } from "react-router-dom";
 import { storage, STORAGE_KEYS } from "../lib/storage";
 
@@ -51,6 +52,11 @@ interface AwaitingOffer {
   load: LoadDetail;
 }
 
+interface AwaitingBooking {
+  booking: LoadBooking;
+  load: LoadDetail;
+}
+
 interface ActiveConversation {
   thread: LoadOfferThread | TruckBookingThread;
   load: LoadDetail;
@@ -64,6 +70,7 @@ export default function ShipperContractsTab() {
   const [modalOpen, setModalOpen] = useState(false);
   const [showViewDialog, setShowViewDialog] = useState(false);
   const [awaitingOffers, setAwaitingOffers] = useState<AwaitingOffer[]>([]);
+  const [awaitingBookings, setAwaitingBookings] = useState<AwaitingBooking[]>([]);
   const [loadingAwaiting, setLoadingAwaiting] = useState(false);
   const [activeConversations, setActiveConversations] = useState<ActiveConversation[]>([]);
   const [loadingConversations, setLoadingConversations] = useState(false);
@@ -150,6 +157,18 @@ export default function ShipperContractsTab() {
       // Fetch all shipper loads
       const loads = await fetchLoadsForShipper(userId);
       
+      // Fetch all threads to check first_message_sent status
+      const allLoadOfferThreads = await fetchUserLoadOfferThreads();
+      // Create a set of offer_ids (as strings) that have messages (first_message_sent === true)
+      // These should NOT appear in "Awaiting Your Response"
+      const offerIdsWithMessages = new Set<string>();
+      allLoadOfferThreads.forEach(thread => {
+        if (thread.first_message_sent && thread.is_active) {
+          // Store as string to match offer.id type
+          offerIdsWithMessages.add(String(thread.offer_id));
+        }
+      });
+      
       // For each load, fetch offers and check for PENDING offers without contracts
       const offersWithLoads: AwaitingOffer[] = [];
       const contractOfferIds = new Set(
@@ -160,7 +179,16 @@ export default function ShipperContractsTab() {
         try {
           const offersResp = await fetchLoadOffers(String(load.id));
           const pendingOffers = offersResp.items.filter(
-            offer => offer.status === "PENDING" && !contractOfferIds.has(offer.id)
+            offer => {
+              // Must be PENDING and not have a contract
+              if (offer.status !== "PENDING" || contractOfferIds.has(offer.id)) {
+                return false;
+              }
+              // EXCLUDE offers that have messages (first_message_sent === true)
+              // These will appear in "Under Negotiation" instead
+              // offer.id is a string, so we check against string set
+              return !offerIdsWithMessages.has(offer.id);
+            }
           );
           
           for (const offer of pendingOffers) {
@@ -177,6 +205,57 @@ export default function ShipperContractsTab() {
       console.error("Failed to load awaiting offers:", err);
     } finally {
       setLoadingAwaiting(false);
+    }
+  };
+
+  const loadAwaitingBookings = async () => {
+    if (!userId) return;
+    try {
+      // Fetch all truck booking threads to check first_message_sent status
+      const allTruckBookingThreads = await fetchUserTruckBookingThreads();
+      // Create a set of booking_ids (as strings) that have messages (first_message_sent === true)
+      // These should NOT appear in "Awaiting Your Response"
+      const bookingIdsWithMessages = new Set<string>();
+      allTruckBookingThreads.forEach(thread => {
+        if (thread.first_message_sent && thread.is_active) {
+          // Store as string to match booking.id type
+          bookingIdsWithMessages.add(String(thread.booking_id));
+        }
+      });
+      
+      // Fetch all bookings
+      const bookingsResp = await fetchBookings();
+      const contractBookingIds = new Set(
+        contracts.filter(c => c.booking_id).map(c => c.booking_id!)
+      );
+      
+      // Filter for REQUESTED bookings without contracts and without messages
+      const bookingsWithLoads: AwaitingBooking[] = [];
+      const requestedBookings = bookingsResp.items.filter(
+        booking => {
+          // Must be REQUESTED and not have a contract
+          if (booking.status !== "REQUESTED" || contractBookingIds.has(booking.id)) {
+            return false;
+          }
+          // EXCLUDE bookings that have messages (first_message_sent === true)
+          // These will appear in "Under Negotiation" instead
+          // booking.id is a string, so we check against string set
+          return !bookingIdsWithMessages.has(booking.id);
+        }
+      );
+      
+      for (const booking of requestedBookings) {
+        try {
+          const load = await fetchLoadById(Number(booking.load_id));
+          bookingsWithLoads.push({ booking, load });
+        } catch (err) {
+          console.warn(`Failed to load load details for booking ${booking.id}:`, err);
+        }
+      }
+      
+      setAwaitingBookings(bookingsWithLoads);
+    } catch (err: any) {
+      console.error("Failed to load awaiting bookings:", err);
     }
   };
 
@@ -249,6 +328,7 @@ export default function ShipperContractsTab() {
   useEffect(() => {
     if (contracts.length >= 0) {
       loadAwaitingOffers();
+      loadAwaitingBookings();
       loadActiveConversations();
     }
   }, [contracts, userId]);
@@ -582,7 +662,7 @@ export default function ShipperContractsTab() {
           <Card className="p-6 border-2 flex flex-col" style={{ borderColor: '#f59e0b', minHeight: '600px' }}>
             <h3 className="mb-5 flex items-center gap-2 flex-shrink-0 text-lg font-semibold">
               <Clock className="w-5 h-5" style={{ color: '#f59e0b' }} />
-              Awaiting Your Response ({awaitingOffers.length + draftContracts.length + awaitingYourResponseContracts.length})
+              Awaiting Response ({awaitingOffers.length + awaitingBookings.length + draftContracts.length + awaitingYourResponseContracts.length})
             </h3>
             <ScrollArea className="flex-1 pr-2">
               <div className="space-y-4">
@@ -641,6 +721,82 @@ export default function ShipperContractsTab() {
 
                         {offer.message && (
                           <p className="text-xs text-gray-600 mb-3 italic truncate">"{offer.message}"</p>
+                        )}
+
+                        <div className="flex gap-3 flex-wrap">
+                          <Button
+                            onClick={() => {
+                              navigate('/shipper/messages');
+                            }}
+                            variant="outline"
+                            className="px-4 py-2 text-sm flex items-center gap-1"
+                          >
+                            <MessageSquare className="w-4 h-4" />
+                            View Messages
+                          </Button>
+                        </div>
+                      </div>
+                    </div>
+                  </Card>
+                ))}
+                
+                {/* Show truck bookings awaiting response (no messages yet) */}
+                {awaitingBookings.map(({ booking, load }) => (
+                  <Card key={booking.id} className="p-5 border-amber-200 bg-amber-50 hover:shadow-md transition-all">
+                    <div className="flex items-start gap-4 p-2">
+                      <div className="w-12 h-12 rounded-full flex items-center justify-center flex-shrink-0" style={{ backgroundColor: '#fef3c7' }}>
+                        <TruckIcon className="w-6 h-6" style={{ color: '#f59e0b' }} />
+                      </div>
+                      
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-start justify-between gap-2 mb-3">
+                          <div className="flex-1 min-w-0">
+                            <h4 className="text-base font-semibold mb-2 truncate">Truck Request #{booking.id}</h4>
+                            {load && (
+                              <div className="flex items-center gap-2 text-xs text-gray-600 flex-wrap">
+                                <span className="flex items-center gap-1">
+                                  <MapPin className="w-3 h-3" />
+                                  {load.pickup_location} → {load.dropoff_location}
+                                </span>
+                                {load.species && (
+                                  <>
+                                    <span>•</span>
+                                    <span className="capitalize">{load.species}</span>
+                                  </>
+                                )}
+                                {load.quantity && (
+                                  <>
+                                    <span>•</span>
+                                    <span>{load.quantity} head</span>
+                                  </>
+                                )}
+                              </div>
+                            )}
+                          </div>
+                          <Badge className="px-2 py-1 text-xs" style={{ backgroundColor: '#f59e0b', color: 'white' }}>
+                            Waiting for your response
+                          </Badge>
+                        </div>
+
+                        {booking.offered_amount && (
+                          <div className="flex items-center justify-between gap-4 mb-4">
+                            <div>
+                              <p className="text-xs text-gray-500 mb-1">Requested Price</p>
+                              <p className="text-lg font-semibold" style={{ color: '#f59e0b' }}>
+                                {booking.offered_currency || 'USD'} {Number(booking.offered_amount).toLocaleString()}
+                              </p>
+                            </div>
+                            <div className="text-right">
+                              <p className="text-xs text-gray-500 mb-1">Received</p>
+                              <p className="text-xs text-gray-600">
+                                {new Date(booking.created_at).toLocaleDateString()}
+                              </p>
+                            </div>
+                          </div>
+                        )}
+
+                        {booking.notes && (
+                          <p className="text-xs text-gray-600 mb-3 italic truncate">"{booking.notes}"</p>
                         )}
 
                         <div className="flex gap-3 flex-wrap">
@@ -797,7 +953,7 @@ export default function ShipperContractsTab() {
                   ))}
                 
                 {/* Show empty state if no items */}
-                {awaitingOffers.length === 0 && draftContracts.length === 0 && awaitingYourResponseContracts.length === 0 && (
+                {awaitingOffers.length === 0 && awaitingBookings.length === 0 && draftContracts.length === 0 && awaitingYourResponseContracts.length === 0 && (
                   <div className="text-center py-8 text-gray-500 text-sm">
                     No items awaiting your response
                   </div>

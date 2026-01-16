@@ -640,7 +640,7 @@ export default function HaulerContractsTab() {
           <Card className="p-6 border-2 flex flex-col" style={{ borderColor: '#f59e0b', minHeight: '600px' }}>
             <div className="flex items-center gap-2 mb-5 flex-shrink-0">
               <Clock className="w-5 h-5" style={{ color: '#f59e0b' }} />
-              <h3 className="text-lg font-semibold">Awaiting Counter Party Response ({awaitingBookings.length + awaitingOffers.length + draftContracts.length})</h3>
+              <h3 className="text-lg font-semibold">Awaiting Response ({awaitingBookings.length + awaitingOffers.length + draftContracts.length})</h3>
             </div>
             <ScrollArea className="flex-1 pr-2">
               <div className="space-y-4">
