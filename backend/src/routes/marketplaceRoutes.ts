@@ -374,6 +374,23 @@ router.post(
       if (load.status !== LoadStatus.PUBLISHED) {
         return res.status(400).json({ error: "Offers can only be placed on published loads." });
       }
+      
+      // Check if load already has a contract (if contract exists, load is already assigned)
+      const hasContract = await pool.query(
+        `
+          SELECT 1
+          FROM contracts
+          WHERE load_id = $1
+          LIMIT 1
+        `,
+        [loadId]
+      );
+      if (hasContract.rowCount && hasContract.rowCount > 0) {
+        return res.status(400).json({ 
+          error: "This load already has a contract. Only one hauler can be assigned to a load at a time." 
+        });
+      }
+      
       const existingOffer = await getLatestOfferForHauler(loadId, derivedHaulerId);
       if (
         existingOffer &&
