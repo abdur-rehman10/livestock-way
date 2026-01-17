@@ -1117,7 +1117,7 @@ export default function JobMessages() {
       }
       
       // Validate sent message has content before adding to state
-      const sentMessageContent = sentMessage?.message || sentMessage?.text || "";
+      const sentMessageContent = sentMessage?.message || "";
       if (!sentMessageContent || !sentMessageContent.trim()) {
         console.error("Received empty message from API, not adding to state", sentMessage);
         toast.error("Message was empty, please try again");
@@ -1752,12 +1752,12 @@ export default function JobMessages() {
               messages
                 .filter((message) => {
                   // Filter out messages with empty content
-                  const messageContent = message.message || message.text || "";
+                  const messageContent = message.message || "";
                   return messageContent && messageContent.trim();
                 })
                 .map((message) => {
                   const isCurrentUser = Number(message.sender_user_id) === Number(userId);
-                  const messageContent = message.message || message.text || "";
+                  const messageContent = message.message || "";
                   
                   // Format date safely
                   let formattedTime = "Just now";
