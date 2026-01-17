@@ -319,11 +319,15 @@ export default function JobMessages() {
         await loadResourcesDetails(thread.listing_id);
       } else if (thread.type === "load-offer") {
         const result = await fetchLoadOfferThreadMessages(thread.id);
-        setMessages(result.map(m => ({ ...m, type: "load-offer" as const })));
+        // Filter out any messages with empty content
+        const validMessages = result.filter(m => m.message && m.message.trim());
+        setMessages(validMessages.map(m => ({ ...m, type: "load-offer" as const })));
         await loadLoadOfferDetails(thread.offer_id, thread.load_id);
       } else if (thread.type === "truck-booking") {
         const result = await fetchTruckBookingThreadMessages(thread.id);
-        setMessages(result.map(m => ({ ...m, type: "truck-booking" as const })));
+        // Filter out any messages with empty content
+        const validMessages = result.filter(m => m.message && m.message.trim());
+        setMessages(validMessages.map(m => ({ ...m, type: "truck-booking" as const })));
         if (thread.booking_id && thread.load_id && thread.truck_availability_id) {
           await loadTruckBookingDetails(thread.booking_id, thread.load_id, thread.truck_availability_id);
         } else {
@@ -535,7 +539,26 @@ export default function JobMessages() {
       (payload: any) => {
         const { message, thread } = payload;
         
+        // Validate message has content before adding - check both message.message and message.text
+        const messageContent = message?.message || message?.text || "";
+        if (!message || !messageContent || !messageContent.trim()) {
+          console.warn("Received empty message via WebSocket, ignoring", message);
+          return;
+        }
+        
+        // Validate message has valid created_at
+        if (!message.created_at || isNaN(new Date(message.created_at).getTime())) {
+          console.warn("Received message with invalid date via WebSocket, ignoring", message);
+          return;
+        }
+        
         if (selectedThread && selectedThread.type === "load-offer" && thread.id === selectedThread.id) {
+          // Double-check message has valid ID and content before adding
+          if (!message.id || !messageContent.trim()) {
+            console.warn("Skipping message with invalid ID or empty content", message);
+            return;
+          }
+          
           setMessages((prev) => {
             if (prev.some((m) => m.id === message.id && m.type === "load-offer")) {
               return prev;
@@ -550,7 +573,7 @@ export default function JobMessages() {
             t.id === thread.id
               ? {
                   ...t,
-                  last_message: message.message,
+                  last_message: messageContent,
                   last_message_at: message.created_at,
                   first_message_sent: true,
                   unread_count: 
@@ -591,7 +614,26 @@ export default function JobMessages() {
       (payload: any) => {
         const { message, thread } = payload;
         
+        // Validate message has content before adding - check both message.message and message.text
+        const messageContent = message?.message || message?.text || "";
+        if (!message || !messageContent || !messageContent.trim()) {
+          console.warn("Received empty message via WebSocket, ignoring", message);
+          return;
+        }
+        
+        // Validate message has valid created_at
+        if (!message.created_at || isNaN(new Date(message.created_at).getTime())) {
+          console.warn("Received message with invalid date via WebSocket, ignoring", message);
+          return;
+        }
+        
         if (selectedThread && selectedThread.type === "truck-booking" && thread.id === selectedThread.id) {
+          // Double-check message has valid ID and content before adding
+          if (!message.id || !messageContent.trim()) {
+            console.warn("Skipping message with invalid ID or empty content", message);
+            return;
+          }
+          
           setMessages((prev) => {
             if (prev.some((m) => m.id === message.id && m.type === "truck-booking")) {
               return prev;
@@ -606,7 +648,7 @@ export default function JobMessages() {
             t.id === thread.id
               ? {
                   ...t,
-                  last_message: message.message,
+                  last_message: messageContent,
                   last_message_at: message.created_at,
                   first_message_sent: true,
                   unread_count: 
@@ -1016,7 +1058,14 @@ export default function JobMessages() {
   }, []);
 
   const handleSendMessage = async () => {
-    if (!messageText.trim() || !selectedThread) return;
+    // Validate message text is not empty
+    const trimmedText = messageText.trim();
+    if (!trimmedText || !selectedThread) {
+      if (!trimmedText) {
+        toast.error("Message cannot be empty");
+      }
+      return;
+    }
 
     if (!selectedThread.first_message_sent) {
       if (selectedThread.type === "truck-booking") {
@@ -1039,25 +1088,58 @@ export default function JobMessages() {
       }
     }
 
+    // Save original message for error recovery
+    const originalMessage = messageText;
+    const trimmedMessage = messageText.trim();
+    
     try {
       setSending(true);
-      const sentMessage = selectedThread.type === "job"
-        ? await sendMessage(selectedThread.id, messageText.trim())
-        : selectedThread.type === "buy-sell"
-          ? await sendBuySellMessage(selectedThread.id, messageText.trim())
-          : selectedThread.type === "resources"
-            ? await sendResourcesMessage(selectedThread.id, messageText.trim())
-            : selectedThread.type === "load-offer"
-              ? await sendLoadOfferMessage(selectedThread.id, messageText.trim())
-              : await sendTruckBookingMessage(selectedThread.id, messageText.trim());
       
+      // Clear input immediately after validation passes (optimistic UI update)
+      setMessageText("");
+      
+      const sentMessage = selectedThread.type === "job"
+        ? await sendMessage(selectedThread.id, trimmedMessage)
+        : selectedThread.type === "buy-sell"
+          ? await sendBuySellMessage(selectedThread.id, trimmedMessage)
+          : selectedThread.type === "resources"
+            ? await sendResourcesMessage(selectedThread.id, trimmedMessage)
+            : selectedThread.type === "load-offer"
+              ? await sendLoadOfferMessage(selectedThread.id, trimmedMessage)
+              : await sendTruckBookingMessage(selectedThread.id, trimmedMessage);
+      
+      // Validate sent message is an object, not a string
+      if (typeof sentMessage === "string") {
+        console.error("API returned string instead of message object:", sentMessage);
+        toast.error("Invalid response from server, please try again");
+        setMessageText(originalMessage);
+        return;
+      }
+      
+      // Validate sent message has content before adding to state
+      const sentMessageContent = sentMessage?.message || sentMessage?.text || "";
+      if (!sentMessageContent || !sentMessageContent.trim()) {
+        console.error("Received empty message from API, not adding to state", sentMessage);
+        toast.error("Message was empty, please try again");
+        setMessageText(originalMessage);
+        return;
+      }
+      
+      // Ensure sentMessage has valid content and created_at before adding
+      if (!sentMessage.id || !sentMessage.created_at || isNaN(new Date(sentMessage.created_at).getTime())) {
+        console.error("Received invalid message from API", sentMessage);
+        toast.error("Message data is invalid, please try again");
+        setMessageText(originalMessage);
+        return;
+      }
+      
+      // Add message to state (duplicate check prevents duplicates from WebSocket)
       setMessages((prev) => {
         if (prev.some((m) => m.id === sentMessage.id && m.type === selectedThread.type)) {
           return prev;
         }
         return [...prev, { ...sentMessage, type: selectedThread.type }];
       });
-      setMessageText("");
       
       // Scroll will happen automatically via the messages.length useEffect
       
@@ -1065,6 +1147,8 @@ export default function JobMessages() {
     } catch (err: any) {
       console.error("Error sending message:", err);
       toast.error(err?.message ?? "Failed to send message");
+      // Restore message text on error so user doesn't lose their message
+      setMessageText(originalMessage);
     } finally {
       setSending(false);
     }
@@ -1665,36 +1749,57 @@ export default function JobMessages() {
                 )}
               </div>
             ) : (
-              messages.map((message) => {
-                const isCurrentUser = Number(message.sender_user_id) === Number(userId);
-                return (
-                  <div
-                    key={message.id}
-                    className={`flex ${isCurrentUser ? "justify-end" : "justify-start"}`}
-                  >
-                    <div
-                      className={`max-w-md px-4 py-3 rounded-lg ${
-                        isCurrentUser
-                          ? "text-white"
-                          : "bg-gray-100 dark:bg-gray-800 text-gray-800 dark:text-gray-200"
-                      }`}
-                      style={isCurrentUser ? { backgroundColor: "#53ca97" } : {}}
-                    >
-                      <p className="text-sm">{message.message}</p>
-                      <p
-                        className={`text-xs mt-1 ${
-                          isCurrentUser ? "text-white/80" : "text-gray-500 dark:text-gray-400"
-                        }`}
-                      >
-                        {new Date(message.created_at).toLocaleTimeString("en-US", {
+              messages
+                .filter((message) => {
+                  // Filter out messages with empty content
+                  const messageContent = message.message || message.text || "";
+                  return messageContent && messageContent.trim();
+                })
+                .map((message) => {
+                  const isCurrentUser = Number(message.sender_user_id) === Number(userId);
+                  const messageContent = message.message || message.text || "";
+                  
+                  // Format date safely
+                  let formattedTime = "Just now";
+                  if (message.created_at) {
+                    try {
+                      const date = new Date(message.created_at);
+                      if (!isNaN(date.getTime())) {
+                        formattedTime = date.toLocaleTimeString("en-US", {
                           hour: "2-digit",
                           minute: "2-digit",
-                        })}
-                      </p>
+                        });
+                      }
+                    } catch (e) {
+                      console.warn("Error formatting date:", message.created_at, e);
+                    }
+                  }
+                  
+                  return (
+                    <div
+                      key={message.id}
+                      className={`flex ${isCurrentUser ? "justify-end" : "justify-start"}`}
+                    >
+                      <div
+                        className={`max-w-md px-4 py-3 rounded-lg ${
+                          isCurrentUser
+                            ? "text-white"
+                            : "bg-gray-100 dark:bg-gray-800 text-gray-800 dark:text-gray-200"
+                        }`}
+                        style={isCurrentUser ? { backgroundColor: "#53ca97" } : {}}
+                      >
+                        <p className="text-sm">{messageContent}</p>
+                        <p
+                          className={`text-xs mt-1 ${
+                            isCurrentUser ? "text-white/80" : "text-gray-500 dark:text-gray-400"
+                          }`}
+                        >
+                          {formattedTime}
+                        </p>
+                      </div>
                     </div>
-                  </div>
-                );
-              })
+                  );
+                })
             )}
             <div ref={messagesEndRef} />
           </div>

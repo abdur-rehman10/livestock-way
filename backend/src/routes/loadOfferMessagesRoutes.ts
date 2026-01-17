@@ -93,8 +93,13 @@ router.post("/threads/:threadId/messages", authRequired, async (req: Request, re
     const userRole = (req as any).user?.user_type;
     const message = req.body.message;
 
-    if (Number.isNaN(threadId) || !userId || !userRole || !message) {
+    if (Number.isNaN(threadId) || !userId || !userRole) {
       return res.status(400).json({ error: "Invalid request" });
+    }
+
+    // Validate message - must be a non-empty string after trimming
+    if (!message || typeof message !== "string" || !message.trim()) {
+      return res.status(400).json({ error: "Message cannot be empty" });
     }
 
     const sentMessage = await sendLoadOfferThreadMessage(

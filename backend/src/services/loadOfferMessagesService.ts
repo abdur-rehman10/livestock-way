@@ -62,12 +62,17 @@ function mapThreadRow(row: any): LoadOfferThread {
 }
 
 function mapMessageRow(row: any): LoadOfferMessage {
+  // Ensure message text is never empty - if it is, something went wrong
+  const messageText = (row.text || row.message || "").trim();
+  if (!messageText) {
+    console.error("Warning: Attempted to map message row with empty text", row);
+  }
   return {
     id: Number(row.id),
     thread_id: Number(row.thread_id),
     sender_user_id: Number(row.sender_user_id),
     sender_role: row.sender_role,
-    message: row.text || row.message || "",
+    message: messageText || "[Empty message - please contact support]",
     attachments: row.attachments ? (typeof row.attachments === 'string' ? JSON.parse(row.attachments) : row.attachments) : [],
     created_at: row.created_at,
     sender_name: row.sender_name,
@@ -275,6 +280,14 @@ export async function sendLoadOfferThreadMessage(
     throw new Error("Only the shipper can send the first message");
   }
 
+  // Validate message is not empty after trimming
+  if (!message || typeof message !== "string" || !message.trim()) {
+    throw new Error("Message cannot be empty");
+  }
+
+  // Trim the message before storing
+  const trimmedMessage = message.trim();
+
   // Insert message
   const result = await pool.query(
     `
@@ -293,7 +306,7 @@ export async function sendLoadOfferThreadMessage(
       threadId,
       senderUserId,
       senderRole,
-      message,
+      trimmedMessage,
       JSON.stringify(attachments || []),
     ]
   );

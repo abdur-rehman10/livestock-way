@@ -127,6 +127,27 @@ export async function sendResourcesMessage(
     throw new Error(`Failed to send message (${response.status}): ${text}`);
   }
 
+  const contentType = response.headers.get("content-type");
+  if (!contentType || !contentType.includes("application/json")) {
+    const text = await response.text().catch(() => "");
+    console.error("Expected JSON response but got:", contentType, text);
+    throw new Error(`Invalid response format: expected JSON but got ${contentType}`);
+  }
+
   const data = await response.json();
-  return data.message;
+  
+  // Backend returns the message object directly, not wrapped in { message: ... }
+  if (data && typeof data === "object" && !Array.isArray(data)) {
+    // Check if it's already a message object (has id, thread_id, etc.)
+    if (data.id && data.thread_id !== undefined) {
+      return data as ResourcesApplicationMessage;
+    }
+    // Otherwise check if it's wrapped in a message property
+    if (data.message && typeof data.message === "object") {
+      return data.message as ResourcesApplicationMessage;
+    }
+  }
+  
+  console.error("Unexpected response format:", data);
+  throw new Error("Invalid message response format");
 }
