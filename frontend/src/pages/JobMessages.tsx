@@ -1158,9 +1158,11 @@ export default function JobMessages() {
     (thread) => {
       const title = thread.type === "job" 
         ? thread.job_title 
-        : thread.type === "load-offer" || thread.type === "truck-booking"
-          ? thread.load_title
-          : thread.listing_title;
+        : thread.type === "truck-booking"
+          ? (thread.truck_name || thread.truck_plate_number || thread.truck_route || "Truck Booking")
+          : thread.type === "load-offer"
+            ? thread.load_title
+            : thread.listing_title;
       const applicantName = thread.type === "load-offer" || thread.type === "truck-booking"
         ? (Number(thread.shipper_user_id) === Number(userId) ? thread.hauler_name : thread.shipper_name)
         : thread.applicant_name;
@@ -1253,9 +1255,11 @@ export default function JobMessages() {
                       : thread.listing_poster_name);
               const threadTitle = thread.type === "job" 
                 ? thread.job_title 
-                : thread.type === "load-offer" || thread.type === "truck-booking"
-                  ? thread.load_title
-                  : thread.listing_title;
+                : thread.type === "truck-booking"
+                  ? (thread.truck_name || thread.truck_plate_number || thread.truck_route || "Truck Booking")
+                  : thread.type === "load-offer"
+                    ? thread.load_title
+                    : thread.listing_title;
 
               return (
                 <div
@@ -1433,7 +1437,7 @@ export default function JobMessages() {
                             : selectedThread?.type === "load-offer"
                               ? loadOfferDetails?.load?.title || `${loadOfferDetails?.load?.pickup_location} → ${loadOfferDetails?.load?.dropoff_location}`
                               : selectedThread?.type === "truck-booking"
-                                ? truckBookingDetails?.load?.title || `${truckBookingDetails?.load?.pickup_location} → ${truckBookingDetails?.load?.dropoff_location}`
+                                ? (selectedThread.truck_name || selectedThread.truck_plate_number || selectedThread.truck_route || truckBookingDetails?.truck?.truck_name || truckBookingDetails?.truck?.plate_number || "Truck Booking")
                                 : resourcesDetails?.title}
                       </p>
                     </div>

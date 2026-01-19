@@ -2219,6 +2219,20 @@ async function loadHasActiveBooking(loadId: string): Promise<boolean> {
   return (result.rowCount ?? 0) > 0;
 }
 
+async function loadHasAcceptedContract(loadId: string): Promise<boolean> {
+  const result = await pool.query(
+    `
+      SELECT 1
+      FROM contracts
+      WHERE load_id = $1
+        AND status IN ('ACCEPTED', 'LOCKED')
+      LIMIT 1
+    `,
+    [loadId]
+  );
+  return (result.rowCount ?? 0) > 0;
+}
+
 function ensureNumeric(value: any): number | null {
   if (value === null || value === undefined) return null;
   const num = Number(value);
@@ -2267,8 +2281,9 @@ export async function createBookingFromOffer(params: {
   if (load.status !== LoadStatus.PUBLISHED && load.status !== LoadStatus.AWAITING_ESCROW) {
     throw new Error("Load is not open for new bookings.");
   }
-  if (await loadHasActiveBooking(offer.load_id)) {
-    throw new Error("Load already has an active booking.");
+  // Check if load has an accepted/locked contract - if so, no more bookings allowed
+  if (await loadHasAcceptedContract(offer.load_id)) {
+    throw new Error("This load already has an accepted contract. No new bookings can be created.");
   }
   const requestedHeadcount = ensureNumeric(loadDetails.animal_count);
   const requestedWeight = ensureNumeric(loadDetails.estimated_weight_kg);
@@ -2388,8 +2403,9 @@ export async function createBookingForAvailability(params: {
     );
   }
   await ensureTruckAvailableForTrip(availability.truck_id);
-  if (await loadHasActiveBooking(params.loadId)) {
-    throw new Error("Load already has an active booking.");
+  // Check if load has an accepted/locked contract - if so, no more bookings allowed
+  if (await loadHasAcceptedContract(params.loadId)) {
+    throw new Error("This load already has an accepted contract. No new bookings can be created.");
   }
   let loadDetails: Awaited<ReturnType<typeof getLoadDetails>> | null = null;
   async function ensureLoadDetailsFetched() {

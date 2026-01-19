@@ -85,7 +85,7 @@ export async function getUserLoadOfferThreads(userId: number): Promise<LoadOffer
     `
     SELECT 
       t.*,
-      l.pickup_location_text || ' → ' || l.dropoff_location_text as load_title,
+      COALESCE(l.title, l.pickup_location_text || ' → ' || l.dropoff_location_text) as load_title,
       h.legal_name as hauler_name,
       s.farm_name as shipper_name,
       lo.offered_amount::text as offer_amount,
@@ -153,7 +153,7 @@ export async function getLoadOfferThreadById(threadId: number, userId: number): 
     `
     SELECT 
       t.*,
-      l.pickup_location_text || ' → ' || l.dropoff_location_text as load_title,
+      COALESCE(l.title, l.pickup_location_text || ' → ' || l.dropoff_location_text) as load_title,
       h.legal_name as hauler_name,
       s.farm_name as shipper_name,
       lo.offered_amount::text as offer_amount,
@@ -184,7 +184,7 @@ export async function getLoadOfferThreadByOfferId(offerId: number, userId: numbe
     `
     SELECT 
       t.*,
-      l.pickup_location_text || ' → ' || l.dropoff_location_text as load_title,
+      COALESCE(l.title, l.pickup_location_text || ' → ' || l.dropoff_location_text) as load_title,
       h.legal_name as hauler_name,
       s.farm_name as shipper_name,
       lo.offered_amount::text as offer_amount,

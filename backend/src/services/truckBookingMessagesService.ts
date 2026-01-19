@@ -14,6 +14,8 @@ export interface TruckBookingThread {
   // Joined data
   load_title?: string;
   truck_route?: string;
+  truck_name?: string | null;
+  truck_plate_number?: string | null;
   hauler_name?: string;
   shipper_name?: string;
   last_message?: string;
@@ -38,7 +40,24 @@ export interface TruckBookingMessage {
   sender_name?: string;
 }
 
+function parseTruckNotes(raw: string | null): { truck_name?: string | null; species_supported?: string | null } {
+  if (!raw) return {};
+  try {
+    const parsed = JSON.parse(raw);
+    if (typeof parsed === "object" && parsed !== null) {
+      return {
+        truck_name: parsed.truck_name ?? null,
+        species_supported: parsed.species_supported ?? null,
+      };
+    }
+  } catch {
+    // not JSON, return empty
+  }
+  return {};
+}
+
 function mapThreadRow(row: any): TruckBookingThread {
+  const truckMeta = parseTruckNotes(row.truck_notes ?? null);
   return {
     id: Number(row.id),
     booking_id: Number(row.booking_id),
@@ -52,6 +71,8 @@ function mapThreadRow(row: any): TruckBookingThread {
     updated_at: row.updated_at,
     load_title: row.load_title,
     truck_route: row.truck_route,
+    truck_name: truckMeta.truck_name ?? null,
+    truck_plate_number: row.truck_plate_number ?? null,
     hauler_name: row.hauler_name,
     shipper_name: row.shipper_name,
     last_message: row.last_message,
@@ -91,6 +112,8 @@ export async function getUserTruckBookingThreads(userId: number): Promise<TruckB
       t.*,
       l.pickup_location_text || ' → ' || l.dropoff_location_text as load_title,
       ta.origin_location_text || COALESCE(' → ' || ta.destination_location_text, '') as truck_route,
+      tr.plate_number as truck_plate_number,
+      tr.notes as truck_notes,
       h.legal_name as hauler_name,
       s.farm_name as shipper_name,
       lb.offered_amount::text as booking_amount,
@@ -124,6 +147,7 @@ export async function getUserTruckBookingThreads(userId: number): Promise<TruckB
     INNER JOIN loads l ON l.id = t.load_id
     INNER JOIN load_bookings lb ON lb.id = t.booking_id
     INNER JOIN truck_availability ta ON ta.id = t.truck_availability_id
+    LEFT JOIN trucks tr ON tr.id = ta.truck_id
     LEFT JOIN haulers h ON h.user_id = t.hauler_user_id
     LEFT JOIN shippers s ON s.user_id = t.shipper_user_id
     WHERE (t.shipper_user_id = $1 OR t.hauler_user_id = $1)
@@ -161,6 +185,8 @@ export async function getTruckBookingThreadById(threadId: number, userId: number
       t.*,
       l.pickup_location_text || ' → ' || l.dropoff_location_text as load_title,
       ta.origin_location_text || COALESCE(' → ' || ta.destination_location_text, '') as truck_route,
+      tr.plate_number as truck_plate_number,
+      tr.notes as truck_notes,
       h.legal_name as hauler_name,
       s.farm_name as shipper_name,
       lb.offered_amount::text as booking_amount,
@@ -170,6 +196,7 @@ export async function getTruckBookingThreadById(threadId: number, userId: number
     INNER JOIN loads l ON l.id = t.load_id
     INNER JOIN load_bookings lb ON lb.id = t.booking_id
     INNER JOIN truck_availability ta ON ta.id = t.truck_availability_id
+    LEFT JOIN trucks tr ON tr.id = ta.truck_id
     LEFT JOIN haulers h ON h.user_id = t.hauler_user_id
     LEFT JOIN shippers s ON s.user_id = t.shipper_user_id
     WHERE t.id = $1 
@@ -194,6 +221,8 @@ export async function getTruckBookingThreadByBookingId(bookingId: number, userId
       t.*,
       l.pickup_location_text || ' → ' || l.dropoff_location_text as load_title,
       ta.origin_location_text || COALESCE(' → ' || ta.destination_location_text, '') as truck_route,
+      tr.plate_number as truck_plate_number,
+      tr.notes as truck_notes,
       h.legal_name as hauler_name,
       s.farm_name as shipper_name,
       lb.offered_amount::text as booking_amount,
@@ -203,6 +232,7 @@ export async function getTruckBookingThreadByBookingId(bookingId: number, userId
     INNER JOIN loads l ON l.id = t.load_id
     INNER JOIN load_bookings lb ON lb.id = t.booking_id
     INNER JOIN truck_availability ta ON ta.id = t.truck_availability_id
+    LEFT JOIN trucks tr ON tr.id = ta.truck_id
     LEFT JOIN haulers h ON h.user_id = t.hauler_user_id
     LEFT JOIN shippers s ON s.user_id = t.shipper_user_id
     WHERE t.booking_id = $1 

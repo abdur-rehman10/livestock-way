@@ -34,6 +34,8 @@ export interface TruckBookingThread {
   updated_at: string;
   load_title?: string;
   truck_route?: string;
+  truck_name?: string | null;
+  truck_plate_number?: string | null;
   hauler_name?: string;
   shipper_name?: string;
   last_message?: string;
