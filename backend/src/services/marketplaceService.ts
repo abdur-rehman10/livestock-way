@@ -1220,7 +1220,7 @@ export async function createLoadOffer(input: CreateLoadOfferInput): Promise<Load
     input;
 
   if (!truckId) {
-    throw new Error("Truck selection is required when placing an offer");
+    throw new Error("Please add truck or route first.");
   }
 
   // Check if load already has a contract (if contract exists, load is already assigned)

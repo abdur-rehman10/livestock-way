@@ -73,6 +73,7 @@ import {
   subscribeHauler,
 } from "../api/marketplace";
 import { fetchTrucks } from "../api/fleet";
+import { fetchTruckAvailability } from "../api/marketplace";
 import { useHaulerSubscription } from "../hooks/useHaulerSubscription";
 import { SubscriptionCTA } from "../components/SubscriptionCTA";
 import {
@@ -166,6 +167,7 @@ export function Loadboard() {
   const [error, setError] = useState<string | null>(null);
   const [haulerOffers, setHaulerOffers] = useState<Record<string, HaulerOfferSummary>>({});
   const [haulerTruckCount, setHaulerTruckCount] = useState<number | null>(null);
+  const [hasTruckBoardEntries, setHasTruckBoardEntries] = useState<boolean | null>(null);
   const [subscriptionDialogOpen, setSubscriptionDialogOpen] = useState(false);
   const [oneTimeUpgradeOpen, setOneTimeUpgradeOpen] = useState(false);
   const [subscriptionSaving, setSubscriptionSaving] = useState(false);
@@ -264,7 +266,8 @@ type LoadboardFilters = {
     subscriptionState?.hauler_type === "INDIVIDUAL" &&
     subscriptionState.subscription_status !== "ACTIVE" &&
     subscriptionState.free_trip_used === true;
-  const hasFleet = haulerTruckCount === null ? true : haulerTruckCount > 0;
+  // Check if hauler has posted trucks/routes on truck board (not bound to contracts)
+  const hasTruckOrRoute = hasTruckBoardEntries === null ? true : hasTruckBoardEntries;
   const offerBlockedMessage = "You have used your one free trip. Please subscribe to keep using LivestockWay.";
   const individualPrice =
     subscriptionState?.current_individual_monthly_price !== null &&
@@ -486,9 +489,9 @@ type LoadboardFilters = {
   };
 
   const handleOfferClick = (load: Load) => {
-    if (!hasFleet) {
-      toast.error("Add a vehicle in My Fleet before placing offers.");
-      navigate("/hauler/fleet");
+    if (!hasTruckOrRoute) {
+      toast.error("Please add truck or route first.");
+      navigate("/hauler/truck-listings");
       return;
     }
     if (offerBlocked) {
@@ -508,9 +511,9 @@ type LoadboardFilters = {
       toast.info("This external load is read-only.");
       return;
     }
-    if (!hasFleet) {
-      toast.error("Add a vehicle in My Fleet before placing offers.");
-      navigate("/hauler/fleet");
+    if (!hasTruckOrRoute) {
+      toast.error("Please add truck or route first.");
+      navigate("/hauler/truck-listings");
       return;
     }
     setOfferDialogLoad(load);
@@ -527,8 +530,8 @@ type LoadboardFilters = {
       const trucksResult = await fetchTrucks();
       setHaulerTrucks(trucksResult.items || []);
       if (trucksResult.items.length === 0) {
-        toast.error("Add a vehicle in My Fleet before placing offers.");
-        navigate("/hauler/fleet");
+        toast.error("Please add truck or route first.");
+        navigate("/hauler/truck-listings");
         setOfferDialogLoad(null);
         return;
       }
@@ -595,7 +598,7 @@ const submitOffer = async () => {
       return;
     }
     if (!selectedTruckId) {
-      toast.error("Please select a truck for this offer.");
+      toast.error("Please add truck or route first.");
       return;
     }
     try {
@@ -830,6 +833,17 @@ const loadUserOffer = async (load: Load, options: { silent?: boolean } = {}) => 
         .catch(() => {
           setHaulerOffers({});
         });
+      // Check for truck board entries (trucks/routes posted by hauler)
+      fetchTruckAvailability({ scope: "mine" })
+        .then((resp) => {
+          // Check if there are any active entries (not bound to contracts)
+          const hasActiveEntries = resp.items.some((entry) => entry.is_active === true);
+          setHasTruckBoardEntries(hasActiveEntries);
+        })
+        .catch(() => {
+          setHasTruckBoardEntries(false);
+        });
+      // Still fetch trucks for the offer dialog (to select which truck to use)
       fetchTrucks()
         .then((resp) => {
           setHaulerTruckCount(resp.items?.length ?? 0);
@@ -1579,7 +1593,7 @@ const loadUserOffer = async (load: Load, options: { silent?: boolean } = {}) => 
                 </SelectContent>
               </Select>
               {!selectedTruckId && (
-                <p className="text-xs text-red-500 mt-1">Truck selection is required</p>
+                <p className="text-xs text-red-500 mt-1">Please add truck or route first</p>
               )}
             </div>
             <div>
