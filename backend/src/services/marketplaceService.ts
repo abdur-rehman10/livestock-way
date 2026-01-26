@@ -1282,6 +1282,56 @@ export async function createLoadOffer(input: CreateLoadOfferInput): Promise<Load
     throw new Error("Failed to create load offer");
   }
   const hydrated = await getLoadOfferById(row.id);
+  
+  // If there's a message, create the first chat message from the hauler
+  // Thread is created automatically via database trigger
+  if (message && message.trim()) {
+    try {
+      // Get thread_id for this offer (created via trigger)
+      const threadResult = await pool.query(
+        "SELECT id FROM load_offer_threads WHERE offer_id = $1 LIMIT 1",
+        [row.id]
+      );
+      
+      const threadId = threadResult.rows[0]?.id ? Number(threadResult.rows[0].id) : null;
+      
+      if (threadId) {
+        // Insert message directly (bypassing first message restriction since this is the application message)
+        await pool.query(
+          `
+          INSERT INTO load_offer_messages (
+            thread_id,
+            offer_id,
+            sender_user_id,
+            sender_role,
+            text,
+            attachments
+          )
+          VALUES ($1, $2, $3, $4, $5, $6)
+          `,
+          [
+            threadId,
+            row.id,
+            Number(createdByUserId),
+            "hauler",
+            message.trim(),
+            JSON.stringify([]),
+          ]
+        );
+        
+        // Update thread: keep first_message_sent = FALSE until shipper responds
+        // (Trigger sets it to TRUE, but we override it back to FALSE since this is the hauler's application message)
+        await pool.query(
+          "UPDATE load_offer_threads SET updated_at = NOW(), first_message_sent = FALSE WHERE id = $1",
+          [threadId]
+        );
+      }
+    } catch (err) {
+      // Log error but don't fail the offer creation if message creation fails
+      console.error("Failed to create initial offer message:", err);
+    }
+  }
+  
   return hydrated ?? row;
 }
 
@@ -2475,6 +2525,56 @@ export async function createBookingForAvailability(params: {
   );
   const bookingRow = mapBookingRow(insert.rows[0]);
   await refreshTruckAvailabilityState(params.truckAvailabilityId);
+  
+  // If there are notes, create the first chat message from the shipper
+  // Thread is created automatically via database trigger
+  if (params.notes && params.notes.trim()) {
+    try {
+      // Get thread for this booking (created via trigger)
+      const threadQuery = await pool.query(
+        `SELECT id FROM truck_booking_threads WHERE booking_id = $1 LIMIT 1`,
+        [bookingRow.id]
+      );
+      
+      const threadId = threadQuery.rows[0]?.id ? Number(threadQuery.rows[0].id) : null;
+      
+      if (threadId) {
+        // Insert message directly (bypassing first message restriction since this is the application message)
+        await pool.query(
+          `
+          INSERT INTO truck_booking_messages (
+            thread_id,
+            booking_id,
+            sender_user_id,
+            sender_role,
+            text,
+            attachments
+          )
+          VALUES ($1, $2, $3, $4, $5, $6)
+          `,
+          [
+            threadId,
+            bookingRow.id,
+            Number(params.shipperUserId),
+            "shipper",
+            params.notes.trim(),
+            JSON.stringify([]),
+          ]
+        );
+        
+        // Update thread: keep first_message_sent = FALSE until hauler responds
+        // (Trigger sets it to TRUE, but we override it back to FALSE since this is the shipper's application message)
+        await pool.query(
+          "UPDATE truck_booking_threads SET updated_at = NOW(), first_message_sent = FALSE WHERE id = $1",
+          [threadId]
+        );
+      }
+    } catch (err) {
+      // Log error but don't fail the booking creation if message creation fails
+      console.error("Failed to create initial booking message:", err);
+    }
+  }
+  
   return bookingRow;
 }
 
