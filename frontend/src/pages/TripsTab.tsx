@@ -1291,19 +1291,19 @@ export function TripsTab({ onViewTrip, role = 'hauler' }: TripsTabProps) {
             <TabsContent value="active" className="space-y-3 mt-4">
               {shipperActiveTrips.length === 0
                 ? renderEmptyState('active')
-                : shipperActiveTrips.map(renderShipperTripCard)}
+                : shipperActiveTrips.map((trip) => renderShipperTripCard(trip, true))}
             </TabsContent>
 
             <TabsContent value="upcoming" className="space-y-3 mt-4">
               {shipperUpcomingTrips.length === 0
                 ? renderEmptyState('upcoming')
-                : shipperUpcomingTrips.map(renderShipperTripCard)}
+                : shipperUpcomingTrips.map((trip) => renderShipperTripCard(trip, true))}
             </TabsContent>
 
             <TabsContent value="completed" className="space-y-3 mt-4">
               {shipperCompletedTrips.length === 0
                 ? renderEmptyState('completed')
-                : shipperCompletedTrips.map(renderShipperTripCard)}
+                : shipperCompletedTrips.map((trip) => renderShipperTripCard(trip, false))}
             </TabsContent>
           </>
         )}
