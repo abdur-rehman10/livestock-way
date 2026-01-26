@@ -297,7 +297,7 @@ export function AppRouter({ showKeyboardShortcuts, onKeyboardShortcutsToggle }: 
                   <Route path="truck-board" element={<TruckBoard />} />
                   <Route path="marketplace" element={<MarketplaceTab userRole="hauler" />} />
                   <Route path="documents" element={<DocumentsTab />} />
-                  <Route path="settings" element={<div>Hauler settings coming soon</div>} />
+                  <Route path="settings" element={<ProfileSettings role="hauler" onBack={() => navigate(-1)} />} />
                   <Route path="support" element={<SupportTab />} />
                   <Route path="*" element={<Navigate to="/hauler/dashboard" replace />} />
                 </Routes>

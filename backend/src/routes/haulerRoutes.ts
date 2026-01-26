@@ -379,4 +379,190 @@ router.post(
   }
 );
 
+// GET /api/hauler/profile - Get hauler profile information
+router.get(
+  "/profile",
+  requireRoles(["hauler"]),
+  async (req: Request, res: Response) => {
+    try {
+      assertHaulerUser(req.user as any);
+      const userId = (req.user as any)?.id ? Number((req.user as any).id) : null;
+      if (!userId) {
+        return res.status(401).json({ message: "Unauthorized" });
+      }
+
+      const haulerId = await ensureHaulerProfile(userId);
+      const result = await pool.query(
+        `
+          SELECT
+            u.id AS user_id,
+            u.full_name,
+            u.email,
+            u.phone_number,
+            u.company_name,
+            u.country,
+            u.timezone,
+            u.preferred_language,
+            h.id AS hauler_id,
+            h.legal_name,
+            h.dot_number,
+            h.tax_id,
+            h.website_url,
+            h.hauler_type
+          FROM app_users u
+          JOIN haulers h ON h.user_id = u.id
+          WHERE u.id = $1
+          LIMIT 1
+        `,
+        [userId]
+      );
+
+      if (!result.rowCount) {
+        return res.status(404).json({ message: "Profile not found" });
+      }
+
+      const row = result.rows[0];
+      return res.json({
+        user_id: String(row.user_id),
+        hauler_id: String(row.hauler_id),
+        full_name: row.full_name ?? "",
+        email: row.email ?? "",
+        phone_number: row.phone_number ?? "",
+        company_name: row.company_name ?? "",
+        country: row.country ?? "",
+        timezone: row.timezone ?? "",
+        preferred_language: row.preferred_language ?? "",
+        legal_name: row.legal_name ?? "",
+        dot_number: row.dot_number ?? "",
+        tax_id: row.tax_id ?? "",
+        website_url: row.website_url ?? "",
+        hauler_type: row.hauler_type ?? "company",
+      });
+    } catch (err: any) {
+      console.error("Error in GET /api/hauler/profile:", err);
+      return res.status(500).json({ message: "Failed to load profile" });
+    }
+  }
+);
+
+// PATCH /api/hauler/profile - Update hauler profile information
+router.patch(
+  "/profile",
+  requireRoles(["hauler"]),
+  async (req: Request, res: Response) => {
+    try {
+      assertHaulerUser(req.user as any);
+      const userId = (req.user as any)?.id ? Number((req.user as any).id) : null;
+      if (!userId) {
+        return res.status(401).json({ message: "Unauthorized" });
+      }
+
+      const haulerId = await ensureHaulerProfile(userId);
+      const {
+        full_name,
+        email,
+        phone_number,
+        company_name,
+        country,
+        timezone,
+        preferred_language,
+        legal_name,
+        dot_number,
+        tax_id,
+        website_url,
+      } = req.body;
+
+      await pool.query("BEGIN");
+
+      // Update app_users
+      const userUpdates: string[] = [];
+      const userValues: any[] = [];
+      let paramCount = 1;
+
+      if (full_name !== undefined) {
+        userUpdates.push(`full_name = $${paramCount++}`);
+        userValues.push(full_name);
+      }
+      if (email !== undefined) {
+        userUpdates.push(`email = $${paramCount++}`);
+        userValues.push(email);
+      }
+      if (phone_number !== undefined) {
+        userUpdates.push(`phone_number = $${paramCount++}`);
+        userValues.push(phone_number);
+      }
+      if (company_name !== undefined) {
+        userUpdates.push(`company_name = $${paramCount++}`);
+        userValues.push(company_name);
+      }
+      if (country !== undefined) {
+        userUpdates.push(`country = $${paramCount++}`);
+        userValues.push(country);
+      }
+      if (timezone !== undefined) {
+        userUpdates.push(`timezone = $${paramCount++}`);
+        userValues.push(timezone);
+      }
+      if (preferred_language !== undefined) {
+        userUpdates.push(`preferred_language = $${paramCount++}`);
+        userValues.push(preferred_language);
+      }
+
+      if (userUpdates.length > 0) {
+        userValues.push(userId);
+        await pool.query(
+          `
+            UPDATE app_users
+            SET ${userUpdates.join(", ")}, updated_at = NOW()
+            WHERE id = $${paramCount}
+          `,
+          userValues
+        );
+      }
+
+      // Update haulers
+      const haulerUpdates: string[] = [];
+      const haulerValues: any[] = [];
+      let haulerParamCount = 1;
+
+      if (legal_name !== undefined) {
+        haulerUpdates.push(`legal_name = $${haulerParamCount++}`);
+        haulerValues.push(legal_name);
+      }
+      if (dot_number !== undefined) {
+        haulerUpdates.push(`dot_number = $${haulerParamCount++}`);
+        haulerValues.push(dot_number);
+      }
+      if (tax_id !== undefined) {
+        haulerUpdates.push(`tax_id = $${haulerParamCount++}`);
+        haulerValues.push(tax_id);
+      }
+      if (website_url !== undefined) {
+        haulerUpdates.push(`website_url = $${haulerParamCount++}`);
+        haulerValues.push(website_url);
+      }
+
+      if (haulerUpdates.length > 0) {
+        haulerValues.push(haulerId);
+        await pool.query(
+          `
+            UPDATE haulers
+            SET ${haulerUpdates.join(", ")}, updated_at = NOW()
+            WHERE id = $${haulerParamCount}
+          `,
+          haulerValues
+        );
+      }
+
+      await pool.query("COMMIT");
+
+      return res.json({ message: "Profile updated successfully" });
+    } catch (err: any) {
+      await pool.query("ROLLBACK");
+      console.error("Error in PATCH /api/hauler/profile:", err);
+      return res.status(500).json({ message: "Failed to update profile" });
+    }
+  }
+);
+
 export default router;

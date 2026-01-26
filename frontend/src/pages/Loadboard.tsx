@@ -71,9 +71,10 @@ import {
   fetchHaulerOfferSummaries,
   type HaulerOfferSummary,
   subscribeHauler,
+  fetchTruckAvailability,
+  type TruckAvailability,
 } from "../api/marketplace";
 import { fetchTrucks } from "../api/fleet";
-import { fetchTruckAvailability } from "../api/marketplace";
 import { useHaulerSubscription } from "../hooks/useHaulerSubscription";
 import { SubscriptionCTA } from "../components/SubscriptionCTA";
 import {
@@ -153,6 +154,7 @@ export function Loadboard() {
   const [offerDialogExistingOffer, setOfferDialogExistingOffer] = useState<LoadOffer | null>(null);
   const [offerDialogCheckingExisting, setOfferDialogCheckingExisting] = useState(false);
   const [haulerTrucks, setHaulerTrucks] = useState<any[]>([]);
+  const [haulerTruckAvailability, setHaulerTruckAvailability] = useState<TruckAvailability[]>([]);
   const [selectedTruckId, setSelectedTruckId] = useState<string>("");
   const [trucksLoading, setTrucksLoading] = useState(false);
   const [detailLoadOffer, setDetailLoadOffer] = useState<LoadOffer | null>(null);
@@ -524,20 +526,22 @@ type LoadboardFilters = {
     setSelectedTruckId("");
     if (!currentHaulerId) return;
     
-    // Fetch trucks for selection
+    // Fetch truck availability entries (trucks/routes) for selection
     setTrucksLoading(true);
+    let activeEntries: TruckAvailability[] = [];
     try {
-      const trucksResult = await fetchTrucks();
-      setHaulerTrucks(trucksResult.items || []);
-      if (trucksResult.items.length === 0) {
+      const availabilityResult = await fetchTruckAvailability({ scope: "mine" });
+      activeEntries = availabilityResult.items.filter((entry) => entry.is_active === true);
+      setHaulerTruckAvailability(activeEntries);
+      if (activeEntries.length === 0) {
         toast.error("Please add truck or route first.");
         navigate("/hauler/truck-listings");
         setOfferDialogLoad(null);
         return;
       }
     } catch (err: any) {
-      console.error("Error fetching trucks:", err);
-      toast.error("Failed to load trucks. Please try again.");
+      console.error("Error fetching truck availability:", err);
+      toast.error("Failed to load trucks/routes. Please try again.");
       setOfferDialogLoad(null);
       return;
     } finally {
@@ -553,9 +557,15 @@ type LoadboardFilters = {
           setOfferDialogExistingOffer(existing);
           setOfferAmount(existing.offered_amount);
           setOfferMessage(existing.message ?? "");
-          // Set selected truck if offer has truck_id
+          // Set selected truck availability if offer has truck_id
           if ((existing as any).truck_id) {
-            setSelectedTruckId(String((existing as any).truck_id));
+            // Find the truck availability entry that has this truck_id
+            const matchingEntry = activeEntries.find(
+              (entry) => entry.truck_id === String((existing as any).truck_id)
+            );
+            if (matchingEntry) {
+              setSelectedTruckId(matchingEntry.id);
+            }
           }
         } else if (existing.status === "ACCEPTED") {
           toast.error("This load already has an accepted offer from you.");
@@ -612,11 +622,19 @@ const submitOffer = async () => {
         });
         toast.success("Offer updated.");
       } else {
+        // Get truck_id from selected truck availability entry
+        const selectedAvailability = haulerTruckAvailability.find(
+          (entry) => entry.id === selectedTruckId
+        );
+        if (!selectedAvailability || !selectedAvailability.truck_id) {
+          toast.error("Selected truck/route must have a truck assigned.");
+          return;
+        }
         const result = await createLoadOfferRequest(loadIdNumeric, {
           offered_amount: amountValue,
           currency: "USD",
           message: offerMessage || undefined,
-          truck_id: selectedTruckId,
+          truck_id: selectedAvailability.truck_id,
         });
         toast.success("Offer submitted to shipper.");
         // Open message thread for the new offer
@@ -1570,10 +1588,10 @@ const loadUserOffer = async (load: Load, options: { silent?: boolean } = {}) => 
           {trucksLoading && (
             <p className="text-xs text-gray-500">Loading trucks…</p>
           )}
-          <div className="space-y-4">
+          <div className="space-y-4 overflow-hidden">
             <div>
               <Label className="text-sm text-gray-500">
-                Select Truck <span className="text-red-500">*</span>
+                Select Truck/Route <span className="text-red-500">*</span>
               </Label>
               <Select
                 value={selectedTruckId}
@@ -1581,15 +1599,22 @@ const loadUserOffer = async (load: Load, options: { silent?: boolean } = {}) => 
                 disabled={trucksLoading || offerDialogCheckingExisting}
               >
                 <SelectTrigger>
-                  <SelectValue placeholder="Select a truck" />
+                  <SelectValue placeholder="Select a truck or route" />
                 </SelectTrigger>
                 <SelectContent>
-                  {haulerTrucks.map((truck) => (
-                    <SelectItem key={truck.id} value={String(truck.id)}>
-                      {truck.truck_name || truck.plate_number} ({truck.truck_type})
-                      {truck.capacity && ` - ${Number(truck.capacity).toLocaleString()} kg`}
-                    </SelectItem>
-                  ))}
+                  {haulerTruckAvailability.map((entry) => {
+                    const routeText = entry.destination_location_text
+                      ? `${entry.origin_location_text} → ${entry.destination_location_text}`
+                      : entry.origin_location_text;
+                    return (
+                      <SelectItem key={entry.id} value={entry.id}>
+                        {routeText}
+                        {entry.truck_id && ` (Truck ID: ${entry.truck_id})`}
+                        {entry.capacity_headcount && ` - ${entry.capacity_headcount} head`}
+                        {entry.capacity_weight_kg && ` - ${Number(entry.capacity_weight_kg).toLocaleString()} kg`}
+                      </SelectItem>
+                    );
+                  })}
                 </SelectContent>
               </Select>
               {!selectedTruckId && (

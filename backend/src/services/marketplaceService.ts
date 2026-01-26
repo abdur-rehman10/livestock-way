@@ -430,6 +430,7 @@ export interface TripRecord {
   hauler_id: string | null;
   assigned_driver_id: string | null;
   assigned_vehicle_id: string | null;
+  truck_availability_id: string | null;
   status: TripStatus;
   payment_mode: PaymentMode;
   direct_payment_disclaimer_accepted_at: string | null;
@@ -660,6 +661,7 @@ type TripRow = {
   hauler_id: string | null;
   driver_id: string | null;
   truck_id: string | null;
+  truck_availability_id?: string | null;
   status: string | null;
   payment_mode?: string | null;
   load_payment_mode?: string | null;
@@ -681,6 +683,7 @@ export function mapTripRow(row: TripRow): TripRecord {
     hauler_id: row.hauler_id,
     assigned_driver_id: row.driver_id,
     assigned_vehicle_id: row.truck_id,
+    truck_availability_id: row.truck_availability_id ?? null,
     status: mapTripStatusFromDb(row.status),
     payment_mode:
       (row.payment_mode as PaymentMode | null | undefined) === "DIRECT" ||
@@ -2569,6 +2572,32 @@ export async function listContractsForHauler(
   return result.rows.map(mapContractRow);
 }
 
+export async function listContractsForHaulerByTruckAvailability(
+  haulerId: string,
+  truckAvailabilityId?: string
+): Promise<Array<ContractRecord & { booking_truck_availability_id: string | null }>> {
+  let query = `
+    SELECT 
+      c.*,
+      lb.truck_availability_id::text AS booking_truck_availability_id
+    FROM contracts c
+    LEFT JOIN load_bookings lb ON lb.id = c.booking_id
+    WHERE c.hauler_id = $1
+      AND c.status IN ('ACCEPTED', 'LOCKED')
+  `;
+  const values: Array<string> = [haulerId];
+  if (truckAvailabilityId) {
+    query += ` AND lb.truck_availability_id = $2`;
+    values.push(truckAvailabilityId);
+  }
+  query += ` ORDER BY c.created_at DESC`;
+  const result = await pool.query(query, values);
+  return result.rows.map((row) => ({
+    ...mapContractRow(row),
+    booking_truck_availability_id: row.booking_truck_availability_id ?? null,
+  }));
+}
+
 type ShipperTripRow = {
   id: string;
   load_id: string;
@@ -2700,8 +2729,8 @@ export async function listTripsForShipper(shipperId: string): Promise<ShipperTri
         loc.recorded_at AS latest_recorded_at
       FROM trips t
       JOIN loads l ON l.id = t.load_id
-      JOIN shippers s ON s.id = l.shipper_id
-      JOIN app_users su ON su.id = s.user_id
+      LEFT JOIN shippers s ON s.id = $1
+      LEFT JOIN app_users su ON su.id = s.user_id
       LEFT JOIN haulers h ON h.id = t.hauler_id
       LEFT JOIN app_users hu ON hu.id = h.user_id
       LEFT JOIN drivers d ON d.id = t.driver_id
@@ -2730,12 +2759,40 @@ export async function listTripsForShipper(shipperId: string): Promise<ShipperTri
       LEFT JOIN LATERAL (
         SELECT *
         FROM contracts c
-        WHERE c.load_id = l.id
+        WHERE (
+          c.load_id = l.id
+          OR EXISTS (
+            SELECT 1
+            FROM trip_loads tl
+            WHERE tl.trip_id = t.id
+              AND tl.load_id = c.load_id
+          )
+        )
           AND c.status IN ('ACCEPTED', 'LOCKED')
+          AND (
+            c.shipper_id = $1
+            OR EXISTS (
+              SELECT 1
+              FROM trip_loads tl2
+              JOIN loads l3 ON l3.id = tl2.load_id
+              WHERE tl2.trip_id = t.id
+                AND tl2.load_id = c.load_id
+                AND l3.shipper_id = $1
+            )
+          )
         ORDER BY c.updated_at DESC NULLS LAST, c.created_at DESC
         LIMIT 1
       ) c ON true
-      WHERE l.shipper_id = $1
+      WHERE (
+        l.shipper_id = $1
+        OR EXISTS (
+          SELECT 1
+          FROM trip_loads tl
+          JOIN loads l2 ON l2.id = tl.load_id
+          WHERE tl.trip_id = t.id
+            AND l2.shipper_id = $1
+        )
+      )
         AND c.id IS NOT NULL
         AND UPPER(t.status::text) IN (
           'PENDING_ESCROW',
@@ -2836,7 +2893,7 @@ export async function listTripsForShipper(shipperId: string): Promise<ShipperTri
       hauler: row.hauler_id
         ? { id: row.hauler_id, name: row.hauler_name, phone: row.hauler_phone }
         : null,
-      shipper: { id: row.load_shipper_id, name: row.shipper_name, phone: row.shipper_phone },
+      shipper: { id: shipperId, name: row.shipper_name, phone: row.shipper_phone },
       driver: row.driver_id
         ? { id: row.driver_id, name: row.driver_name, phone: row.driver_phone }
         : null,
@@ -2864,118 +2921,120 @@ export async function listTripsForShipper(shipperId: string): Promise<ShipperTri
 }
 
 export async function listTripsForHauler(haulerId: string): Promise<HaulerTripSummary[]> {
+  // Only show actual trips, not confirmed contracts without trips
   const result = await pool.query<ShipperTripRow>(
     `
       SELECT
-        t.id,
-        t.load_id,
-        t.hauler_id,
-        t.truck_id,
-        t.driver_id,
-        t.status,
-        t.actual_start_time,
-        t.actual_end_time,
-        t.delivered_confirmed_at,
-        t.created_at,
-        t.updated_at,
-        l.shipper_id::text AS load_shipper_id,
-        l.species AS load_species,
-        l.animal_count AS load_animal_count,
-        l.pickup_location_text AS load_pickup_location_text,
-        l.dropoff_location_text AS load_dropoff_location_text,
-        l.price_offer_amount::text AS load_price_offer_amount,
-        l.price_currency AS load_price_currency,
-        l.pickup_window_start AS load_pickup_window_start,
-        l.pickup_window_end AS load_pickup_window_end,
-        l.delivery_window_start AS load_delivery_window_start,
-        l.delivery_window_end AS load_delivery_window_end,
-        l.pickup_lat AS load_pickup_lat,
-        l.pickup_lng AS load_pickup_lng,
-        l.dropoff_lat AS load_dropoff_lat,
-        l.dropoff_lng AS load_dropoff_lng,
-        l.payment_mode AS load_payment_mode,
-        l.direct_payment_disclaimer_accepted_at AS load_direct_payment_disclaimer_accepted_at,
-        l.direct_payment_disclaimer_version AS load_direct_payment_disclaimer_version,
-        c.id AS contract_id,
-        c.offer_id AS contract_offer_id,
-        c.booking_id AS contract_booking_id,
-        c.shipper_id::text AS contract_shipper_id,
-        c.hauler_id::text AS contract_hauler_id,
-        c.status AS contract_status,
-        c.price_amount::text AS contract_price_amount,
-        c.price_type AS contract_price_type,
-        c.payment_method AS contract_payment_method,
-        c.payment_schedule AS contract_payment_schedule,
-        c.contract_payload AS contract_payload,
-        c.sent_at AS contract_sent_at,
-        c.accepted_at AS contract_accepted_at,
-        c.rejected_at AS contract_rejected_at,
-        c.locked_at AS contract_locked_at,
-        c.created_by_user_id::text AS contract_created_by_user_id,
-        c.updated_by_user_id::text AS contract_updated_by_user_id,
-        c.created_at AS contract_created_at,
-        c.updated_at AS contract_updated_at,
-        hu.full_name AS hauler_name,
-        hu.phone_number AS hauler_phone,
-        su.full_name AS shipper_name,
-        su.phone_number AS shipper_phone,
-        d.full_name AS driver_name,
-        d.phone_number AS driver_phone,
-        tr.plate_number AS truck_plate_number,
-        tr.truck_type AS truck_type,
-        pay.status AS payment_status,
-        trp.id AS route_plan_id,
-        loc.latitude AS latest_lat,
-        loc.longitude AS latest_lng,
-        loc.recorded_at AS latest_recorded_at
-      FROM trips t
-      JOIN loads l ON l.id = t.load_id
-      JOIN shippers s ON s.id = l.shipper_id
-      JOIN app_users su ON su.id = s.user_id
-      LEFT JOIN haulers h ON h.id = t.hauler_id
-      LEFT JOIN app_users hu ON hu.id = h.user_id
-      LEFT JOIN drivers d ON d.id = t.driver_id
-      LEFT JOIN trucks tr ON tr.id = t.truck_id
-      LEFT JOIN LATERAL (
-        SELECT status
-        FROM payments p
-        WHERE p.trip_id = t.id
-        ORDER BY p.created_at DESC
-        LIMIT 1
-      ) pay ON true
-      LEFT JOIN LATERAL (
-        SELECT id
-        FROM trip_route_plans trp
-        WHERE trp.trip_id = t.id
-        ORDER BY trp.created_at DESC
-        LIMIT 1
-      ) trp ON true
-      LEFT JOIN LATERAL (
-        SELECT latitude, longitude, recorded_at
-        FROM trip_locations
-        WHERE trip_id = t.id
-        ORDER BY recorded_at DESC
-        LIMIT 1
-      ) loc ON true
-      LEFT JOIN LATERAL (
-        SELECT *
-        FROM contracts c
-        WHERE c.load_id = l.id
-          AND c.status IN ('ACCEPTED', 'LOCKED')
-        ORDER BY c.updated_at DESC NULLS LAST, c.created_at DESC
-        LIMIT 1
-      ) c ON true
-      WHERE t.hauler_id = $1
-        AND c.id IS NOT NULL
-        AND UPPER(t.status::text) IN (
-          'PENDING_ESCROW',
-          'READY_TO_START',
-          'IN_PROGRESS',
-          'DELIVERED_AWAITING_CONFIRMATION',
-          'DELIVERED_CONFIRMED',
-          'DISPUTED',
-          'CLOSED'
-        )
+          t.id::text,
+          t.load_id::text,
+          t.hauler_id::text,
+          COALESCE(t.truck_id::text, NULL::text) AS truck_id,
+          COALESCE(t.driver_id::text, NULL::text) AS driver_id,
+          COALESCE(t.truck_availability_id::text, NULL::text) AS truck_availability_id,
+          t.status,
+          t.actual_start_time,
+          t.actual_end_time,
+          t.delivered_confirmed_at,
+          t.created_at,
+          t.updated_at,
+          l.shipper_id::text AS load_shipper_id,
+          l.species AS load_species,
+          l.animal_count AS load_animal_count,
+          l.pickup_location_text AS load_pickup_location_text,
+          l.dropoff_location_text AS load_dropoff_location_text,
+          l.price_offer_amount::text AS load_price_offer_amount,
+          l.price_currency AS load_price_currency,
+          l.pickup_window_start AS load_pickup_window_start,
+          l.pickup_window_end AS load_pickup_window_end,
+          l.delivery_window_start AS load_delivery_window_start,
+          l.delivery_window_end AS load_delivery_window_end,
+          l.pickup_lat AS load_pickup_lat,
+          l.pickup_lng AS load_pickup_lng,
+          l.dropoff_lat AS load_dropoff_lat,
+          l.dropoff_lng AS load_dropoff_lng,
+          l.payment_mode AS load_payment_mode,
+          l.direct_payment_disclaimer_accepted_at AS load_direct_payment_disclaimer_accepted_at,
+          l.direct_payment_disclaimer_version AS load_direct_payment_disclaimer_version,
+          c.id AS contract_id,
+          c.offer_id AS contract_offer_id,
+          c.booking_id AS contract_booking_id,
+          c.shipper_id::text AS contract_shipper_id,
+          c.hauler_id::text AS contract_hauler_id,
+          c.status AS contract_status,
+          c.price_amount::text AS contract_price_amount,
+          c.price_type AS contract_price_type,
+          c.payment_method AS contract_payment_method,
+          c.payment_schedule AS contract_payment_schedule,
+          c.contract_payload AS contract_payload,
+          c.sent_at AS contract_sent_at,
+          c.accepted_at AS contract_accepted_at,
+          c.rejected_at AS contract_rejected_at,
+          c.locked_at AS contract_locked_at,
+          c.created_by_user_id::text AS contract_created_by_user_id,
+          c.updated_by_user_id::text AS contract_updated_by_user_id,
+          c.created_at AS contract_created_at,
+          c.updated_at AS contract_updated_at,
+          hu.full_name AS hauler_name,
+          hu.phone_number AS hauler_phone,
+          su.full_name AS shipper_name,
+          su.phone_number AS shipper_phone,
+          d.full_name AS driver_name,
+          d.phone_number AS driver_phone,
+          tr.plate_number AS truck_plate_number,
+          tr.truck_type AS truck_type,
+          pay.status AS payment_status,
+          trp.id AS route_plan_id,
+          loc.latitude AS latest_lat,
+          loc.longitude AS latest_lng,
+          loc.recorded_at AS latest_recorded_at
+        FROM trips t
+        JOIN loads l ON l.id = t.load_id
+        JOIN shippers s ON s.id = l.shipper_id
+        JOIN app_users su ON su.id = s.user_id
+        LEFT JOIN haulers h ON h.id = t.hauler_id
+        LEFT JOIN app_users hu ON hu.id = h.user_id
+        LEFT JOIN drivers d ON d.id = t.driver_id
+        LEFT JOIN trucks tr ON tr.id = t.truck_id
+        LEFT JOIN LATERAL (
+          SELECT status
+          FROM payments p
+          WHERE p.trip_id = t.id
+          ORDER BY p.created_at DESC
+          LIMIT 1
+        ) pay ON true
+        LEFT JOIN LATERAL (
+          SELECT id
+          FROM trip_route_plans trp
+          WHERE trp.trip_id = t.id
+          ORDER BY trp.created_at DESC
+          LIMIT 1
+        ) trp ON true
+        LEFT JOIN LATERAL (
+          SELECT latitude, longitude, recorded_at
+          FROM trip_locations
+          WHERE trip_id = t.id
+          ORDER BY recorded_at DESC
+          LIMIT 1
+        ) loc ON true
+        LEFT JOIN LATERAL (
+          SELECT *
+          FROM contracts c
+          WHERE c.load_id = l.id
+            AND c.status IN ('ACCEPTED', 'LOCKED')
+          ORDER BY c.updated_at DESC NULLS LAST, c.created_at DESC
+          LIMIT 1
+        ) c ON true
+        WHERE t.hauler_id = $1
+          AND c.id IS NOT NULL
+          AND UPPER(t.status::text) IN (
+            'PENDING_ESCROW',
+            'READY_TO_START',
+            'IN_PROGRESS',
+            'DELIVERED_AWAITING_CONFIRMATION',
+            'DELIVERED_CONFIRMED',
+            'DISPUTED',
+            'CLOSED'
+          )
       ORDER BY t.created_at DESC
     `,
     [haulerId]
@@ -2988,6 +3047,7 @@ export async function listTripsForHauler(haulerId: string): Promise<HaulerTripSu
       hauler_id: row.hauler_id,
       driver_id: row.driver_id,
       truck_id: row.truck_id,
+      truck_availability_id: (row as any).truck_availability_id ?? null,
       status: row.status,
       payment_mode: null,
       load_payment_mode: row.load_payment_mode,
@@ -3221,8 +3281,8 @@ export async function acceptContract(params: {
 }): Promise<{
   contract: ContractRecord;
   booking: LoadBookingRecord;
-  trip: TripRecord;
-  payment: PaymentRecord;
+  trip: TripRecord | null;
+  payment: PaymentRecord | null;
 }> {
   const contract = await getContractById(params.contractId);
   if (!contract) {
@@ -3237,8 +3297,208 @@ export async function acceptContract(params: {
     throw new Error("Load not found.");
   }
 
-  // Handle contracts linked to offers
+  // Handle contracts linked to bookings (truck bookings) - check this FIRST
+  // This allows multiple contracts to be accepted without subscription checks
+  if (contract.booking_id) {
+    const existingBooking = await getBookingById(contract.booking_id);
+    if (!existingBooking) {
+      throw new Error("Booking not found for contract.");
+    }
+    if (existingBooking.status !== BookingStatus.REQUESTED) {
+      throw new Error("Booking is not in REQUESTED status.");
+    }
+    
+    // If booking has truck_availability_id, use truck booking flow (skip subscription check)
+    if (existingBooking.truck_availability_id) {
+      const amount = Number(contract.price_amount ?? existingBooking.offered_amount ?? 0);
+      if (!amount || Number.isNaN(amount) || amount <= 0) {
+        throw new Error("Contract amount is invalid.");
+      }
+      
+      const paymentModeSelection = load.payment_mode
+        ? {
+            paymentMode: load.payment_mode,
+            directDisclaimerAt: load.direct_payment_disclaimer_accepted_at ?? null,
+            directDisclaimerVersion: load.direct_payment_disclaimer_version ?? null,
+          }
+        : undefined;
+      
+      // Check if a trip already exists for this truck_availability_id
+      const existingTrip = await pool.query(
+        `
+          SELECT id
+          FROM trips
+          WHERE truck_availability_id = $1
+            AND status NOT IN ($2, $3)
+          LIMIT 1
+        `,
+        [
+          existingBooking.truck_availability_id,
+          mapTripStatusToDb(TripStatus.DELIVERED_CONFIRMED),
+          mapTripStatusToDb(TripStatus.CLOSED),
+        ]
+      );
+      if (existingTrip.rows.length > 0) {
+        throw new Error(
+          "A trip has already been created for this truck/route listing. You cannot accept additional contracts once a trip is created."
+        );
+      }
+      
+      // For truck bookings, don't create trip immediately
+      // Trip will be created later via "Create New Trip" feature which can combine multiple contracts
+      const trip: TripRecord | null = null;
+      const payment: PaymentRecord | null = null;
+      
+      // Update booking status to ACCEPTED
+      const updatedBooking = await updateBookingStatus(
+        existingBooking.id,
+        BookingStatus.ACCEPTED,
+        params.actingUserId
+      );
+      if (!updatedBooking) {
+        throw new Error("Failed to update booking status.");
+      }
+      
+      // Refresh truck availability if needed
+      await refreshTruckAvailabilityState(existingBooking.truck_availability_id);
+      
+      // Update contract
+      const updatedContract = await pool.query(
+        `
+          UPDATE contracts
+          SET status = 'ACCEPTED',
+              accepted_at = NOW(),
+              locked_at = NOW(),
+              updated_by_user_id = $2,
+              updated_at = NOW()
+          WHERE id = $1
+          RETURNING *
+        `,
+        [contract.id, params.actingUserId]
+      );
+      
+      return {
+        contract: mapContractRow(updatedContract.rows[0]),
+        booking: updatedBooking,
+        trip,
+        payment,
+      };
+    }
+  }
+
+  // Handle contracts linked to offers (only if not a truck booking)
+  // But first, check if there's a booking with truck_availability_id for this load
   if (contract.offer_id) {
+    // Check if there's an active booking with truck_availability_id for this load
+    // If so, we should treat it as a truck booking, not an offer-based contract
+    const truckBookingCheck = await pool.query(
+      `
+        SELECT id, truck_availability_id, status
+        FROM load_bookings
+        WHERE load_id = $1
+          AND truck_availability_id IS NOT NULL
+          AND status = $2
+        LIMIT 1
+      `,
+      [contract.load_id, BookingStatus.REQUESTED]
+    );
+    
+    if (truckBookingCheck.rows.length > 0) {
+      // This is actually a truck booking, not a pure offer-based contract
+      // Update the contract to link it to the booking
+      const bookingId = truckBookingCheck.rows[0].id;
+      await pool.query(
+        `
+          UPDATE contracts
+          SET booking_id = $1
+          WHERE id = $2
+        `,
+        [bookingId, contract.id]
+      );
+      // Refresh contract to get updated booking_id
+      const updatedContract = await getContractById(contract.id);
+      if (updatedContract && updatedContract.booking_id) {
+        // Recursively call acceptContract with the updated contract
+        // But we need to avoid infinite recursion, so let's handle it inline
+        const existingBooking = await getBookingById(updatedContract.booking_id);
+        if (existingBooking && existingBooking.truck_availability_id) {
+          // Use truck booking flow
+          const amount = Number(updatedContract.price_amount ?? existingBooking.offered_amount ?? 0);
+          if (!amount || Number.isNaN(amount) || amount <= 0) {
+            throw new Error("Contract amount is invalid.");
+          }
+          
+          const paymentModeSelection = load.payment_mode
+            ? {
+                paymentMode: load.payment_mode,
+                directDisclaimerAt: load.direct_payment_disclaimer_accepted_at ?? null,
+                directDisclaimerVersion: load.direct_payment_disclaimer_version ?? null,
+              }
+            : undefined;
+          
+          // Check if a trip already exists for this truck_availability_id
+          const existingTrip = await pool.query(
+            `
+              SELECT id
+              FROM trips
+              WHERE truck_availability_id = $1
+                AND status NOT IN ($2, $3)
+              LIMIT 1
+            `,
+            [
+              existingBooking.truck_availability_id,
+              mapTripStatusToDb(TripStatus.DELIVERED_CONFIRMED),
+              mapTripStatusToDb(TripStatus.CLOSED),
+            ]
+          );
+          if (existingTrip.rows.length > 0) {
+            throw new Error(
+              "A trip has already been created for this truck/route listing. You cannot accept additional contracts once a trip is created."
+            );
+          }
+          
+          const trip: TripRecord | null = null;
+          const payment: PaymentRecord | null = null;
+          
+          // Update booking status to ACCEPTED
+          const updatedBookingRecord = await updateBookingStatus(
+            existingBooking.id,
+            BookingStatus.ACCEPTED,
+            params.actingUserId
+          );
+          if (!updatedBookingRecord) {
+            throw new Error("Failed to update booking status.");
+          }
+          
+          // Refresh truck availability if needed
+          await refreshTruckAvailabilityState(existingBooking.truck_availability_id);
+          
+          // Update contract
+          const finalContract = await pool.query(
+            `
+              UPDATE contracts
+              SET status = 'ACCEPTED',
+                  accepted_at = NOW(),
+                  locked_at = NOW(),
+                  booking_id = $2,
+                  updated_by_user_id = $3,
+                  updated_at = NOW()
+              WHERE id = $1
+              RETURNING *
+            `,
+            [contract.id, existingBooking.id, params.actingUserId]
+          );
+          
+          return {
+            contract: mapContractRow(finalContract.rows[0]),
+            booking: updatedBookingRecord,
+            trip,
+            payment,
+          };
+        }
+      }
+    }
+    
     if (await loadHasActiveBooking(contract.load_id)) {
       throw new Error("Load already has an active booking.");
     }
@@ -3246,6 +3506,151 @@ export async function acceptContract(params: {
     if (!offer) {
       throw new Error("Offer not found for contract.");
     }
+    
+    // Check if this offer's truck is associated with an active truck availability listing
+    // If yes, this is a truck booking scenario - skip subscription check and trip creation
+    const truckAvailabilityCheck = await pool.query(
+      `
+        SELECT id, truck_id
+        FROM truck_availability
+        WHERE hauler_id = $1
+          AND truck_id = $2
+          AND is_active = TRUE
+        LIMIT 1
+      `,
+      [offer.hauler_id, offer.truck_id]
+    );
+    
+    if (truckAvailabilityCheck.rows.length > 0 && offer.truck_id) {
+      // This is a truck booking scenario - accept contract without creating trip
+      // Check if a trip already exists for this truck_availability_id
+      const truckAvailabilityId = truckAvailabilityCheck.rows[0].id;
+      const existingTrip = await pool.query(
+        `
+          SELECT id
+          FROM trips
+          WHERE truck_availability_id = $1
+            AND status NOT IN ($2, $3)
+          LIMIT 1
+        `,
+        [
+          truckAvailabilityId,
+          mapTripStatusToDb(TripStatus.DELIVERED_CONFIRMED),
+          mapTripStatusToDb(TripStatus.CLOSED),
+        ]
+      );
+      if (existingTrip.rows.length > 0) {
+        throw new Error(
+          "A trip has already been created for this truck/route listing. You cannot accept additional contracts once a trip is created."
+        );
+      }
+      
+      // Find or create booking for this truck availability
+      let booking = await pool.query(
+        `
+          SELECT *
+          FROM load_bookings
+          WHERE load_id = $1
+            AND truck_availability_id = $2
+            AND status = $3
+          LIMIT 1
+        `,
+        [contract.load_id, truckAvailabilityId, BookingStatus.REQUESTED]
+      );
+      
+      let bookingRecord: LoadBookingRecord;
+      if (booking.rows.length > 0) {
+        bookingRecord = mapBookingRow(booking.rows[0]);
+      } else {
+        // Create a booking for this truck availability
+        const amount = Number(contract.price_amount ?? offer.offered_amount);
+        const newBooking = await pool.query(
+          `
+            INSERT INTO load_bookings (
+              load_id,
+              hauler_id,
+              shipper_id,
+              truck_availability_id,
+              offer_id,
+              offered_amount,
+              offered_currency,
+              status,
+              notes,
+              created_by_user_id,
+              payment_mode,
+              direct_payment_disclaimer_accepted_at,
+              direct_payment_disclaimer_version
+            )
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+            RETURNING *
+          `,
+          [
+            contract.load_id,
+            offer.hauler_id,
+            load.shipper_id,
+            truckAvailabilityId,
+            offer.id,
+            amount,
+            offer.currency,
+            BookingStatus.REQUESTED,
+            "Created from offer",
+            offer.created_by_user_id,
+            load.payment_mode ?? "ESCROW",
+            load.direct_payment_disclaimer_accepted_at ?? null,
+            load.direct_payment_disclaimer_version ?? null,
+          ]
+        );
+        bookingRecord = mapBookingRow(newBooking.rows[0]);
+      }
+      
+      // Update contract to link to booking
+      await pool.query(
+        `
+          UPDATE contracts
+          SET booking_id = $1
+          WHERE id = $2
+        `,
+        [bookingRecord.id, contract.id]
+      );
+      
+      // Accept the booking
+      const updatedBooking = await updateBookingStatus(
+        bookingRecord.id,
+        BookingStatus.ACCEPTED,
+        params.actingUserId
+      );
+      if (!updatedBooking) {
+        throw new Error("Failed to update booking status.");
+      }
+      
+      // Update contract
+      const updatedContract = await pool.query(
+        `
+          UPDATE contracts
+          SET status = 'ACCEPTED',
+              accepted_at = NOW(),
+              locked_at = NOW(),
+              booking_id = $2,
+              updated_by_user_id = $3,
+              updated_at = NOW()
+          WHERE id = $1
+          RETURNING *
+        `,
+        [contract.id, bookingRecord.id, params.actingUserId]
+      );
+      
+      const trip: TripRecord | null = null;
+      const payment: PaymentRecord | null = null;
+      
+      return {
+        contract: mapContractRow(updatedContract.rows[0]),
+        booking: updatedBooking,
+        trip,
+        payment,
+      };
+    }
+    
+    // Regular offer-based flow (with subscription check)
     const amount = Number(contract.price_amount ?? offer.offered_amount);
     if (!amount || Number.isNaN(amount) || amount <= 0) {
       throw new Error("Contract amount is invalid.");
@@ -3336,7 +3741,8 @@ export async function acceptContract(params: {
     };
   }
   
-  // Handle contracts linked to bookings (truck bookings)
+  // Handle contracts linked to bookings (non-truck bookings - those without truck_availability_id)
+  // Truck bookings are already handled above with early return
   if (contract.booking_id) {
     const existingBooking = await getBookingById(contract.booking_id);
     if (!existingBooking) {
@@ -3359,10 +3765,10 @@ export async function acceptContract(params: {
         }
       : undefined;
     
-    let trip: TripRecord;
-    let payment: PaymentRecord;
+    let trip: TripRecord | null;
+    let payment: PaymentRecord | null;
     
-    // If booking has an offer_id, use offer-based flow
+    // If booking has an offer_id, use offer-based flow (applies subscription checks)
     if (existingBooking.offer_id) {
       const offer = await getLoadOfferById(existingBooking.offer_id);
       if (!offer) {
@@ -3381,14 +3787,6 @@ export async function acceptContract(params: {
       });
       trip = result.trip;
       payment = result.payment;
-    } else if (existingBooking.truck_availability_id) {
-      // Use truck booking flow
-      const result = await createTripFromTruckBooking(
-        existingBooking,
-        paymentModeSelection || undefined
-      );
-      trip = result.trip;
-      payment = result.payment;
     } else {
       throw new Error("Booking is missing source information.");
     }
@@ -3401,11 +3799,6 @@ export async function acceptContract(params: {
     );
     if (!updatedBooking) {
       throw new Error("Failed to update booking status.");
-    }
-    
-    // Refresh truck availability if needed
-    if (existingBooking.truck_availability_id) {
-      await refreshTruckAvailabilityState(existingBooking.truck_availability_id);
     }
     
     // Update contract
@@ -3485,6 +3878,31 @@ async function createTripFromTruckBooking(
   if (!availability) {
     throw new Error("Truck availability not found");
   }
+  
+  // Check if a trip already exists for this truck_availability_id
+  // Once a trip is created, no more trips can be created for this truck/route
+  if (booking.truck_availability_id) {
+    const existingTrip = await pool.query(
+      `
+        SELECT id
+        FROM trips
+        WHERE truck_availability_id = $1
+          AND status NOT IN ($2, $3)
+        LIMIT 1
+      `,
+      [
+        booking.truck_availability_id,
+        mapTripStatusToDb(TripStatus.DELIVERED_CONFIRMED),
+        mapTripStatusToDb(TripStatus.CLOSED),
+      ]
+    );
+    if (existingTrip.rows.length > 0) {
+      throw new Error(
+        "A trip has already been created for this truck/route listing. You cannot create additional trips once a trip is created."
+      );
+    }
+  }
+  
   await ensureTruckAvailableForTrip(availability.truck_id);
   const loadRow = await getLoadById(booking.load_id);
   if (!loadRow) {
@@ -3509,9 +3927,10 @@ async function createTripFromTruckBooking(
 
   const paymentMode = paymentModeSelection?.paymentMode ?? "ESCROW";
   const isEscrow = paymentMode !== "DIRECT";
-  const tripStatus = isEscrow ? TripStatus.PENDING_ESCROW : TripStatus.READY_TO_START;
+  // Payments are automatically funded when contracts are created
+  const tripStatus = TripStatus.READY_TO_START;
   const paymentStatus = isEscrow
-    ? PaymentStatus.AWAITING_FUNDING
+    ? PaymentStatus.ESCROW_FUNDED
     : PaymentStatus.NOT_APPLICABLE;
 
   const tripResult = await pool.query<TripRow>(
@@ -3520,13 +3939,14 @@ async function createTripFromTruckBooking(
         load_id,
         hauler_id,
         truck_id,
+        truck_availability_id,
         status,
         payment_mode,
         direct_payment_disclaimer_accepted_at,
         direct_payment_disclaimer_version
       )
       VALUES (
-        $1,$2,$3,$4,$5,$6,$7
+        $1,$2,$3,$4,$5,$6,$7,$8
       )
       RETURNING *
     `,
@@ -3534,6 +3954,7 @@ async function createTripFromTruckBooking(
       booking.load_id,
       booking.hauler_id,
       availability.truck_id,
+      booking.truck_availability_id,
       mapTripStatusToDb(tripStatus),
       paymentMode,
       paymentMode === "DIRECT" ? paymentModeSelection?.directDisclaimerAt ?? null : null,
@@ -3592,6 +4013,322 @@ async function createTripFromTruckBooking(
   );
   await refreshTruckAvailabilityState(availability.id);
   return { trip, payment };
+}
+
+export async function createMultiLoadTripFromListing(params: {
+  truckAvailabilityId: string;
+  haulerId: string;
+  haulerUserId: string;
+  contractIds: string[];
+  driverId?: string | null;
+  pickupDateTime: string;
+  deliveryDateTime: string;
+  tripTitle?: string | null;
+  routeMode?: "fastest" | "shortest" | "avoid-tolls";
+  autoRestStops?: boolean;
+}): Promise<{ trip: TripRecord; tripLoads: Array<{ id: string; load_id: string; contract_id: string | null; booking_id: string | null }> }> {
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+
+    // Validate truck availability
+    const availability = await getTruckAvailabilityById(params.truckAvailabilityId);
+    if (!availability) {
+      throw new Error("Truck availability not found");
+    }
+    if (availability.hauler_id !== params.haulerId) {
+      throw new Error("Truck availability does not belong to this hauler");
+    }
+    if (!availability.truck_id) {
+      throw new Error("Truck availability must have a truck assigned");
+    }
+
+    // Validate contracts
+    if (params.contractIds.length === 0) {
+      throw new Error("At least one contract must be selected");
+    }
+    const contracts = await Promise.all(
+      params.contractIds.map((id) => getContractById(id))
+    );
+    const invalidContracts = contracts.filter((c) => !c || c.hauler_id !== params.haulerId || (c.status !== "ACCEPTED" && c.status !== "LOCKED"));
+    if (invalidContracts.length > 0) {
+      throw new Error("One or more contracts are invalid or not accepted");
+    }
+
+    // Get loads and bookings for contracts
+    const loads: LoadRecord[] = [];
+    const bookings: LoadBookingRecord[] = [];
+    for (const contract of contracts) {
+      if (!contract) continue;
+      const load = await getLoadById(contract.load_id);
+      if (!load) {
+        throw new Error(`Load not found for contract ${contract.id}`);
+      }
+      loads.push(load);
+      if (contract.booking_id) {
+        const booking = await getBookingById(contract.booking_id);
+        if (booking && booking.truck_availability_id === params.truckAvailabilityId) {
+          bookings.push(booking);
+        }
+      }
+    }
+
+    // Calculate total capacity and validate (warn but don't block)
+    let totalHeadcount = 0;
+    let totalWeight = 0;
+    for (const load of loads) {
+      const loadDetails = await getLoadDetails(load.id);
+      if (loadDetails?.animal_count) {
+        totalHeadcount += Number(loadDetails.animal_count);
+      }
+      if (loadDetails?.estimated_weight_kg) {
+        totalWeight += Number(loadDetails.estimated_weight_kg);
+      }
+    }
+    const capacityWarning: string[] = [];
+    if (availability.capacity_headcount && totalHeadcount > availability.capacity_headcount) {
+      capacityWarning.push(`Total headcount (${totalHeadcount}) exceeds truck capacity (${availability.capacity_headcount})`);
+    }
+    if (availability.capacity_weight_kg && totalWeight > Number(availability.capacity_weight_kg)) {
+      capacityWarning.push(`Total weight (${totalWeight} kg) exceeds truck capacity (${availability.capacity_weight_kg} kg)`);
+    }
+
+    // Validate that we have at least one load
+    if (loads.length === 0) {
+      throw new Error("No loads found for selected contracts");
+    }
+
+    // Determine payment mode (use first load's payment mode, or default to ESCROW)
+    const paymentMode = loads[0]?.payment_mode ?? "ESCROW";
+    const isEscrow = paymentMode !== "DIRECT";
+    const tripStatus = TripStatus.READY_TO_START; // Multi-load trips start as READY_TO_START (scheduled)
+    
+    // Create trip with first load as primary
+    const primaryLoad = loads[0];
+    if (!primaryLoad) {
+      throw new Error("Primary load is required");
+    }
+    const tripResult = await client.query<TripRow>(
+      `
+        INSERT INTO trips (
+          load_id,
+          hauler_id,
+          truck_id,
+          driver_id,
+          truck_availability_id,
+          status,
+          payment_mode,
+          planned_start_time,
+          planned_end_time,
+          direct_payment_disclaimer_accepted_at,
+          direct_payment_disclaimer_version
+        )
+        VALUES (
+          $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11
+        )
+        RETURNING *
+      `,
+      [
+        primaryLoad.id,
+        params.haulerId,
+        availability.truck_id,
+        params.driverId ?? null,
+        params.truckAvailabilityId,
+        mapTripStatusToDb(tripStatus),
+        paymentMode,
+        params.pickupDateTime,
+        params.deliveryDateTime,
+        paymentMode === "DIRECT" ? primaryLoad.direct_payment_disclaimer_accepted_at ?? null : null,
+        paymentMode === "DIRECT" ? primaryLoad.direct_payment_disclaimer_version ?? null : null,
+      ]
+    );
+    const tripRow = tripResult.rows[0];
+    if (!tripRow) {
+      throw new Error("Failed to create trip");
+    }
+    const trip = mapTripRow(tripRow);
+
+    // Create trip_loads entries for all loads
+    const tripLoads: Array<{ id: string; load_id: string; contract_id: string | null; booking_id: string | null }> = [];
+    for (let i = 0; i < loads.length; i++) {
+      const load = loads[i];
+      if (!load) {
+        throw new Error(`Load at index ${i} is undefined`);
+      }
+      const contract = contracts[i];
+      const booking = contract?.booking_id ? bookings.find((b) => b.id === contract.booking_id) : null;
+      const tripLoadResult = await client.query(
+        `
+          INSERT INTO trip_loads (
+            trip_id,
+            load_id,
+            contract_id,
+            booking_id,
+            sequence_order
+          )
+          VALUES ($1,$2,$3,$4,$5)
+          RETURNING id::text, load_id::text, contract_id::text, booking_id::text
+        `,
+        [trip.id, load.id, contract?.id ?? null, booking?.id ?? null, i]
+      );
+      tripLoads.push({
+        id: tripLoadResult.rows[0].id,
+        load_id: tripLoadResult.rows[0].load_id,
+        contract_id: tripLoadResult.rows[0].contract_id,
+        booking_id: tripLoadResult.rows[0].booking_id,
+      });
+    }
+
+    // Create payments for each load (if escrow)
+    if (isEscrow) {
+      for (let i = 0; i < loads.length; i++) {
+        const load = loads[i];
+        if (!load) {
+          throw new Error(`Load at index ${i} is undefined`);
+        }
+        const contract = contracts[i];
+        if (!contract) continue;
+        const shipperUserId = load.shipper_user_id;
+        // Use contract price_amount first, then load's asking_amount as fallback
+        const amount = Number(contract.price_amount ?? load.asking_amount ?? 0);
+        if (amount > 0) {
+          await client.query<PaymentRow>(
+            `
+              INSERT INTO payments (
+                trip_id,
+                load_id,
+                payer_user_id,
+                payee_user_id,
+                amount,
+                currency,
+                status,
+                is_escrow
+              )
+              VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
+            `,
+            [
+              trip.id,
+              load.id,
+              shipperUserId,
+              params.haulerUserId,
+              amount,
+              load.currency ?? "USD",
+              mapPaymentStatusToDb(PaymentStatus.ESCROW_FUNDED),
+              true,
+            ]
+          );
+        }
+      }
+    }
+
+    // Update loads status
+    for (const load of loads) {
+      await client.query(
+        `
+          UPDATE loads
+          SET status = $2,
+              assigned_to_user_id = $3,
+              assigned_at = NOW(),
+              updated_at = NOW()
+          WHERE id = $1
+        `,
+        [load.id, mapLoadStatusToDb(LoadStatus.AWAITING_ESCROW), params.haulerUserId]
+      );
+    }
+
+    // Create notifications for all stakeholders
+    const stakeholderUserIds = new Set<string>();
+    for (const load of loads) {
+      stakeholderUserIds.add(load.shipper_user_id);
+    }
+    stakeholderUserIds.add(params.haulerUserId);
+    if (params.driverId) {
+      const driverQuery = await client.query(`SELECT user_id::text FROM drivers WHERE id = $1`, [params.driverId]);
+      if (driverQuery.rows[0]?.user_id) {
+        stakeholderUserIds.add(driverQuery.rows[0].user_id);
+      }
+    }
+
+    // Create in-app notifications
+    for (const userId of stakeholderUserIds) {
+      await client.query(
+        `
+          INSERT INTO notifications (
+            user_id,
+            channel,
+            template_code,
+            payload_json,
+            status
+          )
+          VALUES ($1, 'in_app', 'trip_created', $2, 'queued')
+        `,
+        [
+          userId,
+          JSON.stringify({
+            trip_id: trip.id,
+            trip_title: params.tripTitle ?? `Multi-load trip #${trip.id}`,
+            loads_count: loads.length,
+            pickup_date: params.pickupDateTime,
+            delivery_date: params.deliveryDateTime,
+          }),
+        ]
+      );
+    }
+
+    // Send email notifications if SMTP is configured
+    const smtpHost = process.env.SMTP_HOST;
+    const smtpUser = process.env.SMTP_USER;
+    const smtpPass = process.env.SMTP_PASS;
+    if (smtpHost && smtpUser && smtpPass) {
+      for (const userId of stakeholderUserIds) {
+        const userQuery = await client.query(`SELECT email FROM app_users WHERE id = $1`, [userId]);
+        const email = userQuery.rows[0]?.email;
+        if (email) {
+          await client.query(
+            `
+              INSERT INTO notifications (
+                user_id,
+                channel,
+                template_code,
+                payload_json,
+                status
+              )
+              VALUES ($1, 'email', 'trip_created', $2, 'queued')
+            `,
+            [
+              userId,
+              JSON.stringify({
+                trip_id: trip.id,
+                trip_title: params.tripTitle ?? `Multi-load trip #${trip.id}`,
+                loads_count: loads.length,
+                pickup_date: params.pickupDateTime,
+                delivery_date: params.deliveryDateTime,
+                recipient_email: email,
+              }),
+            ]
+          );
+        }
+      }
+    }
+
+    // Emit WebSocket events
+    const { emitEvent, SOCKET_EVENTS } = require("../socket");
+    for (const userId of stakeholderUserIds) {
+      emitEvent(
+        SOCKET_EVENTS.TRIP_UPDATED,
+        { trip, loads: loads.map((l) => ({ id: l.id, shipper_id: l.shipper_id })) },
+        [`user-${userId}`]
+      );
+    }
+
+    await client.query("COMMIT");
+    return { trip, tripLoads };
+  } catch (err) {
+    await client.query("ROLLBACK");
+    throw err;
+  } finally {
+    client.release();
+  }
 }
 
 export async function respondToBooking(params: {
@@ -3811,9 +4548,10 @@ export async function acceptOfferAndCreateTrip(params: {
   const client = await pool.connect();
   const paymentMode = params.paymentModeSelection?.paymentMode ?? "ESCROW";
   const isEscrow = paymentMode !== "DIRECT";
-  const tripStatus = isEscrow ? TripStatus.PENDING_ESCROW : TripStatus.READY_TO_START;
+  // Payments are automatically funded when contracts/trips are created
+  const tripStatus = TripStatus.READY_TO_START;
   const paymentStatus = isEscrow
-    ? PaymentStatus.AWAITING_FUNDING
+    ? PaymentStatus.ESCROW_FUNDED
     : PaymentStatus.NOT_APPLICABLE;
 
   async function ensureTruckId(): Promise<string> {
@@ -3832,6 +4570,8 @@ export async function acceptOfferAndCreateTrip(params: {
     if (truckRows.length === 0) {
       throw new Error("No trucks found for this hauler. Please add a truck before accepting loads.");
     }
+    // Only mark trucks as busy if they have active trips
+    // Having a truck in truck_availability doesn't make it busy - it's available for booking!
     const busyTripRows = await client.query(
       `
         SELECT DISTINCT truck_id::text AS truck_id
@@ -3842,27 +4582,14 @@ export async function acceptOfferAndCreateTrip(params: {
       `,
       [params.haulerId, ACTIVE_TRIP_STATUS_VALUES]
     );
-    const busyAvailabilityRows = await client.query(
-      `
-        SELECT DISTINCT truck_id::text AS truck_id
-        FROM truck_availability
-        WHERE truck_id IS NOT NULL
-          AND hauler_id = $1
-          AND is_active = TRUE
-      `,
-      [params.haulerId]
-    );
     const busySet = new Set<string>();
     busyTripRows.rows.forEach((row) => {
-      if (row?.truck_id) busySet.add(row.truck_id);
-    });
-    busyAvailabilityRows.rows.forEach((row) => {
       if (row?.truck_id) busySet.add(row.truck_id);
     });
     const available = truckRows.find((row) => row?.id && !busySet.has(row.id));
     if (!available?.id) {
       throw new Error(
-        "All trucks are already booked or posted as unavailable. Update your fleet availability before accepting this load."
+        "All trucks are currently assigned to active trips. Please wait for trips to complete or update your fleet availability."
       );
     }
     await ensureTruckAvailableForTrip(available.id);

@@ -310,6 +310,34 @@ export async function fetchContracts(filters: {
   return marketplaceRequest<{ items: ContractRecord[] }>(`/contracts${suffix}`);
 }
 
+export async function fetchContractsByTruckAvailability(truckAvailabilityId?: string) {
+  const params = new URLSearchParams();
+  if (truckAvailabilityId) params.set("truck_availability_id", truckAvailabilityId);
+  const suffix = params.toString() ? `?${params.toString()}` : "";
+  return marketplaceRequest<{ items: Array<ContractRecord & { booking_truck_availability_id: string | null }> }>(
+    `/contracts/by-truck-availability${suffix}`
+  );
+}
+
+export async function createMultiLoadTrip(payload: {
+  truck_availability_id: string;
+  contract_ids: string[];
+  driver_id?: string | null;
+  pickup_date_time: string;
+  delivery_date_time: string;
+  trip_title?: string | null;
+  route_mode?: "fastest" | "shortest" | "avoid-tolls";
+  auto_rest_stops?: boolean;
+}) {
+  return marketplaceRequest<{ trip: any; trip_loads: Array<{ id: string; load_id: string; contract_id: string | null; booking_id: string | null }> }>(
+    `/trips/create-from-listing`,
+    {
+      method: "POST",
+      body: JSON.stringify(payload),
+    }
+  );
+}
+
 export async function fetchContract(contractId: string) {
   return marketplaceRequest<{ contract: ContractRecord }>(`/contracts/${contractId}`);
 }
@@ -851,4 +879,57 @@ export async function subscribeHauler(payload?: { billing_cycle?: "MONTHLY" | "Y
       body: JSON.stringify(payload ?? {}),
     }
   );
+}
+
+export interface HaulerProfile {
+  user_id: string;
+  hauler_id: string;
+  full_name: string;
+  email: string;
+  phone_number: string;
+  company_name: string;
+  country: string;
+  timezone: string;
+  preferred_language: string;
+  legal_name: string;
+  dot_number: string;
+  tax_id: string;
+  website_url: string;
+  hauler_type: string;
+}
+
+export async function fetchHaulerProfile() {
+  return haulerRequest<HaulerProfile>(`/profile`);
+}
+
+export async function updateHaulerProfile(payload: Partial<HaulerProfile>) {
+  return haulerRequest<{ message: string }>(`/profile`, {
+    method: "PATCH",
+    body: JSON.stringify(payload),
+  });
+}
+
+export interface ShipperProfile {
+  user_id: string;
+  shipper_id: string;
+  full_name: string;
+  email: string;
+  phone_number: string;
+  company_name: string;
+  country: string;
+  timezone: string;
+  preferred_language: string;
+  farm_name: string;
+  registration_id: string;
+}
+
+export async function fetchShipperProfile() {
+  return marketplaceRequest<ShipperProfile>(`/shipper/profile`);
+}
+
+export async function updateShipperProfile(payload: Partial<ShipperProfile>) {
+  return marketplaceRequest<{ message: string }>(`/shipper/profile`, {
+    method: "PATCH",
+    body: JSON.stringify(payload),
+  });
 }

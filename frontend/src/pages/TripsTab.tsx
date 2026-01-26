@@ -21,6 +21,7 @@ import {
   Package,
   Phone,
   PlayCircle,
+  Plus,
   Star,
 } from 'lucide-react';
 import { SubscriptionCTA } from '../components/SubscriptionCTA';
@@ -44,6 +45,7 @@ import {
   DialogTitle,
 } from '../components/ui/dialog';
 import { Label } from '../components/ui/label';
+import { CreateTripModal } from '../components/CreateTripModal';
 
 interface Trip {
   id: string;
@@ -145,7 +147,7 @@ const completedTrips: Trip[] = [
 ];
 
 export function TripsTab({ onViewTrip, role = 'hauler' }: TripsTabProps) {
-  const [activeTab, setActiveTab] = useState<'active' | 'upcoming' | 'completed'>('active');
+  const [activeTab, setActiveTab] = useState<'all' | 'in-progress' | 'scheduled' | 'completed'>('all');
   const { isIndividualHauler, subscriptionStatus, freeTripUsed, monthlyPrice, yearlyPrice } =
     useHaulerSubscription();
   const navigate = useNavigate();
@@ -170,6 +172,7 @@ export function TripsTab({ onViewTrip, role = 'hauler' }: TripsTabProps) {
   const [directReceivedAt, setDirectReceivedAt] = useState("");
   const [directError, setDirectError] = useState<string | null>(null);
   const [directSubmitting, setDirectSubmitting] = useState(false);
+  const [createTripModalOpen, setCreateTripModalOpen] = useState(false);
 
   const activeTrips = mockTrips.filter(t => t.status === 'in-transit');
   const upcomingTrips = mockTrips.filter(t => t.status === 'scheduled');
@@ -658,8 +661,9 @@ export function TripsTab({ onViewTrip, role = 'hauler' }: TripsTabProps) {
   const shipperUpcomingTrips = shipperTrips.filter((t) => t.status === 'scheduled');
   const shipperCompletedTrips = shipperTrips.filter((t) => t.status === 'completed');
 
-  const haulerActiveTrips = haulerTrips.filter((t) => t.status === 'in-progress');
-  const haulerUpcomingTrips = haulerTrips.filter((t) => t.status === 'scheduled');
+  const haulerAllTrips = haulerTrips;
+  const haulerInProgressTrips = haulerTrips.filter((t) => t.status === 'in-progress');
+  const haulerScheduledTrips = haulerTrips.filter((t) => t.status === 'scheduled');
   const haulerCompletedTrips = haulerTrips.filter((t) => t.status === 'completed');
 
   const handleEditTrip = (trip: ShipperTrip) => {
@@ -1089,6 +1093,9 @@ export function TripsTab({ onViewTrip, role = 'hauler' }: TripsTabProps) {
         {type === 'active' && 'You have no trips in progress'}
         {type === 'upcoming' && 'No upcoming trips scheduled'}
         {type === 'completed' && 'No completed trips yet'}
+        {type === 'all' && 'You have no trips yet'}
+        {type === 'in-progress' && 'You have no trips in progress'}
+        {type === 'scheduled' && 'No scheduled trips yet'}
       </p>
     </div>
   );
@@ -1170,6 +1177,18 @@ export function TripsTab({ onViewTrip, role = 'hauler' }: TripsTabProps) {
     );
   }
 
+  const handleTripCreated = async () => {
+    // Refresh trips after creation
+    if (role === 'hauler') {
+      try {
+        const response = await fetchHaulerTrips();
+        setHaulerTripSummaries(response.items ?? []);
+      } catch (err: any) {
+        toast.error(err?.message ?? 'Failed to refresh trips');
+      }
+    }
+  };
+
   return (
     <div className="p-4 space-y-4">
       {isIndividualHauler && (subscriptionStatus ?? '').toUpperCase() !== 'ACTIVE' && (
@@ -1180,46 +1199,123 @@ export function TripsTab({ onViewTrip, role = 'hauler' }: TripsTabProps) {
           onUpgradeClick={() => (window.location.href = '/hauler/subscription')}
         />
       )}
+      {role === 'hauler' && (
+        <div className="flex justify-end">
+          <Button
+            onClick={() => setCreateTripModalOpen(true)}
+            style={{ backgroundColor: '#53ca97', color: 'white' }}
+            className="flex items-center gap-2"
+          >
+            <Plus className="w-4 h-4" />
+            Create New Trip
+          </Button>
+        </div>
+      )}
       <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as any)} className="w-full">
-        <TabsList className="w-full grid grid-cols-3">
-          <TabsTrigger value="active">
-            Active
-            <Badge variant="secondary" className="ml-2">
-              {haulerActiveTrips.length}
-            </Badge>
-          </TabsTrigger>
-          <TabsTrigger value="upcoming">
-            Upcoming
-            <Badge variant="secondary" className="ml-2">
-              {haulerUpcomingTrips.length}
-            </Badge>
-          </TabsTrigger>
-          <TabsTrigger value="completed">
-            Completed
-            <Badge variant="secondary" className="ml-2">
-              {haulerCompletedTrips.length}
-            </Badge>
-          </TabsTrigger>
-        </TabsList>
+        {role === 'hauler' ? (
+          <>
+            <TabsList className="w-full grid grid-cols-4">
+              <TabsTrigger value="all">
+                All
+                <Badge variant="secondary" className="ml-2">
+                  {haulerAllTrips.length}
+                </Badge>
+              </TabsTrigger>
+              <TabsTrigger value="in-progress">
+                In Progress
+                <Badge variant="secondary" className="ml-2">
+                  {haulerInProgressTrips.length}
+                </Badge>
+              </TabsTrigger>
+              <TabsTrigger value="scheduled">
+                Scheduled
+                <Badge variant="secondary" className="ml-2">
+                  {haulerScheduledTrips.length}
+                </Badge>
+              </TabsTrigger>
+              <TabsTrigger value="completed">
+                Completed
+                <Badge variant="secondary" className="ml-2">
+                  {haulerCompletedTrips.length}
+                </Badge>
+              </TabsTrigger>
+            </TabsList>
 
-        <TabsContent value="active" className="space-y-3 mt-4">
-          {haulerActiveTrips.length === 0
-            ? renderEmptyState('active')
-            : haulerActiveTrips.map(renderHaulerTripCard)}
-        </TabsContent>
+            <TabsContent value="all" className="space-y-3 mt-4">
+              {haulerAllTrips.length === 0
+                ? renderEmptyState('all')
+                : haulerAllTrips.map(renderHaulerTripCard)}
+            </TabsContent>
 
-        <TabsContent value="upcoming" className="space-y-3 mt-4">
-          {haulerUpcomingTrips.length === 0
-            ? renderEmptyState('upcoming')
-            : haulerUpcomingTrips.map(renderHaulerTripCard)}
-        </TabsContent>
+            <TabsContent value="in-progress" className="space-y-3 mt-4">
+              {haulerInProgressTrips.length === 0
+                ? renderEmptyState('in-progress')
+                : haulerInProgressTrips.map(renderHaulerTripCard)}
+            </TabsContent>
 
-        <TabsContent value="completed" className="space-y-3 mt-4">
-          {haulerCompletedTrips.length === 0
-            ? renderEmptyState('completed')
-            : haulerCompletedTrips.map(renderHaulerTripCard)}
-        </TabsContent>
+            <TabsContent value="scheduled" className="space-y-3 mt-4">
+              {haulerScheduledTrips.length === 0
+                ? renderEmptyState('scheduled')
+                : haulerScheduledTrips.map(renderHaulerTripCard)}
+            </TabsContent>
+
+            <TabsContent value="completed" className="space-y-3 mt-4">
+              {haulerCompletedTrips.length === 0
+                ? renderEmptyState('completed')
+                : haulerCompletedTrips.map(renderHaulerTripCard)}
+            </TabsContent>
+          </>
+        ) : (
+          <>
+            <TabsList className="w-full grid grid-cols-3">
+              <TabsTrigger value="active">
+                Active
+                <Badge variant="secondary" className="ml-2">
+                  {shipperActiveTrips.length}
+                </Badge>
+              </TabsTrigger>
+              <TabsTrigger value="upcoming">
+                Upcoming
+                <Badge variant="secondary" className="ml-2">
+                  {shipperUpcomingTrips.length}
+                </Badge>
+              </TabsTrigger>
+              <TabsTrigger value="completed">
+                Completed
+                <Badge variant="secondary" className="ml-2">
+                  {shipperCompletedTrips.length}
+                </Badge>
+              </TabsTrigger>
+            </TabsList>
+
+            <TabsContent value="active" className="space-y-3 mt-4">
+              {shipperActiveTrips.length === 0
+                ? renderEmptyState('active')
+                : shipperActiveTrips.map(renderShipperTripCard)}
+            </TabsContent>
+
+            <TabsContent value="upcoming" className="space-y-3 mt-4">
+              {shipperUpcomingTrips.length === 0
+                ? renderEmptyState('upcoming')
+                : shipperUpcomingTrips.map(renderShipperTripCard)}
+            </TabsContent>
+
+            <TabsContent value="completed" className="space-y-3 mt-4">
+              {shipperCompletedTrips.length === 0
+                ? renderEmptyState('completed')
+                : shipperCompletedTrips.map(renderShipperTripCard)}
+            </TabsContent>
+          </>
+        )}
       </Tabs>
+
+      {role === 'hauler' && (
+        <CreateTripModal
+          open={createTripModalOpen}
+          onOpenChange={setCreateTripModalOpen}
+          onTripCreated={handleTripCreated}
+        />
+      )}
 
       <Dialog open={directDialog.open} onOpenChange={(open) => !open && resetDirectDialog()}>
         <DialogContent>

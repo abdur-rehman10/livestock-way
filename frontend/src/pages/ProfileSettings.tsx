@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { Button } from '../components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/card';
 import { Input } from '../components/ui/input';
@@ -22,29 +22,88 @@ import {
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { AddressSearch, type MappedAddress } from '../components/AddressSearch';
+import { fetchHaulerProfile, updateHaulerProfile, type HaulerProfile } from '../api/marketplace';
+import { fetchShipperProfile, updateShipperProfile, type ShipperProfile } from '../api/marketplace';
 
 interface ProfileSettingsProps {
-  role?: 'driver' | 'shipper';
+  role?: 'driver' | 'shipper' | 'hauler';
   onBack?: () => void;
 }
 
 export function ProfileSettings({ role = 'driver', onBack }: ProfileSettingsProps) {
   const [activeTab, setActiveTab] = useState('personal');
+  const [loading, setLoading] = useState(true);
   const [profile, setProfile] = useState({
-    name: 'John Smith',
-    email: 'john.smith@example.com',
-    phone: '+1 (555) 123-4567',
-    address: '123 Main St, Austin, TX 78701',
-    bio: 'Experienced livestock driver with 10+ years in the industry.',
+    name: '',
+    email: '',
+    phone: '',
+    address: '',
+    bio: '',
   });
 
   const [businessInfo, setBusinessInfo] = useState({
-    companyName: 'Green Acres Ranch',
-    taxId: 'XX-XXXXXXX',
-    businessAddress: '456 Ranch Road, Austin, TX 78702',
-    defaultPickup: '456 Ranch Road, Austin, TX 78702',
+    companyName: '',
+    taxId: '',
+    businessAddress: '',
+    defaultPickup: '',
     defaultDropoff: '',
   });
+
+  // Fetch profile data on mount
+  useEffect(() => {
+    const loadProfile = async () => {
+      try {
+        setLoading(true);
+        if (role === 'shipper') {
+          const data = await fetchShipperProfile();
+          setProfile({
+            name: data.full_name || '',
+            email: data.email || '',
+            phone: data.phone_number || '',
+            address: data.country || '',
+            bio: '',
+          });
+          setBusinessInfo({
+            companyName: data.company_name || '',
+            taxId: data.registration_id || '',
+            businessAddress: '',
+            defaultPickup: '',
+            defaultDropoff: '',
+          });
+        } else if (role === 'hauler') {
+          // For haulers
+          const data = await fetchHaulerProfile();
+          setProfile({
+            name: data.full_name || '',
+            email: data.email || '',
+            phone: data.phone_number || '',
+            address: data.country || '',
+            bio: '',
+          });
+          setBusinessInfo({
+            companyName: data.company_name || '',
+            taxId: data.tax_id || '',
+            businessAddress: '',
+            defaultPickup: '',
+            defaultDropoff: '',
+          });
+        } else {
+          // For drivers - no API yet, keep default values
+          setLoading(false);
+          return;
+        }
+      } catch (err: any) {
+        toast.error(err?.message || 'Failed to load profile');
+      } finally {
+        setLoading(false);
+      }
+    };
+    if (role === 'shipper' || role === 'hauler') {
+      loadProfile();
+    } else {
+      setLoading(false);
+    }
+  }, [role]);
   const [addressSearch, setAddressSearch] = useState('');
   const [addressCoords, setAddressCoords] = useState<{ lat: string; lon: string } | null>(null);
   const [businessAddressSearch, setBusinessAddressSearch] = useState('');
@@ -69,12 +128,58 @@ export function ProfileSettings({ role = 'driver', onBack }: ProfileSettingsProp
     twoFactorEnabled: false,
   });
 
-  const handleSavePersonal = () => {
-    toast.success('Profile updated successfully');
+  const handleSavePersonal = async () => {
+    try {
+      if (role === 'shipper') {
+        await updateShipperProfile({
+          full_name: profile.name,
+          email: profile.email,
+          phone_number: profile.phone,
+          country: profile.address,
+          company_name: businessInfo.companyName,
+          registration_id: businessInfo.taxId,
+        });
+      } else if (role === 'hauler') {
+        await updateHaulerProfile({
+          full_name: profile.name,
+          email: profile.email,
+          phone_number: profile.phone,
+          country: profile.address,
+          company_name: businessInfo.companyName,
+          tax_id: businessInfo.taxId,
+        });
+      } else {
+        // Driver - no API yet
+        toast.success('Profile updated successfully');
+        return;
+      }
+      toast.success('Profile updated successfully');
+    } catch (err: any) {
+      toast.error(err?.message || 'Failed to update profile');
+    }
   };
 
-  const handleSaveBusiness = () => {
-    toast.success('Business information updated');
+  const handleSaveBusiness = async () => {
+    try {
+      if (role === 'shipper') {
+        await updateShipperProfile({
+          company_name: businessInfo.companyName,
+          registration_id: businessInfo.taxId,
+        });
+      } else if (role === 'hauler') {
+        await updateHaulerProfile({
+          company_name: businessInfo.companyName,
+          tax_id: businessInfo.taxId,
+        });
+      } else {
+        // Driver - no API yet
+        toast.success('Business information updated');
+        return;
+      }
+      toast.success('Business information updated');
+    } catch (err: any) {
+      toast.error(err?.message || 'Failed to update business information');
+    }
   };
 
   const handleSaveNotifications = () => {
@@ -99,6 +204,14 @@ export function ProfileSettings({ role = 'driver', onBack }: ProfileSettingsProp
       toast.error('Account deletion requested. You will receive a confirmation email.');
     }
   };
+
+  if (loading) {
+    return (
+      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
+        <p className="text-gray-600">Loading profile...</p>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-gray-50">
@@ -133,7 +246,7 @@ export function ProfileSettings({ role = 'driver', onBack }: ProfileSettingsProp
                 <p className="text-sm text-gray-600">{profile.email}</p>
                 <div className="flex items-center gap-2 mt-2">
                   <Badge className="bg-[#29CA8D] text-white">
-                    {role === 'driver' ? 'Driver' : 'Shipper'}
+                    {role === 'driver' ? 'Driver' : role === 'hauler' ? 'Hauler' : 'Shipper'}
                   </Badge>
                   <div className="text-sm text-gray-600">Rating: 4.8 ⭐</div>
                 </div>
@@ -237,7 +350,7 @@ export function ProfileSettings({ role = 'driver', onBack }: ProfileSettingsProp
               </CardContent>
             </Card>
 
-            {role === 'shipper' && (
+            {(role === 'shipper' || role === 'hauler') && (
               <Card>
                 <CardHeader>
                   <CardTitle className="text-base">Business Information</CardTitle>

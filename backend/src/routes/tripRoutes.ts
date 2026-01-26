@@ -1640,4 +1640,64 @@ router.get(
   }
 );
 
+router.post(
+  "/create-from-listing",
+  requireRoles(["hauler"]),
+  auditRequest("trip:create-from-listing"),
+  async (req: Request, res: Response) => {
+    try {
+      const authUser = (req as any).user;
+      if (!authUser?.id) {
+        return res.status(401).json({ error: "Unauthorized" });
+      }
+      const userId = String(authUser.id);
+      const haulerId = await pool.query(`SELECT id::text FROM haulers WHERE user_id = $1`, [userId]);
+      if (!haulerId.rows[0]?.id) {
+        return res.status(400).json({ error: "Hauler profile not found" });
+      }
+      const haulerIdStr = haulerId.rows[0].id;
+
+      const {
+        truck_availability_id,
+        contract_ids,
+        driver_id,
+        pickup_date_time,
+        delivery_date_time,
+        trip_title,
+        route_mode,
+        auto_rest_stops,
+      } = req.body;
+
+      if (!truck_availability_id) {
+        return res.status(400).json({ error: "truck_availability_id is required" });
+      }
+      if (!Array.isArray(contract_ids) || contract_ids.length === 0) {
+        return res.status(400).json({ error: "At least one contract_id is required" });
+      }
+      if (!pickup_date_time || !delivery_date_time) {
+        return res.status(400).json({ error: "pickup_date_time and delivery_date_time are required" });
+      }
+
+      const { createMultiLoadTripFromListing } = require("../services/marketplaceService");
+      const result = await createMultiLoadTripFromListing({
+        truckAvailabilityId: String(truck_availability_id),
+        haulerId: haulerIdStr,
+        haulerUserId: userId,
+        contractIds: contract_ids.map((id: any) => String(id)),
+        driverId: driver_id ? String(driver_id) : null,
+        pickupDateTime: pickup_date_time,
+        deliveryDateTime: delivery_date_time,
+        tripTitle: trip_title ?? null,
+        routeMode: route_mode ?? "fastest",
+        autoRestStops: auto_rest_stops ?? true,
+      });
+
+      return res.status(201).json({ trip: result.trip, trip_loads: result.tripLoads });
+    } catch (err: any) {
+      console.error("Error in POST /api/trips/create-from-listing:", err);
+      return res.status(400).json({ error: err?.message ?? "Failed to create trip" });
+    }
+  }
+);
+
 export default router;

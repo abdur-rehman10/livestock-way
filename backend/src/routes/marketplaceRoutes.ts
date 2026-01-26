@@ -85,6 +85,8 @@ import {
   listDriversForHauler,
   listVehiclesForHauler,
   updateTruckChatPermissions,
+  listContractsForHaulerByTruckAvailability,
+  createMultiLoadTripFromListing,
 } from "../services/marketplaceService";
 import { emitEvent, SOCKET_EVENTS } from "../socket";
 import { resolvePaymentModeSelection } from "../utils/paymentMode";
@@ -1067,6 +1069,64 @@ router.post(
  * ==========================
  */
 
+// IMPORTANT: This route must come BEFORE /trips/:tripId to avoid route conflicts
+router.post(
+  "/trips/create-from-listing",
+  authRequired,
+  async (req, res) => {
+    try {
+      const authUser = getAuthUser(req);
+      if (!isHaulerUser(authUser)) {
+        return res.status(403).json({ error: "Only haulers can create trips from listings" });
+      }
+      const userId = String(authUser.id ?? "");
+      const haulerId = await resolveHaulerId(authUser);
+      if (!haulerId) {
+        return res.status(400).json({ error: "Hauler profile not found" });
+      }
+
+      const {
+        truck_availability_id,
+        contract_ids,
+        driver_id,
+        pickup_date_time,
+        delivery_date_time,
+        trip_title,
+        route_mode,
+        auto_rest_stops,
+      } = req.body;
+
+      if (!truck_availability_id) {
+        return res.status(400).json({ error: "truck_availability_id is required" });
+      }
+      if (!Array.isArray(contract_ids) || contract_ids.length === 0) {
+        return res.status(400).json({ error: "At least one contract_id is required" });
+      }
+      if (!pickup_date_time || !delivery_date_time) {
+        return res.status(400).json({ error: "pickup_date_time and delivery_date_time are required" });
+      }
+
+      const result = await createMultiLoadTripFromListing({
+        truckAvailabilityId: String(truck_availability_id),
+        haulerId,
+        haulerUserId: userId,
+        contractIds: contract_ids.map((id: any) => String(id)),
+        driverId: driver_id ? String(driver_id) : null,
+        pickupDateTime: pickup_date_time,
+        deliveryDateTime: delivery_date_time,
+        tripTitle: trip_title ?? null,
+        routeMode: route_mode ?? "fastest",
+        autoRestStops: auto_rest_stops ?? true,
+      });
+
+      return res.status(201).json({ trip: result.trip, trip_loads: result.tripLoads });
+    } catch (err: any) {
+      console.error("Error in POST /api/marketplace/trips/create-from-listing:", err);
+      return res.status(400).json({ error: err?.message ?? "Failed to create trip" });
+    }
+  }
+);
+
 router.get("/trips/:tripId", authRequired, async (req, res) => {
   try {
     const tripId = req.params.tripId;
@@ -1402,8 +1462,10 @@ router.post("/trips/:tripId/escrow/payment-intent", authRequired, async (req, re
     if (!isShipperForLoad(user, context.load) && !isSuperAdminUser(user)) {
       return res.status(403).json({ error: "Forbidden" });
     }
-    if (context.trip.payment_mode !== "DIRECT" && context.trip.status !== TripStatus.PENDING_ESCROW) {
-      return res.status(400).json({ error: "Trip must be PENDING_ESCROW" });
+    // Payments are automatically funded when contracts/trips are created
+    // This endpoint is for future Stripe integration
+    if (context.trip.payment_mode !== "DIRECT" && context.trip.status !== TripStatus.READY_TO_START) {
+      return res.status(400).json({ error: "Trip must be READY_TO_START" });
     }
     const provider = req.body?.provider || "dummy";
     const externalIntentId =
@@ -2338,6 +2400,30 @@ router.get(
   }
 );
 
+// IMPORTANT: This route must come BEFORE /contracts/:contractId to avoid route conflicts
+router.get(
+  "/contracts/by-truck-availability",
+  authRequired,
+  async (req, res) => {
+    try {
+      const authUser = getAuthUser(req);
+      if (!isHaulerUser(authUser)) {
+        return res.status(403).json({ error: "Forbidden" });
+      }
+      const haulerId = await resolveHaulerId(authUser);
+      if (!haulerId) {
+        return res.status(400).json({ error: "Unable to resolve hauler profile" });
+      }
+      const truckAvailabilityId = req.query.truck_availability_id ? String(req.query.truck_availability_id) : undefined;
+      const items = await listContractsForHaulerByTruckAvailability(haulerId, truckAvailabilityId);
+      return res.json({ items });
+    } catch (err: any) {
+      console.error("listContractsByTruckAvailability error", err);
+      res.status(500).json({ error: err?.message ?? "Failed to load contracts" });
+    }
+  }
+);
+
 router.get(
   "/contracts/:contractId",
   authRequired,
@@ -2627,8 +2713,8 @@ router.get(
 
 async function emitBookingSideEffects(result: {
   booking: LoadBookingRecord;
-  trip?: TripRecord;
-  payment?: PaymentRecord;
+  trip?: TripRecord | null;
+  payment?: PaymentRecord | null;
 }) {
   if (result.trip) {
     emitTripEvent(result.trip);
@@ -2752,6 +2838,196 @@ router.get(
     } catch (err) {
       console.error("listTruckChats error", err);
       res.status(500).json({ error: "Failed to load truck chats" });
+    }
+  }
+);
+
+// GET /api/marketplace/shipper/profile - Get shipper profile information
+router.get(
+  "/shipper/profile",
+  authRequired,
+  async (req, res) => {
+    try {
+      const authUser = getAuthUser(req);
+      if (!isShipperUser(authUser)) {
+        return res.status(403).json({ error: "Only shippers can access this endpoint" });
+      }
+      const userId = String(authUser.id ?? "");
+      if (!userId) {
+        return res.status(401).json({ error: "Unauthorized" });
+      }
+
+      const shipperId = await resolveShipperId(authUser);
+      if (!shipperId) {
+        return res.status(400).json({ error: "Shipper profile not found" });
+      }
+
+      const result = await pool.query(
+        `
+          SELECT
+            u.id AS user_id,
+            u.full_name,
+            u.email,
+            u.phone_number,
+            u.company_name,
+            u.country,
+            u.timezone,
+            u.preferred_language,
+            s.id AS shipper_id,
+            s.farm_name,
+            s.registration_id
+          FROM app_users u
+          JOIN shippers s ON s.user_id = u.id
+          WHERE u.id = $1
+          LIMIT 1
+        `,
+        [userId]
+      );
+
+      if (!result.rowCount) {
+        return res.status(404).json({ error: "Profile not found" });
+      }
+
+      const row = result.rows[0];
+      return res.json({
+        user_id: String(row.user_id),
+        shipper_id: String(row.shipper_id),
+        full_name: row.full_name ?? "",
+        email: row.email ?? "",
+        phone_number: row.phone_number ?? "",
+        company_name: row.company_name ?? "",
+        country: row.country ?? "",
+        timezone: row.timezone ?? "",
+        preferred_language: row.preferred_language ?? "",
+        farm_name: row.farm_name ?? "",
+        registration_id: row.registration_id ?? "",
+      });
+    } catch (err: any) {
+      console.error("Error in GET /api/marketplace/shipper/profile:", err);
+      return res.status(500).json({ error: "Failed to load profile" });
+    }
+  }
+);
+
+// PATCH /api/marketplace/shipper/profile - Update shipper profile information
+router.patch(
+  "/shipper/profile",
+  authRequired,
+  async (req, res) => {
+    try {
+      const authUser = getAuthUser(req);
+      if (!isShipperUser(authUser)) {
+        return res.status(403).json({ error: "Only shippers can access this endpoint" });
+      }
+      const userId = String(authUser.id ?? "");
+      if (!userId) {
+        return res.status(401).json({ error: "Unauthorized" });
+      }
+
+      const shipperId = await resolveShipperId(authUser);
+      if (!shipperId) {
+        return res.status(400).json({ error: "Shipper profile not found" });
+      }
+
+      const {
+        full_name,
+        email,
+        phone_number,
+        company_name,
+        country,
+        timezone,
+        preferred_language,
+        farm_name,
+        registration_id,
+      } = req.body;
+
+      const client = await pool.connect();
+      try {
+        await client.query("BEGIN");
+
+        // Update app_users
+        const userUpdates: string[] = [];
+        const userValues: any[] = [];
+        let paramCount = 1;
+
+        if (full_name !== undefined) {
+          userUpdates.push(`full_name = $${paramCount++}`);
+          userValues.push(full_name);
+        }
+        if (email !== undefined) {
+          userUpdates.push(`email = $${paramCount++}`);
+          userValues.push(email);
+        }
+        if (phone_number !== undefined) {
+          userUpdates.push(`phone_number = $${paramCount++}`);
+          userValues.push(phone_number);
+        }
+        if (company_name !== undefined) {
+          userUpdates.push(`company_name = $${paramCount++}`);
+          userValues.push(company_name);
+        }
+        if (country !== undefined) {
+          userUpdates.push(`country = $${paramCount++}`);
+          userValues.push(country);
+        }
+        if (timezone !== undefined) {
+          userUpdates.push(`timezone = $${paramCount++}`);
+          userValues.push(timezone);
+        }
+        if (preferred_language !== undefined) {
+          userUpdates.push(`preferred_language = $${paramCount++}`);
+          userValues.push(preferred_language);
+        }
+
+        if (userUpdates.length > 0) {
+          userValues.push(userId);
+          await client.query(
+            `
+              UPDATE app_users
+              SET ${userUpdates.join(", ")}, updated_at = NOW()
+              WHERE id = $${paramCount}
+            `,
+            userValues
+          );
+        }
+
+        // Update shippers
+        const shipperUpdates: string[] = [];
+        const shipperValues: any[] = [];
+        let shipperParamCount = 1;
+
+        if (farm_name !== undefined) {
+          shipperUpdates.push(`farm_name = $${shipperParamCount++}`);
+          shipperValues.push(farm_name);
+        }
+        if (registration_id !== undefined) {
+          shipperUpdates.push(`registration_id = $${shipperParamCount++}`);
+          shipperValues.push(registration_id);
+        }
+
+        if (shipperUpdates.length > 0) {
+          shipperValues.push(shipperId);
+          await client.query(
+            `
+              UPDATE shippers
+              SET ${shipperUpdates.join(", ")}, updated_at = NOW()
+              WHERE id = $${shipperParamCount}
+            `,
+            shipperValues
+          );
+        }
+
+        await client.query("COMMIT");
+        return res.json({ message: "Profile updated successfully" });
+      } catch (err: any) {
+        await client.query("ROLLBACK");
+        throw err;
+      } finally {
+        client.release();
+      }
+    } catch (err: any) {
+      console.error("Error in PATCH /api/marketplace/shipper/profile:", err);
+      return res.status(500).json({ error: "Failed to update profile" });
     }
   }
 );
