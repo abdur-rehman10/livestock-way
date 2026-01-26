@@ -5,4 +5,4 @@ backend/.env
 frontend/.env
 frontend/vite.config.ts
 backend/uploads/
-backend/dist/
+backend/dist/*
