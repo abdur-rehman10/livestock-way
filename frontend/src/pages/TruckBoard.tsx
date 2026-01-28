@@ -462,11 +462,13 @@ export default function TruckBoard() {
     try {
       setRequestDialog((prev) => ({ ...prev, submitting: true, error: null }));
       const offeredAmountNum = requestDialog.offeredAmount ? Number(requestDialog.offeredAmount) : undefined;
+      const interest = interestForm[requestDialog.listing.id] ?? { loadId: "", message: "" };
       const bookingResponse = await requestBookingForTruckListing(requestDialog.listing.id, {
         load_id: requestDialog.load.id,
         requested_headcount: undefined,
         offered_amount: offeredAmountNum,
         offered_currency: requestDialog.offeredAmount ? "USD" : undefined,
+        notes: interest.message || undefined, // Pass message as notes to booking creation
       });
       const booking = bookingResponse.booking;
       const nextSet = new Set(requestedPairs);
@@ -474,33 +476,15 @@ export default function TruckBoard() {
       setRequestedPairs(nextSet);
       
       // Navigate to messages page and open thread
+      // Note: The truck_booking_thread is automatically created via database trigger when booking is created
+      // The message (notes) is automatically added as the first message in the thread
+      // No need to call startTruckChat as it creates a duplicate thread (truck_availability_chats)
       window.dispatchEvent(new CustomEvent("open-truck-booking-thread", {
         detail: { bookingId: Number(booking.id) }
       }));
       navigate("/shipper/messages");
-      
-      const interest = interestForm[requestDialog.listing.id] ?? { loadId: "", message: "" };
-      const chatResp = await startTruckChat(requestDialog.listing.id, {
-        load_id: String(requestDialog.load.id),
-        message: interest.message || undefined,
-      });
-      setTruckChats((prev) => {
-        const exists = prev.some((item) => item.chat.id === chatResp.chat.id);
-        if (exists) return prev;
-        return [
-          {
-            chat: chatResp.chat,
-            availability: {
-              origin_location_text: requestDialog.listing?.origin_location_text ?? "",
-              destination_location_text: requestDialog.listing?.destination_location_text ?? null,
-              capacity_headcount: requestDialog.listing?.capacity_headcount ?? null,
-            },
-            booking: null,
-            last_message: chatResp.message ?? null,
-          },
-          ...prev,
-        ];
-      });
+      updateInterest(requestDialog.listing.id, "message", "");
+      toast.success("Request submitted. Opening messages...");
       updateInterest(requestDialog.listing.id, "message", "");
       toast.success("Request submitted. Opening messages...");
       setRequestDialog({

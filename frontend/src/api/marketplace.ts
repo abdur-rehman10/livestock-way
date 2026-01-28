@@ -686,6 +686,10 @@ export async function fetchTruckAvailability(
   return marketplaceRequest<{ items: TruckAvailability[] }>(`/truck-board${suffix}`);
 }
 
+export async function fetchTruckAvailabilityById(id: string | number): Promise<TruckAvailability> {
+  return marketplaceRequest<{ availability: TruckAvailability }>(`/truck-board/${id}`).then(res => res.availability);
+}
+
 export async function createTruckAvailabilityEntry(payload: {
   truck_id?: string | null;
   origin_location_text: string;

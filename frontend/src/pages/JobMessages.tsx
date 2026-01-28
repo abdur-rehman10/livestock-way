@@ -15,7 +15,7 @@ import { fetchBuyAndSellApplications } from "../api/buyAndSell";
 import { fetchResourcesById, type ResourcesListing } from "../api/resources";
 import { fetchResourcesApplications } from "../api/resources";
 import { fetchLoadById, type LoadDetail } from "../lib/api";
-import { fetchLoadOffers, type LoadOffer, fetchBookings, fetchTruckAvailability } from "../api/marketplace";
+import { fetchLoadOffers, type LoadOffer, fetchBookings, fetchTruckAvailability, fetchTruckAvailabilityById } from "../api/marketplace";
 import { fetchTrucks, type TruckRecord } from "../api/fleet";
 import { createContract, sendContract, updateContract, fetchContracts, type ContractRecord } from "../api/marketplace";
 import { GenerateContractPopup } from "../components/GenerateContractPopup";
@@ -42,6 +42,8 @@ export default function JobMessages() {
   const [loadOfferDetails, setLoadOfferDetails] = useState<{ load: LoadDetail; offer: LoadOffer; truck: TruckRecord | null } | null>(null);
   const [truckBookingDetails, setTruckBookingDetails] = useState<{ load: LoadDetail; booking: any; truckAvailability: any; truck: TruckRecord | null } | null>(null);
   const [showContractDialog, setShowContractDialog] = useState(false);
+  const [hasContractForOffer, setHasContractForOffer] = useState(false);
+  const [hasContractForBooking, setHasContractForBooking] = useState(false);
   const [loading, setLoading] = useState(true);
   const [messagesLoading, setMessagesLoading] = useState(false);
   const [sending, setSending] = useState(false);
@@ -125,15 +127,20 @@ export default function JobMessages() {
 
   const loadLoadOfferDetails = useCallback(async (offerId: number, loadId: number) => {
     try {
-      const [load, offersResult] = await Promise.all([
+      const [load, offersResult, contractsResult] = await Promise.all([
         fetchLoadById(loadId),
         fetchLoadOffers(String(loadId)),
+        fetchContracts({ offer_id: String(offerId) }).catch(() => ({ items: [] })),
       ]);
       const offer = offersResult.items.find(o => String(o.id) === String(offerId));
       if (!offer) {
         console.error("Offer not found");
         return;
       }
+      
+      // Check if contract exists for this offer
+      const contractExists = contractsResult.items.some(c => c.offer_id === String(offerId));
+      setHasContractForOffer(contractExists);
       
       // Get truck details - first from offer.truck (included in API response), then fallback
       let truck: TruckRecord | null = null;
@@ -199,7 +206,8 @@ export default function JobMessages() {
   const loadTruckBookingDetails = useCallback(async (bookingId: number, loadId: number, truckAvailabilityId: number) => {
     try {
       // Fetch all data in parallel
-      const [load, bookingsResult, truckAvailabilityResult] = await Promise.all([
+      // Use fetchTruckAvailabilityById to get the specific truck availability instead of fetching all
+      const [load, bookingsResult, truckAvailabilityResult, contractsResult] = await Promise.all([
         fetchLoadById(loadId).catch((err) => {
           console.error("Error fetching load:", err);
           return null;
@@ -208,10 +216,11 @@ export default function JobMessages() {
           console.error("Error fetching bookings:", err);
           return { items: [] };
         }),
-        fetchTruckAvailability({}).catch((err) => {
+        fetchTruckAvailabilityById(truckAvailabilityId).catch((err) => {
           console.error("Error fetching truck availability:", err);
-          return { items: [] };
+          return null;
         }),
+        fetchContracts({ booking_id: String(bookingId) }).catch(() => ({ items: [] })),
       ]);
       
       if (!load) {
@@ -221,7 +230,11 @@ export default function JobMessages() {
       }
       
       const booking = bookingsResult.items.find(b => String(b.id) === String(bookingId));
-      const truckAvailability = truckAvailabilityResult.items.find(ta => String(ta.id) === String(truckAvailabilityId));
+      const truckAvailability = truckAvailabilityResult;
+      
+      // Check if contract exists for this booking
+      const contractExists = contractsResult.items.some(c => c.booking_id === String(bookingId));
+      setHasContractForBooking(contractExists);
       
       if (!booking) {
         console.error("Booking not found for bookingId:", bookingId);
@@ -764,6 +777,37 @@ export default function JobMessages() {
   }, [selectedThread]);
 
   const previousThreadIdRef = useRef<string | null>(null);
+
+  // Refresh contract check when thread changes
+  useEffect(() => {
+    if (!selectedThread) {
+      setHasContractForOffer(false);
+      setHasContractForBooking(false);
+      return;
+    }
+
+    const checkContract = async () => {
+      if (selectedThread.type === "load-offer" && selectedThread.offer_id) {
+        try {
+          const contractsResult = await fetchContracts({ offer_id: String(selectedThread.offer_id) });
+          const contractExists = contractsResult.items.some(c => c.offer_id === String(selectedThread.offer_id));
+          setHasContractForOffer(contractExists);
+        } catch (err) {
+          console.error("Error checking contract for offer:", err);
+        }
+      } else if (selectedThread.type === "truck-booking" && selectedThread.booking_id) {
+        try {
+          const contractsResult = await fetchContracts({ booking_id: String(selectedThread.booking_id) });
+          const contractExists = contractsResult.items.some(c => c.booking_id === String(selectedThread.booking_id));
+          setHasContractForBooking(contractExists);
+        } catch (err) {
+          console.error("Error checking contract for booking:", err);
+        }
+      }
+    };
+
+    checkContract();
+  }, [selectedThread]);
 
   useEffect(() => {
     if (selectedThread) {
@@ -1444,26 +1488,50 @@ export default function JobMessages() {
                   </div>
                   <div className="flex items-center gap-2">
                     {selectedThread?.type === "load-offer" && isPoster && (
-                      <Button
-                        size="sm"
-                        className="text-xs"
-                        onClick={() => setShowContractDialog(true)}
-                        style={{ backgroundColor: "#53ca97", color: "white" }}
-                      >
-                        <FileText className="w-3 h-3 mr-1" />
-                        Create Contract
-                      </Button>
+                      hasContractForOffer ? (
+                        <Button
+                          size="sm"
+                          className="text-xs"
+                          disabled
+                          style={{ backgroundColor: "#6b7280", color: "white", cursor: "not-allowed" }}
+                        >
+                          <FileText className="w-3 h-3 mr-1" />
+                          Contract Sent
+                        </Button>
+                      ) : (
+                        <Button
+                          size="sm"
+                          className="text-xs"
+                          onClick={() => setShowContractDialog(true)}
+                          style={{ backgroundColor: "#53ca97", color: "white" }}
+                        >
+                          <FileText className="w-3 h-3 mr-1" />
+                          Generate Contract
+                        </Button>
+                      )
                     )}
                     {selectedThread?.type === "truck-booking" && userRole === "shipper" && (
-                      <Button
-                        size="sm"
-                        className="text-xs"
-                        onClick={() => setShowContractDialog(true)}
-                        style={{ backgroundColor: "#53ca97", color: "white" }}
-                      >
-                        <FileText className="w-3 h-3 mr-1" />
-                        Create Contract
-                      </Button>
+                      hasContractForBooking ? (
+                        <Button
+                          size="sm"
+                          className="text-xs"
+                          disabled
+                          style={{ backgroundColor: "#6b7280", color: "white", cursor: "not-allowed" }}
+                        >
+                          <FileText className="w-3 h-3 mr-1" />
+                          Contract Sent
+                        </Button>
+                      ) : (
+                        <Button
+                          size="sm"
+                          className="text-xs"
+                          onClick={() => setShowContractDialog(true)}
+                          style={{ backgroundColor: "#53ca97", color: "white" }}
+                        >
+                          <FileText className="w-3 h-3 mr-1" />
+                          Generate Contract
+                        </Button>
+                      )
                     )}
                     <Button
                       size="sm"
@@ -2508,6 +2576,7 @@ export default function JobMessages() {
               
               toast.success("Contract sent to hauler.");
               setShowContractDialog(false);
+              setHasContractForOffer(true);
               // Refresh threads to show updated status
               loadThreads();
             } catch (err: any) {
@@ -2609,6 +2678,7 @@ export default function JobMessages() {
               
               toast.success("Contract sent to hauler.");
               setShowContractDialog(false);
+              setHasContractForBooking(true);
               // Refresh threads to show updated status
               loadThreads();
             } catch (err: any) {

@@ -113,6 +113,27 @@ function getAuthUser(req: Request): AuthUser {
 const router = Router();
 
 router.get(
+  "/truck-board/:id",
+  authRequired,
+  async (req, res) => {
+    try {
+      const availabilityId = req.params.id;
+      if (!availabilityId) {
+        return res.status(400).json({ error: "Missing availability id" });
+      }
+      const availability = await getTruckAvailabilityById(availabilityId);
+      if (!availability) {
+        return res.status(404).json({ error: "Truck availability not found" });
+      }
+      res.json({ availability });
+    } catch (err) {
+      console.error("getTruckAvailabilityById error", err);
+      res.status(500).json({ error: "Failed to load truck availability" });
+    }
+  }
+);
+
+router.get(
   "/truck-board",
   authRequired,
   async (req, res) => {

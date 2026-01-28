@@ -935,11 +935,6 @@ async function refreshTruckAvailabilityState(availabilityId: string) {
     `
       SELECT
         id,
-        truck_id::text,
-        allow_shared,
-        capacity_headcount,
-        capacity_weight_kg,
-        available_until,
         is_active
       FROM truck_availability
       WHERE id = $1
@@ -951,79 +946,27 @@ async function refreshTruckAvailabilityState(availabilityId: string) {
     return;
   }
 
-  let shouldStayActive = true;
-  const now = Date.now();
+  // Check if a trip has been created for this truck_availability_id
+  // If trip exists, listing should be inactive
+  // Otherwise, listing stays active (no expiration or capacity checks)
+  const tripCheck = await pool.query(
+    `
+      SELECT id
+      FROM trips
+      WHERE truck_availability_id = $1
+        AND status NOT IN ($2, $3)
+      LIMIT 1
+    `,
+    [
+      numericAvailabilityId,
+      mapTripStatusToDb(TripStatus.DELIVERED_CONFIRMED),
+      mapTripStatusToDb(TripStatus.CLOSED),
+    ]
+  );
+  
+  const shouldStayActive = !(tripCheck.rowCount && tripCheck.rowCount > 0);
 
-  if (availability.available_until && new Date(availability.available_until).getTime() < now) {
-    shouldStayActive = false;
-  }
-
-  if (shouldStayActive && (await truckHasBlockingTrip(availability.truck_id))) {
-    shouldStayActive = false;
-  }
-
-  if (shouldStayActive) {
-    const usage = await pool.query(
-      `
-        SELECT
-          COALESCE(
-            SUM(
-              CASE WHEN status IN ($2,$3)
-                THEN COALESCE(requested_headcount,0)
-                ELSE 0
-              END
-            ),
-            0
-          )::numeric AS total_headcount,
-          COALESCE(
-            SUM(
-              CASE WHEN status IN ($2,$3)
-                THEN COALESCE(requested_weight_kg,0)
-                ELSE 0
-              END
-            ),
-            0
-          )::numeric AS total_weight,
-          COUNT(*) FILTER (WHERE status IN ($2,$3))::int AS active_count,
-          COUNT(*) FILTER (WHERE status = $3)::int AS accepted_count
-        FROM load_bookings
-        WHERE truck_availability_id = $1
-      `,
-      [numericAvailabilityId, BookingStatus.REQUESTED, BookingStatus.ACCEPTED]
-    );
-    const usageRow = usage.rows[0] ?? {
-      total_headcount: 0,
-      total_weight: 0,
-      active_count: 0,
-      accepted_count: 0,
-    };
-    const usedHeadcount = Number(usageRow.total_headcount ?? 0);
-    const usedWeight = Number(usageRow.total_weight ?? 0);
-    const activeCount = Number(usageRow.active_count ?? 0);
-    const acceptedCount = Number(usageRow.accepted_count ?? 0);
-
-    if (!availability.allow_shared && activeCount > 0) {
-      shouldStayActive = false;
-    }
-    if (acceptedCount > 0) {
-      shouldStayActive = false;
-    }
-    if (
-      availability.capacity_headcount !== null &&
-      availability.capacity_headcount !== undefined &&
-      usedHeadcount >= Number(availability.capacity_headcount)
-    ) {
-      shouldStayActive = false;
-    }
-    if (
-      availability.capacity_weight_kg !== null &&
-      availability.capacity_weight_kg !== undefined &&
-      usedWeight >= Number(availability.capacity_weight_kg)
-    ) {
-      shouldStayActive = false;
-    }
-  }
-
+  // Only update if the state needs to change
   if (availability.is_active !== shouldStayActive) {
     await pool.query(
       `
@@ -2455,7 +2398,27 @@ export async function createBookingForAvailability(params: {
       "Hauler must attach a specific truck to this listing before bookings can be requested."
     );
   }
-  await ensureTruckAvailableForTrip(availability.truck_id);
+  
+  // Check if a trip has been created for this truck_availability_id
+  // If trip exists, listing is no longer available
+  const tripCheck = await pool.query(
+    `
+    SELECT id
+    FROM trips
+    WHERE truck_availability_id = $1
+      AND status NOT IN ($2, $3)
+    LIMIT 1
+    `,
+    [
+      params.truckAvailabilityId,
+      mapTripStatusToDb(TripStatus.DELIVERED_CONFIRMED),
+      mapTripStatusToDb(TripStatus.CLOSED),
+    ]
+  );
+  if (tripCheck.rowCount && tripCheck.rowCount > 0) {
+    throw new Error("A trip has been created for this truck listing. It is no longer available for new bookings.");
+  }
+  
   // Check if load has an accepted/locked contract - if so, no more bookings allowed
   if (await loadHasAcceptedContract(params.loadId)) {
     throw new Error("This load already has an accepted contract. No new bookings can be created.");
@@ -4111,7 +4074,21 @@ async function createTripFromTruckBooking(
     `,
     [booking.load_id, mapLoadStatusToDb(LoadStatus.AWAITING_ESCROW), haulerUserId]
   );
-  await refreshTruckAvailabilityState(availability.id);
+  
+  // Deactivate the truck availability listing since a trip has been created
+  // This ensures the listing is no longer available for new bookings
+  if (booking.truck_availability_id) {
+    await pool.query(
+      `
+      UPDATE truck_availability
+      SET is_active = FALSE,
+          updated_at = NOW()
+      WHERE id = $1
+      `,
+      [booking.truck_availability_id]
+    );
+  }
+  
   return { trip, payment };
 }
 
@@ -4420,6 +4397,18 @@ export async function createMultiLoadTripFromListing(params: {
         [`user-${userId}`]
       );
     }
+
+    // Deactivate the truck availability listing since a trip has been created
+    // This ensures the listing is no longer available for new bookings
+    await client.query(
+      `
+      UPDATE truck_availability
+      SET is_active = FALSE,
+          updated_at = NOW()
+      WHERE id = $1
+      `,
+      [params.truckAvailabilityId]
+    );
 
     await client.query("COMMIT");
     return { trip, tripLoads };
