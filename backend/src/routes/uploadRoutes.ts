@@ -65,6 +65,14 @@ router.post("/service-image", upload.single("file"), (req, res) => {
   return res.status(200).json({ status: "OK", url });
 });
 
+router.post("/image", upload.single("file"), (req, res) => {
+  if (!req.file) {
+    return res.status(400).json({ status: "ERROR", message: "No file uploaded" });
+  }
+  const url = `/uploads/${req.file.filename}`;
+  return res.status(200).json({ status: "OK", url });
+});
+
 router.post("/resume", upload.single("file"), (req, res) => {
   if (!req.file) {
     return res.status(400).json({ status: "ERROR", message: "No file uploaded" });
