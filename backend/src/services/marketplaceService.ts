@@ -3209,7 +3209,6 @@ export async function listTripsForHauler(haulerId: string): Promise<HaulerTripSu
           LIMIT 1
         ) c ON true
         WHERE t.hauler_id = $1
-          AND c.id IS NOT NULL
           AND UPPER(t.status::text) IN (
             'PENDING_ESCROW',
             'READY_TO_START',
