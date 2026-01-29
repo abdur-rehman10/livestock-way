@@ -211,6 +211,42 @@ export function HaulerTripView() {
     }).filter(Boolean);
   }, [selectedRoute]);
 
+  // Build map markers for all waypoints (origin, destination, pickups, dropoffs)
+  const mapMarkers = useMemo(() => {
+    if (!routeWaypoints.length) return [];
+    return routeWaypoints
+      .filter((waypoint: any) => waypoint?.location?.lat && waypoint?.location?.lng)
+      .map((waypoint: any) => {
+        const type =
+          waypoint.type === "origin" ||
+          waypoint.type === "destination" ||
+          waypoint.type === "pickup" ||
+          waypoint.type === "dropoff"
+            ? waypoint.type
+            : "other";
+
+        let label: string;
+        if (type === "origin") {
+          label = "Origin";
+        } else if (type === "destination") {
+          label = "Destination";
+        } else if (type === "pickup") {
+          label = `Pickup: ${waypoint.location?.text || ""}`;
+        } else if (type === "dropoff") {
+          label = `Dropoff: ${waypoint.location?.text || ""}`;
+        } else {
+          label = waypoint.location?.text || "Waypoint";
+        }
+
+        return {
+          lat: waypoint.location.lat,
+          lng: waypoint.location.lng,
+          type,
+          label,
+        };
+      });
+  }, [routeWaypoints]);
+
   // Extract rest stops, washouts, and feed stops from route plan
   const restStops = useMemo(() => {
     return normalizedPlan?.rest_stops || normalizedPlan?.stops || restStopPlan?.stops || [];
@@ -1296,7 +1332,7 @@ export function HaulerTripView() {
               {/* Route Map */}
               {routeCoordinates.length > 0 && (
                 <div className="rounded-md border border-gray-200 overflow-hidden" style={{ height: '300px' }}>
-                  <RouteMap coordinates={routeCoordinates} />
+                  <RouteMap coordinates={routeCoordinates} markers={mapMarkers} />
                 </div>
               )}
 

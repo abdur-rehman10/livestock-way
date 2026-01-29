@@ -358,6 +358,53 @@ export async function createMultiLoadTrip(payload: {
   );
 }
 
+export async function createManualTrip(payload: {
+  truck_id: string;
+  driver_id?: string | null;
+  pickup_date_time: string;
+  delivery_date_time: string;
+  trip_title?: string | null;
+  route_mode?: "fastest" | "shortest" | "avoid-tolls";
+  auto_rest_stops?: boolean;
+  selected_route_id?: string | null;
+  selected_route_data?: {
+    id: string;
+    waypoints: Array<{
+      id: string;
+      type: 'origin' | 'pickup' | 'dropoff' | 'destination';
+      loadId?: string;
+      location: {
+        text: string;
+        lat: number | null;
+        lng: number | null;
+      };
+    }>;
+    sequence: string[];
+    distance_km?: number;
+    duration_min?: number;
+    estimated_cost?: number;
+  } | null;
+  manual_loads: Array<{
+    origin: string;
+    destination: string;
+    species: string;
+    quantity: number;
+    receiver_phone: string;
+    pickup_lat?: number | null;
+    pickup_lng?: number | null;
+    dropoff_lat?: number | null;
+    dropoff_lng?: number | null;
+  }>;
+}) {
+  return marketplaceRequest<{ trip: any; trip_loads: Array<{ id: string; load_id: string; contract_id: string | null; booking_id: string | null }> }>(
+    `/trips/create-manual`,
+    {
+      method: "POST",
+      body: JSON.stringify(payload),
+    }
+  );
+}
+
 export async function fetchContract(contractId: string) {
   return marketplaceRequest<{ contract: ContractRecord }>(`/contracts/${contractId}`);
 }

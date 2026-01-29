@@ -33,7 +33,7 @@ import {
   FileText,
 } from "lucide-react";
 import { toast } from "sonner";
-import { fetchTruckAvailability, type TruckAvailability, fetchContracts, fetchContractsByTruckAvailability, createMultiLoadTrip, type ContractRecord } from "../api/marketplace";
+import { fetchTruckAvailability, type TruckAvailability, fetchContracts, fetchContractsByTruckAvailability, createMultiLoadTrip, createManualTrip, type ContractRecord } from "../api/marketplace";
 import { fetchLoadById } from "../lib/api";
 import { fetchTrucks } from "../api/fleet";
 import { fetchHaulerDrivers, fetchHaulerVehicles } from "../api/marketplace";
@@ -43,13 +43,32 @@ import { generateTripRoutePlan } from "../lib/api";
 import { AddressSearch, type MappedAddress } from "./AddressSearch";
 import { generateRouteCombinations, calculateRouteMetrics, calculateRouteMetricsOAASIS, type RouteCombination, type Waypoint } from "../lib/routeOptimization";
 
+const toNumberOrNull = (value: string | number | null | undefined) => {
+  if (value === null || value === undefined || value === "") return null;
+  const parsed = typeof value === "number" ? value : Number.parseFloat(value);
+  return Number.isFinite(parsed) ? parsed : null;
+};
+
 interface CreateTripModalProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   onTripCreated?: () => void;
 }
 
+interface ManualLoad {
+  origin: string;
+  destination: string;
+  species: string;
+  quantity: number;
+  receiverPhone: string;
+  pickupLat?: number | null;
+  pickupLng?: number | null;
+  dropoffLat?: number | null;
+  dropoffLng?: number | null;
+}
+
 interface TripFormData {
+  tripMode: "listing" | "manual"; // New: mode selection
   tripTitle: string;
   selectedListingId: string;
   origin: string;
@@ -63,11 +82,13 @@ interface TripFormData {
   routeMode: "fastest" | "shortest" | "avoid-tolls";
   autoRestStops: boolean;
   selectedRouteId?: string; // Selected route combination ID
+  manualLoads: ManualLoad[]; // New: manual loads array
 }
 
 export function CreateTripModal({ open, onOpenChange, onTripCreated }: CreateTripModalProps) {
   const [createTripStep, setCreateTripStep] = useState(1);
   const [tripFormData, setTripFormData] = useState<TripFormData>({
+    tripMode: "listing", // Default to listing mode
     tripTitle: "",
     selectedListingId: "",
     origin: "",
@@ -80,6 +101,7 @@ export function CreateTripModal({ open, onOpenChange, onTripCreated }: CreateTri
     selectedContractIds: [],
     routeMode: "fastest",
     autoRestStops: true,
+    manualLoads: [], // Initialize empty manual loads array
   });
 
   const [truckListings, setTruckListings] = useState<TruckAvailability[]>([]);
@@ -244,9 +266,14 @@ export function CreateTripModal({ open, onOpenChange, onTripCreated }: CreateTri
   
   useEffect(() => {
     // Only calculate when on step 4 and we have required data
-    if (createTripStep === 4 && tripFormData.origin && tripFormData.destination && tripFormData.selectedContractIds.length > 0) {
+    const hasContracts = tripFormData.tripMode === "listing" && tripFormData.selectedContractIds.length > 0;
+    const hasManualLoads = tripFormData.tripMode === "manual" && tripFormData.manualLoads.length > 0;
+    
+    if (createTripStep === 4 && tripFormData.origin && tripFormData.destination && (hasContracts || hasManualLoads)) {
       // Create a cache key based on inputs to avoid recalculating if inputs haven't changed
-      const cacheKey = `${tripFormData.origin}|${tripFormData.destination}|${tripFormData.selectedContractIds.sort().join(',')}|${tripFormData.routeMode}`;
+      const cacheKey = tripFormData.tripMode === "listing"
+        ? `${tripFormData.origin}|${tripFormData.destination}|${tripFormData.selectedContractIds.sort().join(',')}|${tripFormData.routeMode}`
+        : `${tripFormData.origin}|${tripFormData.destination}|${tripFormData.manualLoads.map(l => `${l.origin}|${l.destination}`).join(',')}|${tripFormData.routeMode}`;
       
       // Only recalculate if we don't have combinations yet or if inputs changed
       if (routeCombinations.length === 0 || routeCacheKeyRef.current !== cacheKey) {
@@ -283,7 +310,7 @@ export function CreateTripModal({ open, onOpenChange, onTripCreated }: CreateTri
             lng: parseFloat(dest.lon),
           };
 
-          // Get load data for selected contracts
+          // Get load data - either from contracts (listing mode) or manual loads
           const loads: Array<{
             loadId: string;
             contractId: string;
@@ -291,59 +318,109 @@ export function CreateTripModal({ open, onOpenChange, onTripCreated }: CreateTri
             dropoff: { text: string; lat: number | null; lng: number | null };
           }> = [];
 
-          for (const contractId of tripFormData.selectedContractIds) {
-            const contract = contracts.find((c) => c.id === contractId);
-            if (contract) {
-              const load = loadsData.get(contract.load_id);
-              if (load) {
-                // Geocode pickup and dropoff if needed
-                let pickupLat = (load as any).pickup_lat ? parseFloat(String((load as any).pickup_lat)) : null;
-                let pickupLng = (load as any).pickup_lng ? parseFloat(String((load as any).pickup_lng)) : null;
-                let dropoffLat = (load as any).dropoff_lat ? parseFloat(String((load as any).dropoff_lat)) : null;
-                let dropoffLng = (load as any).dropoff_lng ? parseFloat(String((load as any).dropoff_lng)) : null;
+          if (tripFormData.tripMode === "listing") {
+            // Original flow: get loads from contracts
+            for (const contractId of tripFormData.selectedContractIds) {
+              const contract = contracts.find((c) => c.id === contractId);
+              if (contract) {
+                const load = loadsData.get(contract.load_id);
+                if (load) {
+                  // Geocode pickup and dropoff if needed
+                  let pickupLat = (load as any).pickup_lat ? parseFloat(String((load as any).pickup_lat)) : null;
+                  let pickupLng = (load as any).pickup_lng ? parseFloat(String((load as any).pickup_lng)) : null;
+                  let dropoffLat = (load as any).dropoff_lat ? parseFloat(String((load as any).dropoff_lat)) : null;
+                  let dropoffLng = (load as any).dropoff_lng ? parseFloat(String((load as any).dropoff_lng)) : null;
 
-                const pickupLocationText = (load as any).pickup_location || (load as any).pickup_location_text || '';
-                const dropoffLocationText = (load as any).dropoff_location || (load as any).dropoff_location_text || '';
+                  const pickupLocationText = (load as any).pickup_location || (load as any).pickup_location_text || '';
+                  const dropoffLocationText = (load as any).dropoff_location || (load as any).dropoff_location_text || '';
 
-                if (!pickupLat || !pickupLng) {
-                  try {
-                    const pickupGeocode = await fetch(`${geocodeUrl}${encodeURIComponent(pickupLocationText)}`).then((r) => r.json());
-                    if (pickupGeocode[0]) {
-                      pickupLat = parseFloat(pickupGeocode[0].lat);
-                      pickupLng = parseFloat(pickupGeocode[0].lon);
+                  if (!pickupLat || !pickupLng) {
+                    try {
+                      const pickupGeocode = await fetch(`${geocodeUrl}${encodeURIComponent(pickupLocationText)}`).then((r) => r.json());
+                      if (pickupGeocode[0]) {
+                        pickupLat = parseFloat(pickupGeocode[0].lat);
+                        pickupLng = parseFloat(pickupGeocode[0].lon);
+                      }
+                    } catch (e) {
+                      console.warn('Failed to geocode pickup:', e);
                     }
-                  } catch (e) {
-                    console.warn('Failed to geocode pickup:', e);
                   }
-                }
 
-                if (!dropoffLat || !dropoffLng) {
-                  try {
-                    const dropoffGeocode = await fetch(`${geocodeUrl}${encodeURIComponent(dropoffLocationText)}`).then((r) => r.json());
-                    if (dropoffGeocode[0]) {
-                      dropoffLat = parseFloat(dropoffGeocode[0].lat);
-                      dropoffLng = parseFloat(dropoffGeocode[0].lon);
+                  if (!dropoffLat || !dropoffLng) {
+                    try {
+                      const dropoffGeocode = await fetch(`${geocodeUrl}${encodeURIComponent(dropoffLocationText)}`).then((r) => r.json());
+                      if (dropoffGeocode[0]) {
+                        dropoffLat = parseFloat(dropoffGeocode[0].lat);
+                        dropoffLng = parseFloat(dropoffGeocode[0].lon);
+                      }
+                    } catch (e) {
+                      console.warn('Failed to geocode dropoff:', e);
                     }
-                  } catch (e) {
-                    console.warn('Failed to geocode dropoff:', e);
                   }
-                }
 
-                loads.push({
-                  loadId: contract.load_id,
-                  contractId: contract.id,
-                  pickup: {
-                    text: pickupLocationText,
-                    lat: pickupLat,
-                    lng: pickupLng,
-                  },
-                  dropoff: {
-                    text: dropoffLocationText,
-                    lat: dropoffLat,
-                    lng: dropoffLng,
-                  },
-                });
+                  loads.push({
+                    loadId: contract.load_id,
+                    contractId: contract.id,
+                    pickup: {
+                      text: pickupLocationText,
+                      lat: pickupLat,
+                      lng: pickupLng,
+                    },
+                    dropoff: {
+                      text: dropoffLocationText,
+                      lat: dropoffLat,
+                      lng: dropoffLng,
+                    },
+                  });
+                }
               }
+            }
+          } else {
+            // Manual mode: use manual loads directly
+            for (const manualLoad of tripFormData.manualLoads) {
+              let pickupLat = manualLoad.pickupLat ?? null;
+              let pickupLng = manualLoad.pickupLng ?? null;
+              let dropoffLat = manualLoad.dropoffLat ?? null;
+              let dropoffLng = manualLoad.dropoffLng ?? null;
+
+              if (!pickupLat || !pickupLng) {
+                try {
+                  const pickupGeocode = await fetch(`${geocodeUrl}${encodeURIComponent(manualLoad.origin)}`).then((r) => r.json());
+                  if (pickupGeocode[0]) {
+                    pickupLat = parseFloat(pickupGeocode[0].lat);
+                    pickupLng = parseFloat(pickupGeocode[0].lon);
+                  }
+                } catch (e) {
+                  console.warn('Failed to geocode pickup:', e);
+                }
+              }
+
+              if (!dropoffLat || !dropoffLng) {
+                try {
+                  const dropoffGeocode = await fetch(`${geocodeUrl}${encodeURIComponent(manualLoad.destination)}`).then((r) => r.json());
+                  if (dropoffGeocode[0]) {
+                    dropoffLat = parseFloat(dropoffGeocode[0].lat);
+                    dropoffLng = parseFloat(dropoffGeocode[0].lon);
+                  }
+                } catch (e) {
+                  console.warn('Failed to geocode dropoff:', e);
+                }
+              }
+
+              loads.push({
+                loadId: `manual_${manualLoad.origin}_${manualLoad.destination}`,
+                contractId: `manual_${manualLoad.origin}_${manualLoad.destination}`,
+                pickup: {
+                  text: manualLoad.origin,
+                  lat: pickupLat,
+                  lng: pickupLng,
+                },
+                dropoff: {
+                  text: manualLoad.destination,
+                  lat: dropoffLat,
+                  lng: dropoffLng,
+                },
+              });
             }
           }
 
@@ -403,11 +480,12 @@ export function CreateTripModal({ open, onOpenChange, onTripCreated }: CreateTri
     }
     // Don't clear routeCombinations when leaving step 4 - preserve state until modal closes
     // State will only be cleared when handleClose is called
-  }, [createTripStep, tripFormData.origin, tripFormData.destination, tripFormData.selectedContractIds, tripFormData.routeMode, contracts, loadsData]);
+  }, [createTripStep, tripFormData.origin, tripFormData.destination, tripFormData.selectedContractIds, tripFormData.manualLoads, tripFormData.tripMode, tripFormData.routeMode, contracts, loadsData]);
 
   const handleClose = () => {
     setCreateTripStep(1);
     setTripFormData({
+      tripMode: "listing",
       tripTitle: "",
       selectedListingId: "",
       origin: "",
@@ -420,6 +498,7 @@ export function CreateTripModal({ open, onOpenChange, onTripCreated }: CreateTri
       selectedContractIds: [],
       routeMode: "fastest",
       autoRestStops: true,
+      manualLoads: [],
     });
     // Clear route state when modal closes - preserve until modal closes
     setRouteCombinations([]);
@@ -432,18 +511,6 @@ export function CreateTripModal({ open, onOpenChange, onTripCreated }: CreateTri
   };
 
   const handleSubmit = async () => {
-    if (!tripFormData.selectedListingId) {
-      toast.error("Please select a truck/route listing");
-      return;
-    }
-    if (tripFormData.selectedContractIds.length === 0) {
-      toast.error("Please select at least one contract");
-      return;
-    }
-    if (!tripFormData.origin || !tripFormData.destination) {
-      toast.error("Please enter trip origin and destination");
-      return;
-    }
     if (!tripFormData.tripStartDate || !tripFormData.tripStartTime) {
       toast.error("Please enter trip start date and time");
       return;
@@ -451,34 +518,92 @@ export function CreateTripModal({ open, onOpenChange, onTripCreated }: CreateTri
 
     setSubmitting(true);
     try {
-      // Use trip start date/time for pickup_date_time
       const tripStartDateTime = new Date(`${tripFormData.tripStartDate}T${tripFormData.tripStartTime}`).toISOString();
-      // For delivery_date_time, we'll use a default (e.g., same day + 8 hours) or let backend calculate
-      // Since backend might need this, let's add 8 hours as a default
       const deliveryDateTime = new Date(new Date(tripStartDateTime).getTime() + 8 * 60 * 60 * 1000).toISOString();
 
-      // Get the full route combination details for the selected route
-      const selectedRoute = routeCombinations.find(r => r.id === (selectedRouteId || tripFormData.selectedRouteId));
-      
-      await createMultiLoadTrip({
-        truck_availability_id: tripFormData.selectedListingId,
-        contract_ids: tripFormData.selectedContractIds,
-        driver_id: tripFormData.assignedDriver || null,
-        pickup_date_time: tripStartDateTime,
-        delivery_date_time: deliveryDateTime,
-        trip_title: tripFormData.tripTitle || null,
-        route_mode: tripFormData.routeMode,
-        auto_rest_stops: tripFormData.autoRestStops,
-        selected_route_id: selectedRouteId || tripFormData.selectedRouteId || null,
-        selected_route_data: selectedRoute ? {
-          id: selectedRoute.id,
-          waypoints: selectedRoute.waypoints,
-          sequence: selectedRoute.sequence,
-          distance_km: selectedRoute.distance_km,
-          duration_min: selectedRoute.duration_min,
-          estimated_cost: selectedRoute.estimated_cost,
-        } : null,
-      });
+      if (tripFormData.tripMode === "listing") {
+        // Original flow: create from listing
+        if (!tripFormData.selectedListingId) {
+          toast.error("Please select a truck/route listing");
+          return;
+        }
+        if (tripFormData.selectedContractIds.length === 0) {
+          toast.error("Please select at least one contract");
+          return;
+        }
+        if (!tripFormData.origin || !tripFormData.destination) {
+          toast.error("Please enter trip origin and destination");
+          return;
+        }
+
+        const selectedRoute = routeCombinations.find(r => r.id === (selectedRouteId || tripFormData.selectedRouteId));
+        
+        await createMultiLoadTrip({
+          truck_availability_id: tripFormData.selectedListingId,
+          contract_ids: tripFormData.selectedContractIds,
+          driver_id: tripFormData.assignedDriver || null,
+          pickup_date_time: tripStartDateTime,
+          delivery_date_time: deliveryDateTime,
+          trip_title: tripFormData.tripTitle || null,
+          route_mode: tripFormData.routeMode,
+          auto_rest_stops: tripFormData.autoRestStops,
+          selected_route_id: selectedRouteId || tripFormData.selectedRouteId || null,
+          selected_route_data: selectedRoute ? {
+            id: selectedRoute.id,
+            waypoints: selectedRoute.waypoints,
+            sequence: selectedRoute.sequence,
+            distance_km: selectedRoute.distance_km,
+            duration_min: selectedRoute.duration_min,
+            estimated_cost: selectedRoute.estimated_cost,
+          } : null,
+        });
+      } else {
+        // Manual flow: create without listing/contract
+        if (!tripFormData.assignedVehicle) {
+          toast.error("Please select a vehicle");
+          return;
+        }
+        if (tripFormData.manualLoads.length === 0) {
+          toast.error("Please add at least one manual load");
+          return;
+        }
+        if (!tripFormData.origin || !tripFormData.destination) {
+          toast.error("Please enter trip origin and destination");
+          return;
+        }
+
+        const selectedRoute = routeCombinations.find(r => r.id === (selectedRouteId || tripFormData.selectedRouteId));
+
+        await createManualTrip({
+          truck_id: tripFormData.assignedVehicle,
+          driver_id: tripFormData.assignedDriver || null,
+          pickup_date_time: tripStartDateTime,
+          delivery_date_time: deliveryDateTime,
+          trip_title: tripFormData.tripTitle || null,
+          route_mode: tripFormData.routeMode,
+          auto_rest_stops: tripFormData.autoRestStops,
+          selected_route_id: selectedRouteId || tripFormData.selectedRouteId || null,
+          selected_route_data: selectedRoute ? {
+            id: selectedRoute.id,
+            waypoints: selectedRoute.waypoints,
+            sequence: selectedRoute.sequence,
+            distance_km: selectedRoute.distance_km,
+            duration_min: selectedRoute.duration_min,
+            estimated_cost: selectedRoute.estimated_cost,
+          } : null,
+          manual_loads: tripFormData.manualLoads.map(load => ({
+            origin: load.origin,
+            destination: load.destination,
+            species: load.species,
+            quantity: load.quantity,
+            receiver_phone: load.receiverPhone,
+            pickup_lat: load.pickupLat ?? null,
+            pickup_lng: load.pickupLng ?? null,
+            dropoff_lat: load.dropoffLat ?? null,
+            dropoff_lng: load.dropoffLng ?? null,
+          })),
+        });
+      }
 
       toast.success("Trip created successfully!");
       handleClose();
@@ -511,11 +636,42 @@ export function CreateTripModal({ open, onOpenChange, onTripCreated }: CreateTri
           />
         </div>
 
-        {/* Step 1: Select Truck/Route Listing & Trip Details */}
+        {/* Step 1: Mode Selection & Trip Details */}
         {createTripStep === 1 && (
           <div className="space-y-4">
-            <h3 className="font-medium mb-4">Select Truck/Route Listing</h3>
+            <h3 className="font-medium mb-4">Create Trip</h3>
             
+            {/* Mode Selection */}
+            <div>
+              <Label className="text-sm text-gray-600 mb-2 block">Trip Creation Mode *</Label>
+              <div className="grid grid-cols-2 gap-3">
+                <div
+                  onClick={() => setTripFormData({ ...tripFormData, tripMode: "listing" })}
+                  className={`p-4 border-2 rounded-lg cursor-pointer transition-all ${
+                    tripFormData.tripMode === "listing" ? "border-[#53ca97] bg-green-50" : "border-gray-200 hover:border-[#53ca97]"
+                  }`}
+                >
+                  <div className="flex items-center gap-2 mb-2">
+                    <FileText className="w-5 h-5" />
+                    <p className="text-sm font-medium">From Listing</p>
+                  </div>
+                  <p className="text-xs text-gray-600">Create trip from existing truck listing and contracts</p>
+                </div>
+                <div
+                  onClick={() => setTripFormData({ ...tripFormData, tripMode: "manual" })}
+                  className={`p-4 border-2 rounded-lg cursor-pointer transition-all ${
+                    tripFormData.tripMode === "manual" ? "border-[#53ca97] bg-green-50" : "border-gray-200 hover:border-[#53ca97]"
+                  }`}
+                >
+                  <div className="flex items-center gap-2 mb-2">
+                    <Plus className="w-5 h-5" />
+                    <p className="text-sm font-medium">Manual Entry</p>
+                  </div>
+                  <p className="text-xs text-gray-600">Create trip without listing, add loads manually</p>
+                </div>
+              </div>
+            </div>
+
             <div>
               <Label className="text-sm text-gray-600 mb-1 block">Trip Title/Reference (Optional)</Label>
               <Input
@@ -526,6 +682,8 @@ export function CreateTripModal({ open, onOpenChange, onTripCreated }: CreateTri
               />
             </div>
 
+            {tripFormData.tripMode === "listing" && (
+              <>
             {listingsLoading ? (
               <p className="text-sm text-gray-500">Loading listings...</p>
             ) : truckListings.length === 0 ? (
@@ -575,8 +733,206 @@ export function CreateTripModal({ open, onOpenChange, onTripCreated }: CreateTri
                 })}
               </div>
             )}
+            </>
+            )}
 
-            {tripFormData.selectedListingId && (
+            {tripFormData.tripMode === "manual" && (
+              <div className="space-y-4">
+                <div>
+                  <Label className="text-sm text-gray-600 mb-1 block">
+                    Trip Origin (Where truck will start) *
+                  </Label>
+                  <p className="text-xs text-gray-500 mb-2">Truck will start from here</p>
+                  <AddressSearch
+                    value={tripFormData.origin}
+                    onChange={(text) => setTripFormData({ ...tripFormData, origin: text })}
+                    onSelect={(address) => setTripFormData({ ...tripFormData, origin: address.fullText })}
+                  />
+                </div>
+
+                <div>
+                  <Label className="text-sm text-gray-600 mb-1 block">
+                    Trip Destination (Where trip will end) *
+                  </Label>
+                  <AddressSearch
+                    value={tripFormData.destination}
+                    onChange={(text) => setTripFormData({ ...tripFormData, destination: text })}
+                    onSelect={(address) => setTripFormData({ ...tripFormData, destination: address.fullText })}
+                  />
+                </div>
+
+                <div>
+                  <Label className="text-sm text-gray-600 mb-2 block">Select Vehicle *</Label>
+                  {trucksLoading ? (
+                    <p className="text-sm text-gray-500">Loading vehicles...</p>
+                  ) : trucks.length === 0 ? (
+                    <p className="text-sm text-gray-500">No vehicles available</p>
+                  ) : (
+                    <div className="space-y-2">
+                      {trucks.map((truck) => (
+                        <div
+                          key={truck.id}
+                          onClick={() => setTripFormData({ ...tripFormData, assignedVehicle: String(truck.id) })}
+                          className={`p-3 border-2 rounded-lg cursor-pointer transition-all ${
+                            tripFormData.assignedVehicle === String(truck.id)
+                              ? "border-[#53ca97] bg-green-50"
+                              : "border-gray-200 hover:border-[#53ca97]"
+                          }`}
+                        >
+                          <div className="flex items-center justify-between">
+                            <div>
+                              <p className="text-sm font-medium">{truck.truck_name || truck.plate_number || `Truck #${truck.id}`}</p>
+                              <p className="text-xs text-gray-500">{truck.truck_type || "Truck"}</p>
+                            </div>
+                            {tripFormData.assignedVehicle === String(truck.id) && <CheckCircle className="w-4 h-4 text-green-600" />}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+
+                <div>
+                  <Label className="text-sm text-gray-600 mb-2 block">Manual Loads *</Label>
+                  <div className="space-y-3">
+                    {tripFormData.manualLoads.map((load, index) => (
+                      <div key={index} className="p-4 border-2 border-gray-200 rounded-lg space-y-3">
+                        <div className="flex items-center justify-between mb-2">
+                          <p className="text-sm font-medium">Load #{index + 1}</p>
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() => {
+                              const newLoads = [...tripFormData.manualLoads];
+                              newLoads.splice(index, 1);
+                              setTripFormData({ ...tripFormData, manualLoads: newLoads });
+                            }}
+                          >
+                            <X className="w-4 h-4" />
+                          </Button>
+                        </div>
+                        <div className="grid grid-cols-2 gap-3">
+                          <div>
+                            <Label className="text-xs text-gray-600 mb-1 block">Origin *</Label>
+                            <AddressSearch
+                              value={load.origin}
+                              onChange={(text) => {
+                                const newLoads = [...tripFormData.manualLoads];
+                                newLoads[index].origin = text;
+                                setTripFormData({ ...tripFormData, manualLoads: newLoads });
+                              }}
+                              onSelect={(address) => {
+                                const newLoads = [...tripFormData.manualLoads];
+                                newLoads[index].origin = address.fullText;
+                                newLoads[index].pickupLat = toNumberOrNull(address.lat);
+                                newLoads[index].pickupLng = toNumberOrNull(address.lon);
+                                setTripFormData({ ...tripFormData, manualLoads: newLoads });
+                              }}
+                            />
+                          </div>
+                          <div>
+                            <Label className="text-xs text-gray-600 mb-1 block">Destination *</Label>
+                            <AddressSearch
+                              value={load.destination}
+                              onChange={(text) => {
+                                const newLoads = [...tripFormData.manualLoads];
+                                newLoads[index].destination = text;
+                                setTripFormData({ ...tripFormData, manualLoads: newLoads });
+                              }}
+                              onSelect={(address) => {
+                                const newLoads = [...tripFormData.manualLoads];
+                                newLoads[index].destination = address.fullText;
+                                newLoads[index].dropoffLat = toNumberOrNull(address.lat);
+                                newLoads[index].dropoffLng = toNumberOrNull(address.lon);
+                                setTripFormData({ ...tripFormData, manualLoads: newLoads });
+                              }}
+                            />
+                          </div>
+                        </div>
+                        <div className="grid grid-cols-2 gap-3">
+                          <div>
+                            <Label className="text-xs text-gray-600 mb-1 block">Species/Type *</Label>
+                            <Input
+                              type="text"
+                              placeholder="e.g., Cattle, Sheep"
+                              value={load.species}
+                              onChange={(e) => {
+                                const newLoads = [...tripFormData.manualLoads];
+                                newLoads[index].species = e.target.value;
+                                setTripFormData({ ...tripFormData, manualLoads: newLoads });
+                              }}
+                            />
+                          </div>
+                          <div>
+                            <Label className="text-xs text-gray-600 mb-1 block">Quantity *</Label>
+                            <Input
+                              type="number"
+                              placeholder="Number of head"
+                              value={load.quantity || ""}
+                              onChange={(e) => {
+                                const newLoads = [...tripFormData.manualLoads];
+                                newLoads[index].quantity = Number(e.target.value) || 0;
+                                setTripFormData({ ...tripFormData, manualLoads: newLoads });
+                              }}
+                            />
+                          </div>
+                        </div>
+                        <div>
+                          <Label className="text-xs text-gray-600 mb-1 block">Shipment Receiver Phone *</Label>
+                          <Input
+                            type="tel"
+                            placeholder="e.g., +1234567890"
+                            value={load.receiverPhone}
+                            onChange={(e) => {
+                              const newLoads = [...tripFormData.manualLoads];
+                              newLoads[index].receiverPhone = e.target.value;
+                              setTripFormData({ ...tripFormData, manualLoads: newLoads });
+                            }}
+                          />
+                        </div>
+                      </div>
+                    ))}
+                    <Button
+                      variant="outline"
+                      onClick={() => {
+                        setTripFormData({
+                          ...tripFormData,
+                          manualLoads: [
+                            ...tripFormData.manualLoads,
+                            { origin: "", destination: "", species: "", quantity: 0, receiverPhone: "" },
+                          ],
+                        });
+                      }}
+                      className="w-full"
+                    >
+                      <Plus className="w-4 h-4 mr-2" />
+                      Add Another Load
+                    </Button>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4 pt-4 border-t">
+                  <div>
+                    <Label className="text-sm text-gray-600 mb-1 block">Trip Start Date *</Label>
+                    <Input
+                      type="date"
+                      value={tripFormData.tripStartDate}
+                      onChange={(e) => setTripFormData({ ...tripFormData, tripStartDate: e.target.value })}
+                    />
+                  </div>
+                  <div>
+                    <Label className="text-sm text-gray-600 mb-1 block">Trip Start Time *</Label>
+                    <Input
+                      type="time"
+                      value={tripFormData.tripStartTime}
+                      onChange={(e) => setTripFormData({ ...tripFormData, tripStartTime: e.target.value })}
+                    />
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {tripFormData.tripMode === "listing" && tripFormData.selectedListingId && (
               <div className="space-y-4 pt-4 border-t">
                 <div>
                   <Label className="text-sm text-gray-600 mb-1 block">
@@ -628,13 +984,35 @@ export function CreateTripModal({ open, onOpenChange, onTripCreated }: CreateTri
               </Button>
               <Button
                 onClick={() => {
-                  if (!tripFormData.selectedListingId) {
-                    toast.error("Please select a truck/route listing");
-                    return;
-                  }
-                  if (!tripFormData.origin || !tripFormData.destination) {
-                    toast.error("Please enter trip origin and destination");
-                    return;
+                  if (tripFormData.tripMode === "listing") {
+                    if (!tripFormData.selectedListingId) {
+                      toast.error("Please select a truck/route listing");
+                      return;
+                    }
+                    if (!tripFormData.origin || !tripFormData.destination) {
+                      toast.error("Please enter trip origin and destination");
+                      return;
+                    }
+                  } else {
+                    if (!tripFormData.assignedVehicle) {
+                      toast.error("Please select a vehicle");
+                      return;
+                    }
+                    if (tripFormData.manualLoads.length === 0) {
+                      toast.error("Please add at least one manual load");
+                      return;
+                    }
+                    // Validate all manual loads
+                    for (const load of tripFormData.manualLoads) {
+                      if (!load.origin || !load.destination || !load.species || !load.quantity || !load.receiverPhone) {
+                        toast.error("Please fill in all fields for all manual loads");
+                        return;
+                      }
+                    }
+                    if (!tripFormData.origin || !tripFormData.destination) {
+                      toast.error("Please enter trip origin and destination");
+                      return;
+                    }
                   }
                   if (!tripFormData.tripStartDate || !tripFormData.tripStartTime) {
                     toast.error("Please enter trip start date and time");
@@ -643,9 +1021,9 @@ export function CreateTripModal({ open, onOpenChange, onTripCreated }: CreateTri
                   setCreateTripStep(2);
                 }}
                 style={{ backgroundColor: "#53ca97", color: "white" }}
-                disabled={!tripFormData.selectedListingId}
+                disabled={tripFormData.tripMode === "listing" && !tripFormData.selectedListingId}
               >
-                Next: Assignment
+                Next: {tripFormData.tripMode === "listing" ? "Assignment" : "Route Setup"}
                 <ChevronRight className="w-4 h-4 ml-2" />
               </Button>
             </div>
@@ -695,26 +1073,44 @@ export function CreateTripModal({ open, onOpenChange, onTripCreated }: CreateTri
               </div>
             )}
 
-            {/* Vehicle Selection - Show selected vehicle from listing */}
+            {/* Vehicle Selection - Show selected vehicle from listing or manual selection */}
             <div>
               <Label className="text-sm text-gray-600 mb-2 block">Selected Vehicle</Label>
-              {selectedListing?.truck_id ? (
+              {tripFormData.tripMode === "listing" ? (
+                selectedListing?.truck_id ? (
+                  <div className="p-3 border-2 border-[#53ca97] rounded-lg bg-green-50">
+                    <div className="flex items-center gap-3">
+                      <Truck className="w-8 h-8 text-[#53ca97]" />
+                      <div>
+                        <p className="text-sm font-medium">
+                          {selectedTruck?.truck_name || selectedTruck?.plate_number || `Truck #${selectedListing.truck_id}`}
+                        </p>
+                        <p className="text-xs text-gray-500">
+                          {selectedTruck?.truck_type || "Truck"} • {selectedListing.capacity_headcount ? `${selectedListing.capacity_headcount} head` : ""}
+                          {selectedListing.capacity_weight_kg ? ` • ${selectedListing.capacity_weight_kg} kg` : ""}
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+                ) : (
+                  <p className="text-xs text-gray-500">No truck assigned to this listing</p>
+                )
+              ) : selectedTruck ? (
                 <div className="p-3 border-2 border-[#53ca97] rounded-lg bg-green-50">
                   <div className="flex items-center gap-3">
                     <Truck className="w-8 h-8 text-[#53ca97]" />
                     <div>
                       <p className="text-sm font-medium">
-                        {selectedTruck?.truck_name || selectedTruck?.plate_number || `Truck #${selectedListing.truck_id}`}
+                        {selectedTruck.truck_name || selectedTruck.plate_number || `Truck #${selectedTruck.id}`}
                       </p>
                       <p className="text-xs text-gray-500">
-                        {selectedTruck?.truck_type || "Truck"} • {selectedListing.capacity_headcount ? `${selectedListing.capacity_headcount} head` : ""}
-                        {selectedListing.capacity_weight_kg ? ` • ${selectedListing.capacity_weight_kg} kg` : ""}
+                        {selectedTruck.truck_type || "Truck"}
                       </p>
                     </div>
                   </div>
                 </div>
               ) : (
-                <p className="text-xs text-gray-500">No truck assigned to this listing</p>
+                <p className="text-xs text-gray-500">No vehicle selected in Step 1</p>
               )}
             </div>
 
@@ -725,15 +1121,24 @@ export function CreateTripModal({ open, onOpenChange, onTripCreated }: CreateTri
               </Button>
               <Button
                 onClick={() => {
-                  if (!selectedListing?.truck_id) {
-                    toast.error("Selected listing must have a truck assigned");
-                    return;
+                  if (tripFormData.tripMode === "listing") {
+                    if (!selectedListing?.truck_id) {
+                      toast.error("Selected listing must have a truck assigned");
+                      return;
+                    }
+                    setCreateTripStep(3);
+                  } else {
+                    if (!selectedTruck) {
+                      toast.error("Please select a vehicle in Step 1");
+                      return;
+                    }
+                    // For manual trips, skip contracts step and go directly to route preferences
+                    setCreateTripStep(4);
                   }
-                  setCreateTripStep(3);
                 }}
                 style={{ backgroundColor: "#53ca97", color: "white" }}
               >
-                Next: Contract Selection
+                {tripFormData.tripMode === "listing" ? "Next: Contract Selection" : "Next: Route Preferences"}
                 <ChevronRight className="w-4 h-4 ml-2" />
               </Button>
             </div>

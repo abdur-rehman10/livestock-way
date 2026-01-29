@@ -4473,6 +4473,9 @@ export async function createMultiLoadTripFromListing(params: {
     const tripStatus = TripStatus.READY_TO_START; // Multi-load trips start as READY_TO_START (scheduled)
     
     // Create trip with first load as primary
+    if (loads.length === 0) {
+      throw new Error("At least one load is required");
+    }
     const primaryLoad = loads[0];
     if (!primaryLoad) {
       throw new Error("Primary load is required");
@@ -4784,6 +4787,410 @@ export async function createMultiLoadTripFromListing(params: {
       `,
       [params.truckAvailabilityId]
     );
+
+    await client.query("COMMIT");
+    return { trip, tripLoads };
+  } catch (err) {
+    await client.query("ROLLBACK");
+    throw err;
+  } finally {
+    client.release();
+  }
+}
+
+export async function createManualTrip(params: {
+  haulerId: string;
+  haulerUserId: string;
+  truckId: string;
+  driverId?: string | null;
+  pickupDateTime: string;
+  deliveryDateTime: string;
+  tripTitle?: string | null;
+  routeMode?: "fastest" | "shortest" | "avoid-tolls";
+  autoRestStops?: boolean;
+  selectedRouteId?: string | null;
+  selectedRouteData?: {
+    id: string;
+    waypoints: Array<{
+      id: string;
+      type: 'origin' | 'pickup' | 'dropoff' | 'destination';
+      loadId?: string;
+      location: {
+        text: string;
+        lat: number | null;
+        lng: number | null;
+      };
+    }>;
+    sequence: string[];
+    distance_km?: number;
+    duration_min?: number;
+    estimated_cost?: number;
+  } | null;
+  manualLoads: Array<{
+    origin: string;
+    destination: string;
+    species: string;
+    quantity: number;
+    receiverPhone: string;
+    pickupLat?: number | null;
+    pickupLng?: number | null;
+    dropoffLat?: number | null;
+    dropoffLng?: number | null;
+  }>;
+}): Promise<{ trip: TripRecord; tripLoads: Array<{ id: string; load_id: string; contract_id: string | null; booking_id: string | null }> }> {
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+
+    // Validate truck
+    const truckCheck = await client.query("SELECT id, hauler_id FROM trucks WHERE id = $1", [params.truckId]);
+    if (truckCheck.rowCount === 0) {
+      throw new Error("Truck not found");
+    }
+    if (truckCheck.rows[0].hauler_id !== params.haulerId) {
+      throw new Error("Truck does not belong to this hauler");
+    }
+
+    // Validate manual loads
+    if (params.manualLoads.length === 0) {
+      throw new Error("At least one manual load is required");
+    }
+
+    // Get or create a system shipper for manual loads
+    // We'll use a special shipper record or create one if needed
+    let systemShipperId: string;
+    const shipperCheck = await client.query(
+      `SELECT id::text FROM shippers WHERE user_id = (SELECT id FROM app_users WHERE email = 'system@livestockway.com' LIMIT 1) LIMIT 1`
+    );
+    if (shipperCheck.rowCount && shipperCheck.rowCount > 0) {
+      systemShipperId = shipperCheck.rows[0].id;
+    } else {
+      // Create system user and shipper if they don't exist
+      const systemUserResult = await client.query(
+        `INSERT INTO app_users (email, user_type, created_at, updated_at)
+         VALUES ('system@livestockway.com', 'shipper', NOW(), NOW())
+         ON CONFLICT (email) DO UPDATE SET email = EXCLUDED.email
+         RETURNING id`
+      );
+      const systemUserId = systemUserResult.rows[0].id;
+      const systemShipperResult = await client.query(
+        `INSERT INTO shippers (user_id, created_at, updated_at)
+         VALUES ($1, NOW(), NOW())
+         ON CONFLICT DO NOTHING
+         RETURNING id::text`,
+        [systemUserId]
+      );
+      if (systemShipperResult.rowCount && systemShipperResult.rowCount > 0) {
+        systemShipperId = systemShipperResult.rows[0].id;
+      } else {
+        const existingShipper = await client.query(
+          `SELECT id::text FROM shippers WHERE user_id = $1`,
+          [systemUserId]
+        );
+        if (!existingShipper.rowCount || existingShipper.rowCount === 0) {
+          throw new Error("Failed to create or retrieve system shipper");
+        }
+        systemShipperId = existingShipper.rows[0].id;
+      }
+    }
+
+    // Create loads from manual input
+    const loads: LoadRecord[] = [];
+    for (const manualLoad of params.manualLoads) {
+      // Geocode addresses if coordinates not provided
+      let pickupLat = manualLoad.pickupLat;
+      let pickupLng = manualLoad.pickupLng;
+      let dropoffLat = manualLoad.dropoffLat;
+      let dropoffLng = manualLoad.dropoffLng;
+
+      if (!pickupLat || !pickupLng) {
+        const geocodeUrl = `https://nominatim.openstreetmap.org/search?format=json&limit=1&q=${encodeURIComponent(manualLoad.origin)}`;
+        try {
+          const response = await fetch(geocodeUrl, {
+            headers: { "User-Agent": "livestockway/1.0" },
+          });
+          const data = await response.json();
+          if (data[0]) {
+            pickupLat = parseFloat(data[0].lat);
+            pickupLng = parseFloat(data[0].lon);
+          }
+        } catch (e) {
+          console.warn("Failed to geocode pickup location:", e);
+        }
+      }
+
+      if (!dropoffLat || !dropoffLng) {
+        const geocodeUrl = `https://nominatim.openstreetmap.org/search?format=json&limit=1&q=${encodeURIComponent(manualLoad.destination)}`;
+        try {
+          const response = await fetch(geocodeUrl, {
+            headers: { "User-Agent": "livestockway/1.0" },
+          });
+          const data = await response.json();
+          if (data[0]) {
+            dropoffLat = parseFloat(data[0].lat);
+            dropoffLng = parseFloat(data[0].lon);
+          }
+        } catch (e) {
+          console.warn("Failed to geocode dropoff location:", e);
+        }
+      }
+
+      // Create load record
+      const loadResult = await client.query<LoadRow>(
+        `
+        INSERT INTO loads (
+          shipper_id,
+          title,
+          species,
+          animal_count,
+          pickup_location_text,
+          dropoff_location_text,
+          pickup_lat,
+          pickup_lng,
+          dropoff_lat,
+          dropoff_lng,
+          status,
+          visibility,
+          payment_mode,
+          external_contact_phone,
+          created_at,
+          updated_at
+        )
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, NOW(), NOW())
+        RETURNING *
+        `,
+        [
+          systemShipperId,
+          `Manual Load: ${manualLoad.species} - ${manualLoad.quantity} head`,
+          manualLoad.species,
+          manualLoad.quantity,
+          manualLoad.origin,
+          manualLoad.destination,
+          pickupLat,
+          pickupLng,
+          dropoffLat,
+          dropoffLng,
+          mapLoadStatusToDb(LoadStatus.AWAITING_ESCROW),
+          "private", // Private visibility for manual loads
+          "DIRECT", // Direct payment for manual loads
+          manualLoad.receiverPhone,
+        ]
+      );
+      const loadRow = loadResult.rows[0];
+      if (!loadRow) {
+        throw new Error("Failed to create load");
+      }
+      loads.push(mapLoadRow(loadRow));
+    }
+
+    if (loads.length === 0) {
+      throw new Error("No loads were created");
+    }
+
+    // Create trip with first load as primary
+    const primaryLoad: LoadRecord | undefined = loads[0];
+    if (!primaryLoad) {
+      throw new Error("Primary load is required");
+    }
+    const tripStatus = TripStatus.READY_TO_START;
+    const paymentMode = "DIRECT"; // Manual trips use direct payment
+
+    const tripResult = await client.query<TripRow>(
+      `
+        INSERT INTO trips (
+          load_id,
+          hauler_id,
+          truck_id,
+          driver_id,
+          status,
+          payment_mode,
+          planned_start_time,
+          planned_end_time
+        )
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+        RETURNING *
+      `,
+      [
+        primaryLoad.id,
+        params.haulerId,
+        params.truckId,
+        params.driverId ?? null,
+        mapTripStatusToDb(tripStatus),
+        paymentMode,
+        params.pickupDateTime,
+        params.deliveryDateTime,
+      ]
+    );
+    const tripRow = tripResult.rows[0];
+    if (!tripRow) {
+      throw new Error("Failed to create trip");
+    }
+    const trip = mapTripRow(tripRow);
+
+    // Create trip_loads entries for all loads
+    const tripLoads: Array<{ id: string; load_id: string; contract_id: string | null; booking_id: string | null }> = [];
+    for (let i = 0; i < loads.length; i++) {
+      const load = loads[i];
+      if (!load) continue;
+      const tripLoadResult = await client.query(
+        `
+          INSERT INTO trip_loads (
+            trip_id,
+            load_id,
+            contract_id,
+            booking_id,
+            sequence_order
+          )
+          VALUES ($1, $2, NULL, NULL, $3)
+          RETURNING id::text, load_id::text, contract_id::text, booking_id::text
+        `,
+        [trip.id, load.id, i]
+      );
+      tripLoads.push({
+        id: tripLoadResult.rows[0].id,
+        load_id: tripLoadResult.rows[0].load_id,
+        contract_id: null,
+        booking_id: null,
+      });
+    }
+
+    // Update loads status
+    for (const load of loads) {
+      await client.query(
+        `
+          UPDATE loads
+          SET status = $2,
+              assigned_to_user_id = $3,
+              assigned_at = NOW(),
+              updated_at = NOW()
+          WHERE id = $1
+        `,
+        [load.id, mapLoadStatusToDb(LoadStatus.AWAITING_ESCROW), params.haulerUserId]
+      );
+    }
+
+    // Create notifications
+    const stakeholderUserIds = new Set<string>();
+    stakeholderUserIds.add(params.haulerUserId);
+    if (params.driverId) {
+      const driverQuery = await client.query(`SELECT user_id::text FROM drivers WHERE id = $1`, [params.driverId]);
+      if (driverQuery.rows[0]?.user_id) {
+        stakeholderUserIds.add(driverQuery.rows[0].user_id);
+      }
+    }
+
+    // Create in-app notifications
+    for (const userId of stakeholderUserIds) {
+      await client.query(
+        `
+          INSERT INTO notifications (
+            user_id,
+            channel,
+            template_code,
+            payload_json,
+            status
+          )
+          VALUES ($1, 'in_app', 'trip_created', $2, 'queued')
+        `,
+        [
+          userId,
+          JSON.stringify({
+            trip_id: trip.id,
+            trip_title: params.tripTitle ?? `Manual trip #${trip.id}`,
+            loads_count: loads.length,
+            pickup_date: params.pickupDateTime,
+            delivery_date: params.deliveryDateTime,
+          }),
+        ]
+      );
+    }
+
+    // Emit WebSocket events
+    const { emitEvent, SOCKET_EVENTS } = require("../socket");
+    for (const userId of stakeholderUserIds) {
+      emitEvent(
+        SOCKET_EVENTS.TRIP_UPDATED,
+        { trip, loads: loads.map((l) => ({ id: l.id, shipper_id: l.shipper_id })) },
+        [`user-${userId}`]
+      );
+    }
+
+    // Create initial route plan entry if selectedRouteId is provided
+    if (params.selectedRouteId || params.selectedRouteData) {
+      const buildRestStopPlan = (plannedDistanceKm?: number | null) => {
+        if (!plannedDistanceKm || Number.isNaN(Number(plannedDistanceKm))) {
+          return {
+            total_distance_km: null,
+            stops: [],
+          };
+        }
+
+        const distance = Number(plannedDistanceKm);
+        const stopIntervalKm = 400;
+        const stops = [] as Array<{ stop_number: number; at_distance_km: number; notes: string; label?: string }>;
+
+        let covered = stopIntervalKm;
+        let stopIndex = 1;
+
+        while (covered < distance) {
+          stops.push({
+            stop_number: stopIndex,
+            at_distance_km: covered,
+            notes: "Mandatory animal welfare rest stop (auto-planned).",
+            label: `Rest Stop ${stopIndex}`,
+          });
+          covered += stopIntervalKm;
+          stopIndex += 1;
+        }
+
+        return {
+          total_distance_km: distance,
+          stops,
+        };
+      };
+
+      const routePlanData: any = {
+        selected_route_id: params.selectedRouteId,
+        route_mode: params.routeMode ?? "fastest",
+        created_at: new Date().toISOString(),
+        optimization_provider: "OAASIS",
+      };
+      
+      if (params.selectedRouteData) {
+        routePlanData.route = {
+          id: params.selectedRouteData.id,
+          waypoints: params.selectedRouteData.waypoints,
+          sequence: params.selectedRouteData.sequence,
+          distance_km: params.selectedRouteData.distance_km,
+          duration_min: params.selectedRouteData.duration_min,
+          estimated_cost: params.selectedRouteData.estimated_cost,
+        };
+
+        if (params.autoRestStops !== false && params.selectedRouteData.distance_km) {
+          const restStopPlan = buildRestStopPlan(params.selectedRouteData.distance_km);
+          routePlanData.rest_stops = restStopPlan.stops;
+          routePlanData.washouts = [];
+          routePlanData.feed_stops = [];
+        }
+      }
+      
+      await client.query(
+        `
+        INSERT INTO trip_route_plans (
+          trip_id,
+          plan_json,
+          compliance_status,
+          compliance_notes
+        )
+        VALUES ($1, $2::jsonb, 'pending', 'Route selected during manual trip creation')
+        ON CONFLICT (trip_id) DO UPDATE SET plan_json = $2::jsonb
+        `,
+        [
+          trip.id,
+          JSON.stringify(routePlanData),
+        ]
+      );
+    }
 
     await client.query("COMMIT");
     return { trip, tripLoads };

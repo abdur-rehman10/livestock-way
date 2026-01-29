@@ -5,12 +5,11 @@ import {
   fetchLoadById,
   type LoadDetail,
   API_BASE_URL,
-  fetchTripExpenses,
   fetchTripByLoadId,
   fetchTripRoutePlan,
   type TripRoutePlan,
 } from "../lib/api";
-import type { TripExpense, TripRecord, Payment } from "../lib/types";
+import type { TripRecord, Payment } from "../lib/types";
 import { storage, STORAGE_KEYS } from "../lib/storage";
 import { normalizeLoadStatus, formatLoadStatusLabel } from "../lib/status";
 import { getPaymentByTrip } from "../api/payments";
@@ -63,9 +62,10 @@ export function TripTracking() {
   const [trip, setTrip] = useState<TripRecord | null>(null);
   const [tripLoading, setTripLoading] = useState(true);
   const [tripError, setTripError] = useState<string | null>(null);
-  const [expenses, setExpenses] = useState<TripExpense[]>([]);
-  const [expensesLoading, setExpensesLoading] = useState(true);
-  const [expensesError, setExpensesError] = useState<string | null>(null);
+  // Trip expenses feature is disabled for now
+  // const [expenses, setExpenses] = useState<TripExpense[]>([]);
+  // const [expensesLoading, setExpensesLoading] = useState(true);
+  // const [expensesError, setExpensesError] = useState<string | null>(null);
   const [payment, setPayment] = useState<Payment | null>(null);
   const [paymentLoading, setPaymentLoading] = useState(false);
   const [paymentError, setPaymentError] = useState<string | null>(null);
@@ -111,6 +111,42 @@ export function TripTracking() {
       return waypoint;
     }).filter(Boolean);
   }, [selectedRoute]);
+
+  // Build map markers for all waypoints (origin, destination, pickups, dropoffs)
+  const mapMarkers = useMemo(() => {
+    if (!routeWaypoints.length) return [];
+    return routeWaypoints
+      .filter((waypoint: any) => waypoint?.location?.lat && waypoint?.location?.lng)
+      .map((waypoint: any) => {
+        const type =
+          waypoint.type === "origin" ||
+          waypoint.type === "destination" ||
+          waypoint.type === "pickup" ||
+          waypoint.type === "dropoff"
+            ? waypoint.type
+            : "other";
+
+        let label: string;
+        if (type === "origin") {
+          label = "Origin";
+        } else if (type === "destination") {
+          label = "Destination";
+        } else if (type === "pickup") {
+          label = `Pickup: ${waypoint.location?.text || ""}`;
+        } else if (type === "dropoff") {
+          label = `Dropoff: ${waypoint.location?.text || ""}`;
+        } else {
+          label = waypoint.location?.text || "Waypoint";
+        }
+
+        return {
+          lat: waypoint.location.lat,
+          lng: waypoint.location.lng,
+          type,
+          label,
+        };
+      });
+  }, [routeWaypoints]);
 
   // Extract rest stops, washouts, and feed stops from route plan
   const restStops = useMemo(() => {
@@ -232,48 +268,7 @@ export function TripTracking() {
     };
   }, [load?.id]);
 
-  useEffect(() => {
-    const currentTripId = tripId;
-
-    if (!currentTripId) {
-      setExpenses([]);
-      setExpensesLoading(false);
-      setPayment(null);
-      setPaymentLoading(false);
-      setPaymentError(null);
-      return;
-    }
-
-    const safeTripId: number = currentTripId;
-
-    let cancelled = false;
-    async function loadExpenses() {
-      try {
-        setExpensesLoading(true);
-        setExpensesError(null);
-        const data = await fetchTripExpenses(safeTripId);
-        if (!cancelled) {
-          setExpenses(data);
-        }
-      } catch (err: any) {
-        console.error("Error loading trip expenses", err);
-        if (!cancelled) {
-          setExpensesError(
-            err?.message || "Failed to load expenses for this trip."
-          );
-        }
-      } finally {
-        if (!cancelled) {
-          setExpensesLoading(false);
-        }
-      }
-    }
-
-    loadExpenses();
-    return () => {
-      cancelled = true;
-    };
-  }, [tripId]);
+  // Trip expenses feature disabled: do not load expenses
 
   useEffect(() => {
     if (!tripId) {
@@ -581,8 +576,8 @@ export function TripTracking() {
 
             {/* Route Map */}
             {routeCoordinates.length > 0 && (
-              <div className="rounded-md border border-gray-200 overflow-hidden" style={{ height: '400px' }}>
-                <RouteMap coordinates={routeCoordinates} />
+              <div className="rounded-md border border-gray-200 overflow-hidden" style={{ height: "400px" }}>
+                <RouteMap coordinates={routeCoordinates} markers={mapMarkers} />
               </div>
             )}
 
@@ -693,53 +688,7 @@ export function TripTracking() {
         </Card>
       )}
 
-      {/* Expenses */}
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-sm">Trip Expenses</CardTitle>
-        </CardHeader>
-        <CardContent>
-          {expensesLoading ? (
-            <div className="text-sm text-gray-500">Loading expenses…</div>
-          ) : expensesError ? (
-            <div className="text-sm text-rose-600">{expensesError}</div>
-          ) : expenses.length > 0 ? (
-            <div className="space-y-2">
-              {expenses.map((expense) => (
-                <div
-                  key={expense.id}
-                  className="flex items-center justify-between rounded border border-gray-200 bg-white px-3 py-2"
-                >
-                  <div>
-                    <div className="text-xs font-medium text-gray-900">
-                      {expense.expense_type.charAt(0).toUpperCase() + expense.expense_type.slice(1)}
-                    </div>
-                    {expense.description && (
-                      <div className="text-[10px] text-gray-500">{expense.description}</div>
-                    )}
-                  </div>
-                  <div className="text-xs font-semibold text-gray-900">
-                    {expense.currency || "USD"} {Number(expense.amount).toLocaleString()}
-                  </div>
-                </div>
-              ))}
-              <div className="pt-2 border-t border-gray-200">
-                <div className="flex items-center justify-between text-xs font-semibold text-gray-900">
-                  <span>Total Expenses</span>
-                  <span>
-                    {expenses[0]?.currency || "USD"}{" "}
-                    {expenses
-                      .reduce((sum, e) => sum + Number(e.amount), 0)
-                      .toLocaleString()}
-                  </span>
-                </div>
-              </div>
-            </div>
-          ) : (
-            <div className="text-sm text-gray-500">No expenses recorded yet.</div>
-          )}
-        </CardContent>
-      </Card>
+      {/* Trip Expenses section removed (feature disabled) */}
 
       {/* Payment Details */}
       <Card>

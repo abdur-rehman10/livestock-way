@@ -1098,6 +1098,86 @@ router.post(
 
 // IMPORTANT: This route must come BEFORE /trips/:tripId to avoid route conflicts
 router.post(
+  "/trips/create-manual",
+  authRequired,
+  async (req, res) => {
+    try {
+      const authUser = getAuthUser(req);
+      if (!isHaulerUser(authUser)) {
+        return res.status(403).json({ error: "Only haulers can create manual trips" });
+      }
+      const userId = String(authUser.id ?? "");
+      const haulerId = await resolveHaulerId(authUser);
+      if (!haulerId) {
+        return res.status(400).json({ error: "Hauler profile not found" });
+      }
+
+      const {
+        truck_id,
+        driver_id,
+        pickup_date_time,
+        delivery_date_time,
+        trip_title,
+        route_mode,
+        auto_rest_stops,
+        selected_route_id,
+        selected_route_data,
+        manual_loads,
+      } = req.body;
+
+      if (!truck_id) {
+        return res.status(400).json({ error: "truck_id is required" });
+      }
+      if (!Array.isArray(manual_loads) || manual_loads.length === 0) {
+        return res.status(400).json({ error: "At least one manual load is required" });
+      }
+      if (!pickup_date_time || !delivery_date_time) {
+        return res.status(400).json({ error: "pickup_date_time and delivery_date_time are required" });
+      }
+
+      // Validate manual loads
+      for (const load of manual_loads) {
+        if (!load.origin || !load.destination || !load.species || !load.quantity || !load.receiver_phone) {
+          return res.status(400).json({ error: "Each manual load must have origin, destination, species, quantity, and receiver_phone" });
+        }
+      }
+
+      const { createManualTrip } = require("../services/marketplaceService");
+      const result = await createManualTrip({
+        haulerId,
+        haulerUserId: userId,
+        truckId: String(truck_id),
+        driverId: driver_id ? String(driver_id) : null,
+        pickupDateTime: pickup_date_time,
+        deliveryDateTime: delivery_date_time,
+        tripTitle: trip_title ?? null,
+        routeMode: route_mode ?? "fastest",
+        autoRestStops: auto_rest_stops ?? true,
+        selectedRouteId: selected_route_id ?? null,
+        selectedRouteData: selected_route_data ?? null,
+        manualLoads: manual_loads.map((load: any) => ({
+          origin: load.origin,
+          destination: load.destination,
+          species: load.species,
+          quantity: Number(load.quantity),
+          receiverPhone: load.receiver_phone,
+          pickupLat: load.pickup_lat ?? null,
+          pickupLng: load.pickup_lng ?? null,
+          dropoffLat: load.dropoff_lat ?? null,
+          dropoffLng: load.dropoff_lng ?? null,
+        })),
+      });
+
+      return res.status(201).json({ trip: result.trip, trip_loads: result.tripLoads });
+    } catch (err: any) {
+      console.error("Error in POST /api/marketplace/trips/create-manual:", err);
+      return res.status(400).json({ error: err?.message ?? "Failed to create manual trip" });
+    }
+  }
+);
+
+// IMPORTANT: This route must come BEFORE /trips/:tripId to avoid route conflicts
+router.post(
   "/trips/create-from-listing",
   authRequired,
   async (req, res) => {
