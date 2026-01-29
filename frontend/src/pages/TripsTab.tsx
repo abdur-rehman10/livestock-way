@@ -62,6 +62,14 @@ interface Trip {
   rating?: number;
 }
 
+/** Manual trips and released payments show as "Confirmed" */
+function formatPaymentStatusLabel(status: string | null | undefined): string {
+  if (!status) return 'Pending';
+  const u = status.toUpperCase();
+  if (u === 'RELEASED_TO_HAULER' || u === 'NOT_APPLICABLE') return 'Confirmed';
+  return status.replace(/_/g, ' ');
+}
+
 interface TripsTabProps {
   onViewTrip?: (trip: Trip) => void;
   role?: 'shipper' | 'hauler' | 'driver';
@@ -905,17 +913,6 @@ export function TripsTab({ onViewTrip, role = 'hauler' }: TripsTabProps) {
                 View Escrow
               </Button>
             )}
-            {trip.routePlanAvailable && !trip.isWaitingForTrip && (
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => navigate(`/shipper/trips/${trip.loadId}/route-plan`)}
-                className="px-3 py-1 text-xs"
-              >
-                <Navigation className="w-3 h-3 mr-1" />
-                View Plan
-              </Button>
-            )}
             {trip.rawStatus === 'DELIVERED_AWAITING_CONFIRMATION' && (
               <Button
                 size="sm"
@@ -1066,7 +1063,7 @@ export function TripsTab({ onViewTrip, role = 'hauler' }: TripsTabProps) {
             </div>
             <div className="bg-gray-50 p-2 rounded">
               <p className="text-gray-500 mb-1">Payment</p>
-              <p className="font-medium">{trip.paymentStatus ?? 'Pending'}</p>
+              <p className="font-medium">{formatPaymentStatusLabel(trip.paymentStatus)}</p>
             </div>
           </div>
 
@@ -1117,17 +1114,6 @@ export function TripsTab({ onViewTrip, role = 'hauler' }: TripsTabProps) {
               >
                 <Navigation className="w-3 h-3 mr-1" />
                 {routePlanLoadingId === trip.id ? 'Generating…' : 'Generate Plan'}
-              </Button>
-            )}
-            {trip.routePlanAvailable && (
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => navigate(`/hauler/trips/${trip.loadId}/route-plan`)}
-                className="px-3 py-1 text-xs"
-              >
-                <Navigation className="w-3 h-3 mr-1" />
-                View Plan
               </Button>
             )}
             <Button

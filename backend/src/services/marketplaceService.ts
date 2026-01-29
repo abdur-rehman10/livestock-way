@@ -3105,7 +3105,7 @@ export async function listTripsForShipper(shipperId: string): Promise<ShipperTri
 }
 
 export async function listTripsForHauler(haulerId: string): Promise<HaulerTripSummary[]> {
-  // Only show actual trips, not confirmed contracts without trips
+  // Only return trips for this hauler (t.hauler_id = $1); each hauler sees only their own trips
   const result = await pool.query<ShipperTripRow>(
     `
       SELECT
@@ -3224,6 +3224,7 @@ export async function listTripsForHauler(haulerId: string): Promise<HaulerTripSu
   );
 
   return result.rows.map((row) => {
+    const hasContract = row.contract_id != null;
     const trip = mapTripRow({
       id: row.id,
       load_id: row.load_id,
@@ -3320,7 +3321,8 @@ export async function listTripsForHauler(haulerId: string): Promise<HaulerTripSu
             truck_type: row.truck_type,
           }
         : null,
-      payment_status: row.payment_status,
+      // Manual trips (no contract) always show payment as confirmed
+      payment_status: hasContract ? (row.payment_status ?? null) : "RELEASED_TO_HAULER",
       route_plan_id: row.route_plan_id ? String(row.route_plan_id) : null,
       latest_location:
         row.latest_lat !== null && row.latest_lat !== undefined &&

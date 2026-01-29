@@ -2442,6 +2442,7 @@ router.get(
       if (!isHaulerUser(authUser)) {
         return res.status(403).json({ error: "Only haulers can access trips" });
       }
+      // Only use the authenticated hauler's id – each hauler sees only their own trips
       const haulerIdResolved = await resolveHaulerId(authUser);
       if (!haulerIdResolved) {
         return res.status(400).json({ error: "Unable to resolve hauler profile" });
