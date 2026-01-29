@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
 import React, { useEffect, useState, useMemo, useCallback } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import {
@@ -460,16 +461,16 @@ export function TripTracking() {
               <span className="font-medium">Delivered:</span>{" "}
               {formatDateTime(load.completed_at)}
             </div>
-            {marketplaceTrip?.actual_start_time && (
+            {(marketplaceTrip as any)?.actual_start_time && (
               <div>
                 <span className="font-medium">Actual Start:</span>{" "}
-                {formatDateTime(marketplaceTrip.actual_start_time)}
+                {formatDateTime((marketplaceTrip as any).actual_start_time)}
               </div>
             )}
-            {marketplaceTrip?.actual_end_time && (
+            {(marketplaceTrip as any)?.actual_end_time && (
               <div>
                 <span className="font-medium">Actual End:</span>{" "}
-                {formatDateTime(marketplaceTrip.actual_end_time)}
+                {formatDateTime((marketplaceTrip as any).actual_end_time)}
               </div>
             )}
           </CardContent>
@@ -490,12 +491,6 @@ export function TripTracking() {
             <div>
               <div className="font-medium">Dropoff Location</div>
               <div className="text-gray-600">{load.dropoff_location ?? "—"}</div>
-            </div>
-            <div>
-              <div className="font-medium">Weight</div>
-              <div className="text-gray-600">
-                {load.weight ? `${load.weight} kg` : "—"}
-              </div>
             </div>
             <div>
               <div className="font-medium">Description</div>
@@ -717,10 +712,10 @@ export function TripTracking() {
                 >
                   <div>
                     <div className="text-xs font-medium text-gray-900">
-                      {expense.type.charAt(0).toUpperCase() + expense.type.slice(1)}
+                      {expense.expense_type.charAt(0).toUpperCase() + expense.expense_type.slice(1)}
                     </div>
-                    {expense.note && (
-                      <div className="text-[10px] text-gray-500">{expense.note}</div>
+                    {expense.description && (
+                      <div className="text-[10px] text-gray-500">{expense.description}</div>
                     )}
                   </div>
                   <div className="text-xs font-semibold text-gray-900">

@@ -400,7 +400,7 @@ export function TripsTab({ onViewTrip, role = 'hauler' }: TripsTabProps) {
 
       const normalizedStatus = summary.trip.status?.toUpperCase?.() ?? '';
       const tripStatus = toStatus(summary.trip.status, summary.trip.id, summary.contract?.id ?? null);
-      const isWaitingForTrip = tripStatus === 'waiting-for-trip' || summary.trip.status === 'WAITING_FOR_TRIP' || (!summary.trip.status && summary.contract?.id);
+      const isWaitingForTrip: boolean = tripStatus === 'waiting-for-trip' || summary.trip.status === 'WAITING_FOR_TRIP' || (!summary.trip.status && !!summary.contract?.id);
       
       return {
         id: summary.trip.id,
@@ -883,7 +883,7 @@ export function TripsTab({ onViewTrip, role = 'hauler' }: TripsTabProps) {
           )}
 
           <div className="flex gap-2 flex-wrap">
-            {editable && trip.status === 'scheduled' && !trip.isWaitingForTrip && trip.status !== 'waiting-for-trip' && (
+            {editable && trip.status === 'scheduled' && !trip.isWaitingForTrip && (
               <Button
                 variant="outline"
                 size="sm"

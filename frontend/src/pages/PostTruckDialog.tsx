@@ -327,12 +327,11 @@ export function PostTruckDialog({ open, onOpenChange, onPosted }: PostTruckDialo
                     selected={dateRange}
                     onSelect={(range) => {
                       if (range) {
-                        setDateRange(range);
+                        setDateRange({ from: range.from, to: range.to });
                       }
                     }}
                     initialFocus
                     numberOfMonths={2}
-                    hidden={{}}
                   />
                 </PopoverContent>
               </Popover>

@@ -1522,16 +1522,16 @@ export function HaulerTripView() {
                             </span>
                           </div>
                         </div>
-                        {pay.funded_at && (
+                        {(pay as any).funded_at && (
                           <div className="text-xs text-gray-600">
                             <span className="text-gray-500">Funded:</span>{" "}
-                            {formatDateTime(pay.funded_at)}
+                            {formatDateTime((pay as any).funded_at)}
                           </div>
                         )}
-                        {pay.released_at && (
+                        {(pay as any).released_at && (
                           <div className="text-xs text-gray-600">
                             <span className="text-gray-500">Released:</span>{" "}
-                            {formatDateTime(pay.released_at)}
+                            {formatDateTime((pay as any).released_at)}
                           </div>
                         )}
                       </div>
