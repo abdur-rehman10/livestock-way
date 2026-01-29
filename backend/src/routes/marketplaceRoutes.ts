@@ -33,6 +33,7 @@ import {
   getLoadOfferById,
   getLatestOfferForHauler,
   getPaymentForTrip,
+  getAllPaymentsForTrip,
   getDirectPaymentForTrip,
   getPaymentById,
   getPaymentByIntentId,
@@ -166,8 +167,13 @@ router.get(
         originSearch?: string;
         near?: { lat: number; lng: number; radiusKm: number };
         limit?: number;
+        includeInactive?: boolean;
       } = {};
-      if (haulerId) options.haulerId = haulerId;
+      if (haulerId) {
+        options.haulerId = haulerId;
+        // When viewing "mine", include inactive listings so hauler can see all their listings
+        options.includeInactive = onlyMine;
+      }
       if (origin) options.originSearch = origin;
       if (nearLat !== undefined && nearLng !== undefined) {
         options.near = {
@@ -1115,6 +1121,8 @@ router.post(
         trip_title,
         route_mode,
         auto_rest_stops,
+        selected_route_id,
+        selected_route_data,
       } = req.body;
 
       if (!truck_availability_id) {
@@ -1138,6 +1146,8 @@ router.post(
         tripTitle: trip_title ?? null,
         routeMode: route_mode ?? "fastest",
         autoRestStops: auto_rest_stops ?? true,
+        selectedRouteId: selected_route_id ?? null,
+        selectedRouteData: selected_route_data ?? null,
       });
 
       return res.status(201).json({ trip: result.trip, trip_loads: result.tripLoads });
@@ -1178,11 +1188,12 @@ router.get("/trips/:tripId", authRequired, async (req, res) => {
       return res.status(403).json({ error: "Forbidden" });
     }
     const payment = await getPaymentForTrip(context.trip.id);
+    const allPayments = await getAllPaymentsForTrip(context.trip.id);
     const direct_payment =
       context.trip.payment_mode === "DIRECT"
         ? await getDirectPaymentForTrip(context.trip.id)
         : null;
-    return res.json({ trip: context.trip, load: context.load, payment, direct_payment });
+    return res.json({ trip: context.trip, load: context.load, payment, payments: allPayments, direct_payment });
   } catch (err) {
     console.error("getTrip error", err);
     res.status(500).json({ error: "Failed to load trip" });
@@ -1217,6 +1228,20 @@ router.get("/loads/:loadId/trip", authRequired, async (req, res) => {
   } catch (err) {
     console.error("getTripByLoad error", err);
     res.status(500).json({ error: "Failed to load trip by load id" });
+  }
+});
+
+router.get("/trips/:tripId/payments", authRequired, async (req, res) => {
+  try {
+    const tripId = req.params.tripId;
+    if (!tripId) {
+      return res.status(400).json({ error: "Missing tripId" });
+    }
+    const payments = await getAllPaymentsForTrip(tripId);
+    return res.json({ payments });
+  } catch (err) {
+    console.error("getAllPaymentsForTrip error", err);
+    res.status(500).json({ error: "Failed to load payments for trip" });
   }
 });
 
@@ -2503,6 +2528,8 @@ router.post(
       let resolvedLoadId = loadId;
       let resolvedOfferId = offerId;
       let resolvedHaulerId: string | null = null;
+      let resolvedBookingId = bookingId;
+      
       if (bookingId) {
         const booking = await getBookingById(bookingId);
         if (!booking) {
@@ -2532,6 +2559,26 @@ router.post(
         resolvedLoadId = loadId;
         resolvedOfferId = offerId;
         resolvedHaulerId = offer.hauler_id;
+        
+        // Check if there's already a booking for this offer/load to reuse existing thread
+        // This prevents creating duplicate threads when a contract is created
+        const existingBooking = await pool.query(
+          `
+            SELECT id
+            FROM load_bookings
+            WHERE load_id = $1
+              AND offer_id = $2
+              AND shipper_id = $3
+            ORDER BY created_at ASC
+            LIMIT 1
+          `,
+          [resolvedLoadId, resolvedOfferId, shipperIdResolved]
+        );
+        
+        if (existingBooking.rows.length > 0) {
+          // Use existing booking to avoid creating duplicate thread
+          resolvedBookingId = String(existingBooking.rows[0].id);
+        }
       }
       if (!resolvedLoadId || !resolvedHaulerId) {
         return res.status(400).json({ error: "Missing contract identifiers" });
@@ -2540,7 +2587,7 @@ router.post(
       const contract = await createContract({
         loadId: resolvedLoadId,
         offerId: resolvedOfferId,
-        bookingId,
+        bookingId: resolvedBookingId,
         shipperId: shipperIdResolved,
         haulerId: resolvedHaulerId,
         status,

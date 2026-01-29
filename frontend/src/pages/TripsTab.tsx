@@ -261,7 +261,7 @@ export function TripsTab({ onViewTrip, role = 'hauler' }: TripsTabProps) {
     );
   };
 
-  type ShipperTripStatus = 'scheduled' | 'in-progress' | 'completed';
+  type ShipperTripStatus = 'scheduled' | 'in-progress' | 'completed' | 'waiting-for-trip';
 
   interface ShipperTrip {
     id: string;
@@ -291,6 +291,7 @@ export function TripsTab({ onViewTrip, role = 'hauler' }: TripsTabProps) {
       plateNumber: string;
     };
     currentLocation?: string;
+    isWaitingForTrip?: boolean;
     progress?: number;
     notes?: string;
   }
@@ -353,8 +354,25 @@ export function TripsTab({ onViewTrip, role = 'hauler' }: TripsTabProps) {
       return typeof value === 'string' && value.trim().length > 0 ? value : null;
     };
 
-    const toStatus = (status: string): ShipperTripStatus => {
-      const normalized = status.toUpperCase();
+    const toStatus = (status: string | null | undefined, tripId: string, contractId: string | null): ShipperTripStatus => {
+      // Check if this is a contract waiting for trip creation
+      // If trip status is null/undefined/WAITING_FOR_TRIP and we have a contract, it's waiting
+      const normalized = (status ?? '').toUpperCase();
+      
+      // If we have a contract ID and the status indicates waiting or is empty/null
+      if (contractId) {
+        // Check if trip ID matches contract ID (backend uses contract ID as trip ID for contracts without trips)
+        const tripIdStr = String(tripId);
+        const contractIdStr = String(contractId);
+        
+        if (normalized === 'WAITING_FOR_TRIP' || 
+            !status || 
+            normalized === '' ||
+            tripIdStr === contractIdStr) {
+          return 'waiting-for-trip';
+        }
+      }
+      
       if (['IN_PROGRESS', 'DELIVERED_AWAITING_CONFIRMATION', 'DISPUTED'].includes(normalized)) {
         return 'in-progress';
       }
@@ -378,13 +396,16 @@ export function TripsTab({ onViewTrip, role = 'hauler' }: TripsTabProps) {
         summary.contract?.price_amount ??
         summary.load.price_offer_amount ??
         '0';
-    const haulerSource = summary.hauler;
+      const haulerSource = summary.hauler;
 
       const normalizedStatus = summary.trip.status?.toUpperCase?.() ?? '';
+      const tripStatus = toStatus(summary.trip.status, summary.trip.id, summary.contract?.id ?? null);
+      const isWaitingForTrip = tripStatus === 'waiting-for-trip' || summary.trip.status === 'WAITING_FOR_TRIP' || (!summary.trip.status && summary.contract?.id);
+      
       return {
         id: summary.trip.id,
-        status: toStatus(summary.trip.status ?? ''),
-        rawStatus: normalizedStatus,
+        status: tripStatus,
+        rawStatus: isWaitingForTrip ? 'WAITING_FOR_TRIP' : normalizedStatus,
         escrowRequired: normalizedStatus === 'PENDING_ESCROW',
         routePlanAvailable: Boolean(summary.route_plan_id),
         paymentStatus: summary.payment_status ?? null,
@@ -412,6 +433,7 @@ export function TripsTab({ onViewTrip, role = 'hauler' }: TripsTabProps) {
               plateNumber: summary.truck.plate_number ?? '—',
             }
           : undefined,
+        isWaitingForTrip, // Flag to identify contracts waiting for trip creation
       };
     });
   }, [shipperTripSummaries]);
@@ -658,7 +680,7 @@ export function TripsTab({ onViewTrip, role = 'hauler' }: TripsTabProps) {
   };
 
   const shipperActiveTrips = shipperTrips.filter((t) => t.status === 'in-progress');
-  const shipperUpcomingTrips = shipperTrips.filter((t) => t.status === 'scheduled');
+  const shipperUpcomingTrips = shipperTrips.filter((t) => t.status === 'scheduled' || t.status === 'waiting-for-trip');
   const shipperCompletedTrips = shipperTrips.filter((t) => t.status === 'completed');
 
   const haulerAllTrips = haulerTrips;
@@ -703,19 +725,28 @@ export function TripsTab({ onViewTrip, role = 'hauler' }: TripsTabProps) {
           <div className="flex items-start justify-between gap-2 mb-3">
             <div className="flex-1 min-w-0">
               <div className="flex items-center gap-2 mb-1 flex-wrap">
-                <h3 className="text-sm md:text-base">Trip #{trip.id}</h3>
+                <h3 className="text-sm md:text-base">
+                  {trip.isWaitingForTrip ? `Contract #${trip.id}` : `Trip #${trip.id}`}
+                </h3>
                 <Badge
                   className={`px-2 py-0.5 text-xs ${
-                    trip.status === 'in-progress'
-                      ? 'bg-blue-100 text-blue-700'
-                      : trip.status === 'scheduled'
-                        ? 'bg-yellow-100 text-yellow-700'
-                        : trip.rawStatus === 'DELIVERED_AWAITING_CONFIRMATION'
-                          ? 'bg-amber-100 text-amber-700'
-                          : 'bg-green-100 text-green-700'
+                    trip.status === 'waiting-for-trip'
+                      ? 'bg-orange-100 text-orange-700'
+                      : trip.status === 'in-progress'
+                        ? 'bg-blue-100 text-blue-700'
+                        : trip.status === 'scheduled'
+                          ? 'bg-yellow-100 text-yellow-700'
+                          : trip.rawStatus === 'DELIVERED_AWAITING_CONFIRMATION'
+                            ? 'bg-amber-100 text-amber-700'
+                            : 'bg-green-100 text-green-700'
                   }`}
                 >
-                  {trip.status === 'in-progress' ? (
+                  {trip.status === 'waiting-for-trip' ? (
+                    <>
+                      <Clock className="w-3 h-3 mr-1" />
+                      Waiting for Trip Creation
+                    </>
+                  ) : trip.status === 'in-progress' ? (
                     <>
                       <PlayCircle className="w-3 h-3 mr-1" />
                       In Progress
@@ -826,6 +857,22 @@ export function TripsTab({ onViewTrip, role = 'hauler' }: TripsTabProps) {
             </div>
           </div>
 
+          {trip.isWaitingForTrip && (
+            <div className="bg-orange-50 border border-orange-200 rounded-lg p-3 mb-3">
+              <div className="flex items-start gap-2">
+                <AlertCircle className="w-4 h-4 text-orange-600 mt-0.5 flex-shrink-0" />
+                <div className="flex-1">
+                  <p className="text-sm font-medium text-orange-900 mb-1">
+                    Waiting for hauler to create trip
+                  </p>
+                  <p className="text-xs text-orange-700">
+                    Your contract has been confirmed. The hauler will create a trip soon. You'll be notified when the trip is created.
+                  </p>
+                </div>
+              </div>
+            </div>
+          )}
+
           {trip.notes && (
             <div className="bg-blue-50 p-2 rounded mb-3">
               <p className="text-xs text-blue-700">
@@ -836,7 +883,7 @@ export function TripsTab({ onViewTrip, role = 'hauler' }: TripsTabProps) {
           )}
 
           <div className="flex gap-2 flex-wrap">
-            {editable && trip.status === 'scheduled' && (
+            {editable && trip.status === 'scheduled' && !trip.isWaitingForTrip && trip.status !== 'waiting-for-trip' && (
               <Button
                 variant="outline"
                 size="sm"
@@ -847,7 +894,7 @@ export function TripsTab({ onViewTrip, role = 'hauler' }: TripsTabProps) {
                 Edit
               </Button>
             )}
-            {trip.escrowRequired && (
+            {trip.escrowRequired && !trip.isWaitingForTrip && (
               <Button
                 variant="outline"
                 size="sm"
@@ -858,7 +905,7 @@ export function TripsTab({ onViewTrip, role = 'hauler' }: TripsTabProps) {
                 View Escrow
               </Button>
             )}
-            {trip.routePlanAvailable && (
+            {trip.routePlanAvailable && !trip.isWaitingForTrip && (
               <Button
                 variant="outline"
                 size="sm"
@@ -889,24 +936,37 @@ export function TripsTab({ onViewTrip, role = 'hauler' }: TripsTabProps) {
               <MessageSquare className="w-3 h-3 mr-1" />
               Message
             </Button>
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => handleCall(trip.shipper)}
-              className="px-3 py-1 text-xs"
-            >
-              <Phone className="w-3 h-3 mr-1" />
-              Call
-            </Button>
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => toast.info(`Dispute flow for Trip #${trip.id} coming soon.`)}
-              className="px-3 py-1 text-xs border-red-200 text-red-600 hover:bg-red-50"
-            >
-              <Flag className="w-3 h-3 mr-1" />
-              Dispute
-            </Button>
+            {!trip.isWaitingForTrip && (
+              <>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => handleCall(trip.shipper)}
+                  className="px-3 py-1 text-xs"
+                >
+                  <Phone className="w-3 h-3 mr-1" />
+                  Call
+                </Button>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => navigate(`/shipper/trips/${trip.loadId}`)}
+                  className="px-3 py-1 text-xs"
+                >
+                  <Eye className="w-3 h-3 mr-1" />
+                  View Details
+                </Button>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => toast.info(`Dispute flow for Trip #${trip.id} coming soon.`)}
+                  className="px-3 py-1 text-xs border-red-200 text-red-600 hover:bg-red-50"
+                >
+                  <Flag className="w-3 h-3 mr-1" />
+                  Dispute
+                </Button>
+              </>
+            )}
           </div>
         </div>
       </div>
@@ -1198,18 +1258,6 @@ export function TripsTab({ onViewTrip, role = 'hauler' }: TripsTabProps) {
           yearlyPrice={yearlyPrice ?? undefined}
           onUpgradeClick={() => (window.location.href = '/hauler/subscription')}
         />
-      )}
-      {role === 'hauler' && (
-        <div className="flex justify-end">
-          <Button
-            onClick={() => setCreateTripModalOpen(true)}
-            style={{ backgroundColor: '#53ca97', color: 'white' }}
-            className="flex items-center gap-2"
-          >
-            <Plus className="w-4 h-4" />
-            Create New Trip
-          </Button>
-        </div>
       )}
       <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as any)} className="w-full">
         {role === 'hauler' ? (

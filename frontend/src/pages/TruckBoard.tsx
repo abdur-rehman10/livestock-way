@@ -454,6 +454,10 @@ export default function TruckBoard() {
       setRequestDialog((prev) => ({ ...prev, error: "Enter an offer amount." }));
       return;
     }
+    // Prevent multiple submissions
+    if (requestDialog.submitting) {
+      return;
+    }
     const key = `${requestDialog.listing.id}-${requestDialog.load.id}`;
     if (requestedPairs.has(key)) {
       setRequestDialog((prev) => ({ ...prev, error: "You already requested this truck for that load." }));
@@ -483,8 +487,6 @@ export default function TruckBoard() {
         detail: { bookingId: Number(booking.id) }
       }));
       navigate("/shipper/messages");
-      updateInterest(requestDialog.listing.id, "message", "");
-      toast.success("Request submitted. Opening messages...");
       updateInterest(requestDialog.listing.id, "message", "");
       toast.success("Request submitted. Opening messages...");
       setRequestDialog({

@@ -178,6 +178,7 @@ export interface TripEnvelope {
   trip: TripRecord | null;
   load: TripEnvelopeLoad;
   payment: PaymentRecord | null;
+  payments?: PaymentRecord[];
   direct_payment?: {
     id: string;
     trip_id: string;
@@ -328,6 +329,25 @@ export async function createMultiLoadTrip(payload: {
   trip_title?: string | null;
   route_mode?: "fastest" | "shortest" | "avoid-tolls";
   auto_rest_stops?: boolean;
+  selected_route_id?: string | null;
+  selected_route_data?: {
+    id: string;
+    waypoints: Array<{
+      id: string;
+      type: 'origin' | 'pickup' | 'dropoff' | 'destination';
+      loadId?: string;
+      contractId?: string;
+      location: {
+        text: string;
+        lat: number | null;
+        lng: number | null;
+      };
+    }>;
+    sequence: string[];
+    distance_km?: number;
+    duration_min?: number;
+    estimated_cost?: number;
+  } | null;
 }) {
   return marketplaceRequest<{ trip: any; trip_loads: Array<{ id: string; load_id: string; contract_id: string | null; booking_id: string | null }> }>(
     `/trips/create-from-listing`,

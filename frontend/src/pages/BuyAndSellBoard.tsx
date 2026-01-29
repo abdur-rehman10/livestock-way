@@ -20,6 +20,7 @@ import {
 import { fetchBuySellThreadByListingAndApplication } from "../api/buySellMessages";
 import { toast } from "sonner";
 import { storage, STORAGE_KEYS } from "../lib/storage";
+import { API_BASE_URL } from "../lib/api";
 
 export default function BuyAndSellBoard() {
   const navigate = useNavigate();
@@ -244,9 +245,23 @@ export default function BuyAndSellBoard() {
                 </div>
               )}
 
-              {/* Image Placeholder */}
+              {/* Image */}
+              {listing.photos && listing.photos.length > 0 ? (
+                <img
+                  src={listing.photos[0].startsWith('http') ? listing.photos[0] : `${API_BASE_URL}${listing.photos[0]}`}
+                  alt={listing.title}
+                  className="h-40 w-full object-cover"
+                  onError={(e) => {
+                    // Fallback to placeholder if image fails to load
+                    const target = e.target as HTMLImageElement;
+                    target.style.display = 'none';
+                    const placeholder = target.nextElementSibling as HTMLElement;
+                    if (placeholder) placeholder.style.display = 'flex';
+                  }}
+                />
+              ) : null}
               <div 
-                className="h-40 flex items-center justify-center text-white"
+                className={`h-40 flex items-center justify-center text-white ${listing.photos && listing.photos.length > 0 ? 'hidden' : ''}`}
                 style={{ backgroundColor: "#53ca97" }}
               >
                 <DollarSign className="w-12 h-12 opacity-50" />

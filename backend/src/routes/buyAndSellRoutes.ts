@@ -156,11 +156,8 @@ router.get("/:id/my-application", authRequired, async (req: Request, res: Respon
     }
 
     const application = await getMyBuyAndSellApplication(listingId, userId);
-    if (!application) {
-      return res.status(404).json({ error: "Application not found" });
-    }
-
-    res.json({ application });
+    // Return 200 with null if no application exists (user hasn't applied yet)
+    res.json({ application: application || null });
   } catch (err: any) {
     console.error("Error getting application:", err);
     res.status(500).json({ error: err?.message ?? "Failed to load application" });

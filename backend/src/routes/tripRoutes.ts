@@ -1666,6 +1666,8 @@ router.post(
         trip_title,
         route_mode,
         auto_rest_stops,
+        selected_route_id,
+        selected_route_data,
       } = req.body;
 
       if (!truck_availability_id) {
@@ -1690,12 +1692,127 @@ router.post(
         tripTitle: trip_title ?? null,
         routeMode: route_mode ?? "fastest",
         autoRestStops: auto_rest_stops ?? true,
+        selectedRouteId: selected_route_id ?? null,
+        selectedRouteData: selected_route_data ?? null,
       });
 
       return res.status(201).json({ trip: result.trip, trip_loads: result.tripLoads });
     } catch (err: any) {
       console.error("Error in POST /api/trips/create-from-listing:", err);
       return res.status(400).json({ error: err?.message ?? "Failed to create trip" });
+    }
+  }
+);
+
+// DELETE /api/trips/:id - Hard delete trip (hauler only, only for scheduled/ready trips)
+router.delete(
+  "/:id",
+  requireRoles(["hauler"]),
+  auditRequest("trip:delete", (req) => `trip:${req.params.id}`),
+  async (req: Request, res: Response) => {
+    try {
+      const authUser = (req as any).user;
+      if (!authUser?.id) {
+        return res.status(401).json({ error: "Unauthorized" });
+      }
+      const userId = String(authUser.id);
+      const haulerId = await pool.query(`SELECT id::text FROM haulers WHERE user_id = $1`, [userId]);
+      if (!haulerId.rows[0]?.id) {
+        return res.status(400).json({ error: "Hauler profile not found" });
+      }
+      const haulerIdStr = haulerId.rows[0].id;
+
+      const tripId = req.params.id;
+      if (!tripId) {
+        return res.status(400).json({ error: "Trip ID is required" });
+      }
+
+      // Get trip and verify ownership
+      const tripCheck = await pool.query(
+        `
+        SELECT id, hauler_id, status, truck_availability_id
+        FROM trips
+        WHERE id = $1
+        `,
+        [tripId]
+      );
+
+      if (tripCheck.rowCount === 0) {
+        return res.status(404).json({ error: "Trip not found" });
+      }
+
+      const trip = tripCheck.rows[0];
+      if (trip.hauler_id !== haulerIdStr) {
+        return res.status(403).json({ error: "You can only delete your own trips" });
+      }
+
+      // Allow deletion even with funded escrow payments - payments will be marked as refunded
+
+      const client = await pool.connect();
+      try {
+        await client.query("BEGIN");
+
+        // Reactivate truck availability if it was deactivated
+        if (trip.truck_availability_id) {
+          await client.query(
+            `
+            UPDATE truck_availability
+            SET is_active = TRUE,
+                updated_at = NOW()
+            WHERE id = $1
+            `,
+            [trip.truck_availability_id]
+          );
+        }
+
+        // Update payments first (before deleting trip, since trip_id will be set to NULL by cascade)
+        // Mark payments as cancelled/refunded if needed
+        await client.query(
+          `
+          UPDATE payments
+          SET trip_id = NULL,
+              status = CASE 
+                WHEN status = 'ESCROW_FUNDED' THEN 'REFUNDED_TO_SHIPPER'
+                WHEN status = 'AWAITING_FUNDING' THEN 'CANCELLED'
+                ELSE status
+              END,
+              updated_at = NOW()
+          WHERE trip_id = $1
+          `,
+          [tripId]
+        );
+
+        // Hard delete the trip (cascades to trip_loads, trip_route_plans, trip_locations, trip_expenses)
+        await client.query(
+          `
+          DELETE FROM trips
+          WHERE id = $1
+          `,
+          [tripId]
+        );
+
+        await client.query("COMMIT");
+
+        // Log audit event
+        await logAuditEvent({
+          userId: Number(userId),
+          userRole: "hauler",
+          action: "trip:delete",
+          eventType: "trip:delete",
+          resource: `trip:${tripId}`,
+          metadata: { trip_id: tripId, hauler_id: haulerIdStr },
+        });
+
+        res.status(204).send();
+      } catch (err) {
+        await client.query("ROLLBACK");
+        throw err;
+      } finally {
+        client.release();
+      }
+    } catch (err: any) {
+      console.error("Error in DELETE /api/trips/:id:", err);
+      return res.status(400).json({ error: err?.message ?? "Failed to delete trip" });
     }
   }
 );

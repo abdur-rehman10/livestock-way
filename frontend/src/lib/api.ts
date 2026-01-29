@@ -476,6 +476,7 @@ export async function deleteTripExpense(
     `${API_BASE_URL}/api/trips/${tripId}/expenses/${expenseId}`,
     {
       method: "DELETE",
+      headers: getAuthHeaders(),
     }
   );
   if (!response.ok) {
@@ -483,6 +484,27 @@ export async function deleteTripExpense(
     throw new Error(
       `Failed to delete trip expense (${response.status}): ${text || ""}`
     );
+  }
+}
+
+export async function deleteTrip(tripId: number): Promise<void> {
+  const response = await fetch(
+    `${API_BASE_URL}/api/trips/${tripId}`,
+    {
+      method: "DELETE",
+      headers: getAuthHeaders(),
+    }
+  );
+  if (!response.ok) {
+    const text = await response.text();
+    let errorMessage = `Failed to delete trip (status ${response.status})`;
+    try {
+      const errorData = JSON.parse(text);
+      errorMessage = errorData.error || errorMessage;
+    } catch {
+      errorMessage = text || errorMessage;
+    }
+    throw new Error(errorMessage);
   }
 }
 

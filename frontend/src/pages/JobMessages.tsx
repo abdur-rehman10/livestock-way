@@ -65,12 +65,19 @@ export default function JobMessages() {
   const loadThreads = useCallback(async () => {
     try {
       setLoading(true);
+      const isHauler = userRole === "hauler";
+      const isShipper = userRole === "shipper";
+      
+      // For haulers: fetch BOTH load offer threads (they apply to loads - requests sent)
+      //               AND truck booking threads (shippers apply to their trucks - requests received)
+      // For shippers: fetch BOTH load offer threads (when haulers apply to their loads) 
+      //               AND truck booking threads (when they apply to trucks)
       const [jobResult, buySellResult, resourcesResult, loadOfferResult, truckBookingResult] = await Promise.all([
         fetchUserThreads().catch(() => []),
         fetchUserBuySellThreads().catch(() => []),
         fetchUserResourcesThreads().catch(() => []),
-        fetchUserLoadOfferThreads().catch(() => []),
-        fetchUserTruckBookingThreads().catch(() => []),
+        (isHauler || isShipper) ? fetchUserLoadOfferThreads().catch(() => []) : Promise.resolve([]),
+        (isHauler || isShipper) ? fetchUserTruckBookingThreads().catch(() => []) : Promise.resolve([]),
       ]);
       setJobThreads(jobResult);
       setBuySellThreads(buySellResult);
@@ -84,7 +91,7 @@ export default function JobMessages() {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [userRole]);
 
   const allThreads: UnifiedThread[] = [
     ...jobThreads.map(t => ({ ...t, type: "job" as const })),
@@ -1763,13 +1770,49 @@ export default function JobMessages() {
                     )}
                     
                     {truckBookingDetails.truckAvailability && (
-                      <div className="col-span-2">
-                        <p className="text-xs text-gray-500 dark:text-gray-400">Truck Route</p>
-                        <p className="text-sm text-gray-900 dark:text-white">
-                          {truckBookingDetails.truckAvailability.origin_location_text}
-                          {truckBookingDetails.truckAvailability.destination_location_text ? ` → ${truckBookingDetails.truckAvailability.destination_location_text}` : ''}
-                        </p>
-                      </div>
+                      <>
+                        <div className="col-span-2">
+                          <p className="text-xs text-gray-500 dark:text-gray-400">Truck Listing Route</p>
+                          <p className="text-sm text-gray-900 dark:text-white font-medium">
+                            {truckBookingDetails.truckAvailability.origin_location_text}
+                            {truckBookingDetails.truckAvailability.destination_location_text ? ` → ${truckBookingDetails.truckAvailability.destination_location_text}` : ''}
+                          </p>
+                        </div>
+                        <div>
+                          <p className="text-xs text-gray-500 dark:text-gray-400">Available From</p>
+                          <p className="text-sm text-gray-900 dark:text-white">
+                            {truckBookingDetails.truckAvailability.available_from 
+                              ? new Date(truckBookingDetails.truckAvailability.available_from).toLocaleDateString("en-US", {
+                                  month: "short",
+                                  day: "numeric",
+                                  year: "numeric",
+                                })
+                              : "Not specified"}
+                          </p>
+                        </div>
+                        {truckBookingDetails.truckAvailability.available_until && (
+                          <div>
+                            <p className="text-xs text-gray-500 dark:text-gray-400">Available Until</p>
+                            <p className="text-sm text-gray-900 dark:text-white">
+                              {new Date(truckBookingDetails.truckAvailability.available_until).toLocaleDateString("en-US", {
+                                month: "short",
+                                day: "numeric",
+                                year: "numeric",
+                              })}
+                            </p>
+                          </div>
+                        )}
+                        {(truckBookingDetails.truckAvailability.capacity_headcount || truckBookingDetails.truckAvailability.capacity_weight_kg) && (
+                          <div className="col-span-2">
+                            <p className="text-xs text-gray-500 dark:text-gray-400">Capacity</p>
+                            <p className="text-sm text-gray-900 dark:text-white">
+                              {truckBookingDetails.truckAvailability.capacity_headcount && `${truckBookingDetails.truckAvailability.capacity_headcount} head`}
+                              {truckBookingDetails.truckAvailability.capacity_headcount && truckBookingDetails.truckAvailability.capacity_weight_kg && " • "}
+                              {truckBookingDetails.truckAvailability.capacity_weight_kg && `${Number(truckBookingDetails.truckAvailability.capacity_weight_kg).toLocaleString()} kg`}
+                            </p>
+                          </div>
+                        )}
+                      </>
                     )}
                     
                     {truckBookingDetails.truck && (
@@ -2229,10 +2272,10 @@ export default function JobMessages() {
                     )}
                   </div>
                   
-                  {/* Truck Availability Details Section */}
+                  {/* Truck Listing Details Section */}
                   {truckBookingDetails.truckAvailability && (
                     <div className="pt-4 border-t">
-                      <h4 className="mb-3 font-semibold text-lg">Truck Availability Details</h4>
+                      <h4 className="mb-3 font-semibold text-lg">Truck Listing Details</h4>
                       <div className="bg-gray-50 dark:bg-gray-800 rounded-lg p-4 space-y-3">
                         <div className="flex items-center gap-2 text-sm">
                           <MapPin className="w-4 h-4 text-gray-400" />
@@ -2247,11 +2290,13 @@ export default function JobMessages() {
                           <div>
                             <p className="text-xs text-gray-500 dark:text-gray-400 mb-1">Available From</p>
                             <p className="text-sm text-gray-900 dark:text-white font-medium">
-                              {new Date(truckBookingDetails.truckAvailability.available_from).toLocaleDateString("en-US", {
-                                year: "numeric",
-                                month: "short",
-                                day: "numeric",
-                              })}
+                              {truckBookingDetails.truckAvailability.available_from
+                                ? new Date(truckBookingDetails.truckAvailability.available_from).toLocaleDateString("en-US", {
+                                    year: "numeric",
+                                    month: "short",
+                                    day: "numeric",
+                                  })
+                                : "Not specified"}
                             </p>
                           </div>
                           {truckBookingDetails.truckAvailability.available_until && (
@@ -2282,11 +2327,19 @@ export default function JobMessages() {
                               </p>
                             </div>
                           )}
+                          {truckBookingDetails.truckAvailability.allow_shared !== undefined && (
+                            <div>
+                              <p className="text-xs text-gray-500 dark:text-gray-400 mb-1">Shared Loads</p>
+                              <p className="text-sm text-gray-900 dark:text-white font-medium">
+                                {truckBookingDetails.truckAvailability.allow_shared ? "Allowed" : "Not Allowed"}
+                              </p>
+                            </div>
+                          )}
                         </div>
                         {truckBookingDetails.truckAvailability.notes && (
                           <div className="pt-2 border-t">
-                            <p className="text-xs text-gray-500 dark:text-gray-400 mb-1">Notes</p>
-                            <p className="text-sm text-gray-900 dark:text-white">{truckBookingDetails.truckAvailability.notes}</p>
+                            <p className="text-xs text-gray-500 dark:text-gray-400 mb-1">Listing Notes</p>
+                            <p className="text-sm text-gray-900 dark:text-white whitespace-pre-wrap">{truckBookingDetails.truckAvailability.notes}</p>
                           </div>
                         )}
                       </div>

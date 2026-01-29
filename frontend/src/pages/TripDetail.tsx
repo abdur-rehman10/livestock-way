@@ -11,6 +11,7 @@ import {
   fetchTripByLoadId,
   fetchTripRoutePlan,
   generateTripRoutePlan,
+  deleteTrip,
   type TripRoutePlan,
 } from "../lib/api";
 import type { TripExpense, TripRecord, Payment } from "../lib/types";
@@ -47,6 +48,7 @@ import {
 } from "../components/ui/dialog";
 import { Badge } from "../components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "../components/ui/card";
+import { RouteMap } from "../components/RouteMap";
 
 
 const formatDateTime = (value?: string | null) => {
@@ -158,6 +160,8 @@ export function HaulerTripView() {
   const [directReference, setDirectReference] = useState("");
   const [directReceivedAt, setDirectReceivedAt] = useState("");
   const [directError, setDirectError] = useState<string | null>(null);
+  const [deletingTrip, setDeletingTrip] = useState(false);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
   const { isIndividualHauler, subscriptionStatus, freeTripUsed, monthlyPrice, yearlyPrice } =
     useHaulerSubscription();
   const marketplaceTripId = marketplaceContext?.trip ? Number(marketplaceContext.trip.id) : null;
@@ -178,6 +182,47 @@ export function HaulerTripView() {
     if (!routePlan?.plan_json) return null;
     return routePlan.plan_json;
   }, [routePlan]);
+
+  // Extract selected route data for display
+  const selectedRoute = useMemo(() => {
+    if (!normalizedPlan?.route) return null;
+    return normalizedPlan.route;
+  }, [normalizedPlan]);
+
+  // Build route coordinates from selected route waypoints
+  const routeCoordinates = useMemo(() => {
+    if (!selectedRoute?.waypoints || !selectedRoute?.sequence) return [];
+    const coords: Array<[number, number]> = [];
+    selectedRoute.sequence.forEach((waypointId: string) => {
+      const waypoint = selectedRoute.waypoints.find((wp: any) => wp.id === waypointId);
+      if (waypoint?.location?.lat && waypoint?.location?.lng) {
+        coords.push([waypoint.location.lat, waypoint.location.lng]);
+      }
+    });
+    return coords;
+  }, [selectedRoute]);
+
+  // Extract waypoints in sequence order for display
+  const routeWaypoints = useMemo(() => {
+    if (!selectedRoute?.waypoints || !selectedRoute?.sequence) return [];
+    return selectedRoute.sequence.map((waypointId: string) => {
+      const waypoint = selectedRoute.waypoints.find((wp: any) => wp.id === waypointId);
+      return waypoint;
+    }).filter(Boolean);
+  }, [selectedRoute]);
+
+  // Extract rest stops, washouts, and feed stops from route plan
+  const restStops = useMemo(() => {
+    return normalizedPlan?.rest_stops || normalizedPlan?.stops || restStopPlan?.stops || [];
+  }, [normalizedPlan, restStopPlan]);
+
+  const washouts = useMemo(() => {
+    return normalizedPlan?.washouts || [];
+  }, [normalizedPlan]);
+
+  const feedStops = useMemo(() => {
+    return normalizedPlan?.feed_stops || normalizedPlan?.feed_hay_stops || [];
+  }, [normalizedPlan]);
 
   const resolvedPaymentMode = useMemo(() => {
     const mode =
@@ -705,8 +750,47 @@ export function HaulerTripView() {
     }
   };
 
+  const handleDeleteTrip = async () => {
+    if (!tripId) {
+      toast.error("Trip ID not found");
+      return;
+    }
+    
+    const confirmed = window.confirm(
+      "⚠️ WARNING: This will permanently delete this trip.\n\n" +
+      "• This action cannot be undone\n" +
+      "• The truck/route listing will be reactivated\n" +
+      "• You can create a new trip after deletion\n\n" +
+      "Are you sure you want to proceed?"
+    );
+    
+    if (!confirmed) return;
+
+    try {
+      setDeletingTrip(true);
+      setDeleteError(null);
+      await deleteTrip(tripId);
+      toast.success("Trip deleted successfully. The truck/route listing has been reactivated. You can now create a new trip.");
+      // Navigate back to trips list
+      navigate("/hauler/trips");
+    } catch (err: any) {
+      const errorMessage = err?.message ?? "Failed to delete trip";
+      setDeleteError(errorMessage);
+      toast.error(errorMessage);
+    } finally {
+      setDeletingTrip(false);
+    }
+  };
+
   const marketplaceTrip = marketplaceContext?.trip ?? null;
   const marketplacePayment = marketplaceContext?.payment ?? null;
+  
+  // Check if trip can be deleted - allow deletion for all trips (hard delete)
+  const canDeleteTrip = useMemo(() => {
+    if (!marketplaceTrip) return false;
+    // Allow deletion for all trips (hard delete)
+    return true;
+  }, [marketplaceTrip]);
   const assignedDriver = useMemo(() => {
     if (!marketplaceTrip?.assigned_driver_id) return null;
     return driverOptions.find(
@@ -783,11 +867,24 @@ export function HaulerTripView() {
         </div>
 
         <div className="flex flex-col items-end gap-2">
-          <span
-            className={`inline-flex items-center rounded-full px-3 py-1 text-xs font-semibold ${badgeClass}`}
-          >
-            {badgeLabel}
-          </span>
+          <div className="flex items-center gap-2">
+            {/* {currentUserRole === "hauler" && marketplaceTrip && canDeleteTrip && (
+              <Button
+                size="sm"
+                variant="destructive"
+                onClick={handleDeleteTrip}
+                disabled={deletingTrip}
+                className="bg-red-600 hover:bg-red-700 text-white"
+              >
+                {deletingTrip ? "Deleting…" : "Delete Trip"}
+              </Button>
+            )} */}
+            <span
+              className={`inline-flex items-center rounded-full px-3 py-1 text-xs font-semibold ${badgeClass}`}
+            >
+              {badgeLabel}
+            </span>
+          </div>
           <div className="text-[11px] text-gray-500">
             Created: {formatDateTime(load.created_at)}
           </div>
@@ -875,7 +972,9 @@ export function HaulerTripView() {
                 <p>{marketplacePayment?.status ?? "Pending"}</p>
               </div>
             </div>
+            {/* Don't show Assign Vehicle for individual haulers - vehicle is already selected during trip creation */}
             {currentUserRole === "hauler" &&
+              !isIndividualHauler &&
               ["PENDING_ESCROW", "READY_TO_START"].includes(
                 marketplaceTrip.status ?? ""
               ) && (
@@ -948,6 +1047,18 @@ export function HaulerTripView() {
                     {tripActionLoading ? "Processing…" : "Mark Delivered"}
                   </Button>
                 )}
+              {/* {currentUserRole === "hauler" &&
+                canDeleteTrip && (
+                  <Button
+                    size="sm"
+                    variant="destructive"
+                    onClick={handleDeleteTrip}
+                    disabled={deletingTrip || !marketplaceTrip}
+                    className="bg-red-600 hover:bg-red-700 text-white"
+                  >
+                    {deletingTrip ? "Deleting…" : "Delete Trip"}
+                  </Button>
+                )} */}
               {currentUserRole === "shipper" &&
                 marketplacePayment?.status === "AWAITING_FUNDING" && (
                   <Button
@@ -972,6 +1083,9 @@ export function HaulerTripView() {
                   </Button>
                 )}
             </div>
+            {deleteError && (
+              <p className="text-xs text-rose-600">{deleteError}</p>
+            )}
             {fundError && (
               <p className="text-xs text-rose-600">{fundError}</p>
             )}
@@ -1081,7 +1195,7 @@ export function HaulerTripView() {
       )})()}
 
       {/* ePOD + tracking */}
-      <div className="grid gap-3 md:grid-cols-2">
+      <div className="grid gap-3 md:grid-rows-2">
         <div className="rounded-lg border border-gray-200 bg-white p-4 text-xs text-gray-700 space-y-2">
           <h2 className="text-sm font-semibold text-gray-900">
             Proof of Delivery (ePOD)
@@ -1108,129 +1222,178 @@ export function HaulerTripView() {
           )}
         </div>
 
-        <div className="rounded-lg border border-gray-200 bg-white p-4 text-xs text-gray-700 space-y-2">
+        <div className="rounded-lg border border-gray-200 bg-white p-4 text-xs text-gray-700 space-y-4">
           <h2 className="text-sm font-semibold text-gray-900">
-            Tracking & route
+            Selected Route
           </h2>
-          <div className="text-gray-500 mb-2">
-            Live map and IoT telemetry will be integrated in later phases. For
-            now, use the tracking view for a monitoring-friendly layout.
-          </div>
-          <div className="rounded-md border border-gray-200 bg-gray-50 p-3 text-[11px] text-gray-700 space-y-2">
-            <div className="flex items-center justify-between">
-              <p className="text-xs font-semibold text-gray-900">Route plan</p>
-              <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-medium text-amber-800">
-                Draft
-              </span>
-            </div>
-            {routePlanLoading ? (
-              <div className="text-gray-500">Loading route plan…</div>
-            ) : routePlanError ? (
-              <div className="text-rose-600">{routePlanError}</div>
-            ) : null}
-            <div className="grid grid-cols-2 gap-2">
-              <div>
-                <div className="text-gray-500">Origin</div>
-                <div className="text-gray-900">{load?.pickup_location || "—"}</div>
-              </div>
-              <div>
-                <div className="text-gray-500">Destination</div>
-                <div className="text-gray-900">{load?.dropoff_location || "—"}</div>
-              </div>
-            </div>
-            <div className="grid grid-cols-3 gap-2">
-              <div>
-                <div className="text-gray-500">Distance</div>
-                <div className="text-gray-900">
-                  {normalizedPlan?.distance_km
-                    ? `${normalizedPlan.distance_km} km`
-                    : trip?.route_distance_km
-                    ? `${trip.route_distance_km} km`
-                    : "—"}
-                </div>
-              </div>
-              <div>
-                <div className="text-gray-500">Tolls</div>
-                <div className="text-gray-900">
-                  {routePlan?.tolls_amount
-                    ? `${routePlan.tolls_amount} ${routePlan.tolls_currency || "USD"}`
-                    : "Estimate pending"}
-                </div>
-              </div>
-              <div>
-                <div className="text-gray-500">Compliance</div>
-                <div className="text-gray-900">
-                  {routePlan?.compliance_status ||
-                    normalizedPlan?.compliance_status ||
-                    "Truck checks pending"}
-                </div>
-              </div>
-            </div>
-            {routePlan?.compliance_notes || normalizedPlan?.compliance_notes ? (
-              <div className="text-gray-600">
-                {routePlan?.compliance_notes || normalizedPlan?.compliance_notes}
-              </div>
-            ) : null}
-            <div>
-              <div className="text-gray-500">Rest stops</div>
-              {(normalizedPlan?.stops?.length || restStopPlan?.stops?.length) ? (
-                <div className="mt-1 space-y-1">
-                  {(normalizedPlan?.stops ?? restStopPlan?.stops ?? []).map((stop: any) => (
-                    <div
-                      key={`${stop.stop_number}-${stop.at_distance_km}`}
-                      className="flex items-start justify-between gap-3 rounded border border-gray-200 bg-white px-2 py-1"
-                    >
-                      <div>
-                        <div className="text-gray-900">
-                          {stop.label || `Stop ${stop.stop_number ?? ""}`.trim()}
-                        </div>
-                        <div className="text-gray-500">{stop.notes}</div>
-                      </div>
-                      <div className="text-gray-700">
-                        {stop.at_distance_km ? `${stop.at_distance_km} km` : "—"}
-                      </div>
+          
+          {routePlanLoading ? (
+            <div className="text-gray-500">Loading route plan…</div>
+          ) : routePlanError ? (
+            <div className="text-rose-600">{routePlanError}</div>
+          ) : selectedRoute ? (
+            <div className="space-y-4">
+              {/* Route Overview */}
+              <div className="rounded-md border border-gray-200 bg-gray-50 p-3 space-y-3">
+                <div className="grid grid-cols-2 gap-2">
+                  <div>
+                    <div className="text-gray-500 text-xs">Origin</div>
+                    <div className="text-gray-900 text-sm font-medium">
+                      {selectedRoute.waypoints?.find((wp: any) => wp.id === 'origin')?.location?.text || "—"}
                     </div>
-                  ))}
+                  </div>
+                  <div>
+                    <div className="text-gray-500 text-xs">Destination</div>
+                    <div className="text-gray-900 text-sm font-medium">
+                      {selectedRoute.waypoints?.find((wp: any) => wp.id === 'destination')?.location?.text || "—"}
+                    </div>
+                  </div>
                 </div>
-              ) : (
-                <div className="text-gray-500">No rest stops planned yet.</div>
+                
+                <div className="grid grid-cols-3 gap-2">
+                  <div>
+                    <div className="text-gray-500 text-xs">Distance</div>
+                    <div className="text-gray-900 text-sm font-medium">
+                      {selectedRoute.distance_km ? `${Math.round(selectedRoute.distance_km)} km` : normalizedPlan?.distance_km ? `${Math.round(normalizedPlan.distance_km)} km` : "—"}
+                    </div>
+                  </div>
+                  <div>
+                    <div className="text-gray-500 text-xs">Duration</div>
+                    <div className="text-gray-900 text-sm font-medium">
+                      {selectedRoute.duration_min ? `${Math.round(selectedRoute.duration_min / 60)}h ${Math.round(selectedRoute.duration_min % 60)}m` : "—"}
+                    </div>
+                  </div>
+                  <div>
+                    <div className="text-gray-500 text-xs">Est. Cost</div>
+                    <div className="text-gray-900 text-sm font-medium">
+                      {selectedRoute.estimated_cost ? `$${selectedRoute.estimated_cost}` : "—"}
+                    </div>
+                  </div>
+                </div>
+
+                {/* Route Waypoints Sequence */}
+                {routeWaypoints.length > 0 && (
+                  <div>
+                    <div className="text-gray-500 text-xs mb-2">Route Sequence</div>
+                    <div className="space-y-1">
+                      {routeWaypoints.map((waypoint: any, index: number) => {
+                        if (!waypoint) return null;
+                        const icon = waypoint.type === 'origin' ? '🚛' : waypoint.type === 'destination' ? '🏁' : waypoint.type === 'pickup' ? '📦' : waypoint.type === 'dropoff' ? '✅' : '📍';
+                        const label = waypoint.type === 'origin' ? 'Origin' : waypoint.type === 'destination' ? 'Destination' : waypoint.type === 'pickup' ? `Pickup: ${waypoint.location?.text || ''}` : waypoint.type === 'dropoff' ? `Dropoff: ${waypoint.location?.text || ''}` : waypoint.location?.text || '';
+                        return (
+                          <div key={waypoint.id || index} className="flex items-center gap-2 text-xs">
+                            <span>{icon}</span>
+                            <span className="text-gray-600">{index + 1}.</span>
+                            <span className="text-gray-900">{label}</span>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              {/* Route Map */}
+              {routeCoordinates.length > 0 && (
+                <div className="rounded-md border border-gray-200 overflow-hidden" style={{ height: '300px' }}>
+                  <RouteMap coordinates={routeCoordinates} />
+                </div>
               )}
-            </div>
-            <div className="grid grid-cols-2 gap-2">
+
+              {/* Rest Stops */}
               <div>
-                <div className="text-gray-500">Washouts</div>
-                <div className="text-gray-900">
-                  {normalizedPlan?.washouts?.length
-                    ? `${normalizedPlan.washouts.length} planned`
-                    : "Not planned"}
-                </div>
+                <div className="text-gray-500 text-xs mb-2 font-medium">Rest Stops</div>
+                {restStops.length > 0 ? (
+                  <div className="space-y-1">
+                    {restStops.map((stop: any, index: number) => (
+                      <div
+                        key={`rest-${index}`}
+                        className="flex items-start justify-between gap-3 rounded border border-gray-200 bg-white px-2 py-1.5"
+                      >
+                        <div>
+                          <div className="text-gray-900 text-xs font-medium">
+                            {stop.label || stop.name || `Rest Stop ${index + 1}`}
+                          </div>
+                          {stop.notes && (
+                            <div className="text-gray-500 text-[10px]">{stop.notes}</div>
+                          )}
+                        </div>
+                        <div className="text-gray-700 text-xs">
+                          {stop.at_distance_km ? `${Math.round(stop.at_distance_km)} km` : "—"}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <div className="text-gray-500 text-xs">No rest stops planned.</div>
+                )}
               </div>
+
+              {/* Washouts */}
               <div>
-                <div className="text-gray-500">Feed/Hay</div>
-                <div className="text-gray-900">
-                  {normalizedPlan?.feed_stops?.length
-                    ? `${normalizedPlan.feed_stops.length} planned`
-                    : "Not planned"}
-                </div>
+                <div className="text-gray-500 text-xs mb-2 font-medium">Washouts</div>
+                {washouts.length > 0 ? (
+                  <div className="space-y-1">
+                    {washouts.map((washout: any, index: number) => (
+                      <div
+                        key={`washout-${index}`}
+                        className="flex items-start justify-between gap-3 rounded border border-gray-200 bg-white px-2 py-1.5"
+                      >
+                        <div>
+                          <div className="text-gray-900 text-xs font-medium">
+                            {washout.name || washout.label || `Washout ${index + 1}`}
+                          </div>
+                          {washout.address && (
+                            <div className="text-gray-500 text-[10px]">{washout.address}</div>
+                          )}
+                        </div>
+                        <div className="text-gray-700 text-xs">
+                          {washout.distance_km ? `${Math.round(washout.distance_km)} km` : "—"}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <div className="text-gray-500 text-xs">No washouts planned.</div>
+                )}
+              </div>
+
+              {/* Feed/Hay Stops */}
+              <div>
+                <div className="text-gray-500 text-xs mb-2 font-medium">Feed/Hay Stops</div>
+                {feedStops.length > 0 ? (
+                  <div className="space-y-1">
+                    {feedStops.map((feed: any, index: number) => (
+                      <div
+                        key={`feed-${index}`}
+                        className="flex items-start justify-between gap-3 rounded border border-gray-200 bg-white px-2 py-1.5"
+                      >
+                        <div>
+                          <div className="text-gray-900 text-xs font-medium">
+                            {feed.name || feed.label || `Feed/Hay Stop ${index + 1}`}
+                          </div>
+                          {feed.address && (
+                            <div className="text-gray-500 text-[10px]">{feed.address}</div>
+                          )}
+                        </div>
+                        <div className="text-gray-700 text-xs">
+                          {feed.distance_km ? `${Math.round(feed.distance_km)} km` : "—"}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <div className="text-gray-500 text-xs">No feed/hay stops planned.</div>
+                )}
               </div>
             </div>
-          </div>
-          <div className="flex flex-wrap gap-2">
-            <button
-              type="button"
-              onClick={handleGenerateRoutePlan}
-              className="inline-flex items-center rounded-md border border-slate-200 px-3 py-1.5 text-[11px] font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-60"
-              disabled={routePlanSaving || !tripId}
-            >
-              {routePlanSaving ? "Generating…" : "Generate route plan"}
-            </button>
-            <button
-              type="button"
-              onClick={() => navigate(`/hauler/trips/${load.id}/route-plan`)}
-              className="inline-flex items-center rounded-md border border-slate-200 px-3 py-1.5 text-[11px] font-medium text-slate-700 hover:bg-slate-50"
-            >
-              View full plan
-            </button>
+          ) : (
+            <div className="text-gray-500 text-xs">
+              No route selected yet. Route will appear here once the trip is created with a selected route.
+            </div>
+          )}
+          
+          <div className="flex flex-wrap gap-2 pt-2 border-t">
             <button
               type="button"
               onClick={() => navigate(`${trackingBase}/trips/${load.id}/tracking`)}
@@ -1250,9 +1413,9 @@ export function HaulerTripView() {
 
       </div>
 
-      <div className="rounded-lg border border-gray-200 bg-white p-4 space-y-2">
+      <div className="rounded-lg border border-gray-200 bg-white p-4 space-y-4">
         <div className="flex items-center justify-between">
-          <h2 className="text-sm font-semibold text-gray-900">Payment Details</h2>
+          <h2 className="text-sm font-semibold text-gray-900">Payment & Escrow</h2>
           <Badge
             variant="secondary"
             className={
@@ -1264,346 +1427,147 @@ export function HaulerTripView() {
             Payment: {resolvedPaymentMode === "DIRECT" ? "Direct" : "Escrow"}
           </Badge>
         </div>
-        <div className="text-sm text-gray-700 space-y-1">
-          <div>
-            <span className="text-gray-500">Agreed Amount:</span>{" "}
-            <span className="font-semibold">
-              {agreedAmount != null ? `$${Number(agreedAmount).toLocaleString()}` : "—"}
-            </span>
+        
+        {resolvedPaymentMode === "DIRECT" ? (
+          <div className="space-y-1 text-xs text-gray-700">
+            <p className="text-amber-700">
+              Direct payment selected. Escrow and disputes are disabled for this trip.
+            </p>
+            {marketplaceContext?.direct_payment ? (
+              <>
+                <div>
+                  <span className="text-gray-500">Received Amount:</span>{" "}
+                  <span className="font-semibold">
+                    ${Number(marketplaceContext.direct_payment.received_amount).toLocaleString()}
+                  </span>
+                </div>
+                <div>
+                  <span className="text-gray-500">Method:</span>{" "}
+                  <span className="font-semibold">
+                    {marketplaceContext.direct_payment.received_payment_method.replace("_", " ")}
+                  </span>
+                </div>
+                {marketplaceContext.direct_payment.received_reference && (
+                  <div>
+                    <span className="text-gray-500">Reference:</span>{" "}
+                    <span className="font-semibold">
+                      {marketplaceContext.direct_payment.received_reference}
+                    </span>
+                  </div>
+                )}
+                <div>
+                  <span className="text-gray-500">Received At:</span>{" "}
+                  <span className="font-semibold">
+                    {new Date(marketplaceContext.direct_payment.received_at).toLocaleString()}
+                  </span>
+                </div>
+              </>
+            ) : (
+              <p className="text-gray-500">No receipt recorded yet.</p>
+            )}
           </div>
-          {resolvedPaymentMode !== "DIRECT" ? (
-            <div>
-              <span className="text-gray-500">Escrow Status:</span>{" "}
-              <span className="font-semibold">
-                {paymentLoading
-                  ? "Loading…"
-                  : paymentError
-                  ? "Unavailable"
-                  : payment?.status ?? "Pending"}
-              </span>
-            </div>
-          ) : (
-            <div className="space-y-1 text-xs text-gray-700">
-              <p className="text-amber-700">
-                Direct payment selected. Escrow and disputes are disabled for this trip.
-              </p>
-              {marketplaceContext?.direct_payment ? (
-                <>
-                  <div>
-                    <span className="text-gray-500">Received Amount:</span>{" "}
-                    <span className="font-semibold">
-                      ${Number(marketplaceContext.direct_payment.received_amount).toLocaleString()}
-                    </span>
-                  </div>
-                  <div>
-                    <span className="text-gray-500">Method:</span>{" "}
-                    <span className="font-semibold">
-                      {marketplaceContext.direct_payment.received_payment_method.replace("_", " ")}
-                    </span>
-                  </div>
-                  {marketplaceContext.direct_payment.received_reference && (
-                    <div>
-                      <span className="text-gray-500">Reference:</span>{" "}
-                      <span className="font-semibold">
-                        {marketplaceContext.direct_payment.received_reference}
-                      </span>
+        ) : (
+          <>
+            {paymentLoading ? (
+              <div className="text-xs text-gray-500">Loading escrow payments…</div>
+            ) : paymentError ? (
+              <div className="text-xs text-red-600">{paymentError}</div>
+            ) : (
+              <>
+                {marketplaceContext?.payments && marketplaceContext.payments.length > 0 ? (
+                  <div className="space-y-3">
+                    <div className="text-xs text-gray-600 font-medium">
+                      All Payments ({marketplaceContext.payments.length})
                     </div>
-                  )}
-                  <div>
-                    <span className="text-gray-500">Received At:</span>{" "}
-                    <span className="font-semibold">
-                      {new Date(marketplaceContext.direct_payment.received_at).toLocaleString()}
-                    </span>
-                  </div>
-                </>
-              ) : (
-                <p className="text-gray-500">No receipt recorded yet.</p>
-              )}
-            </div>
-          )}
-        </div>
-      </div>
-
-      {resolvedPaymentMode !== "DIRECT" && (
-        <>
-          {paymentLoading ? (
-            <div className="rounded-lg border border-gray-200 bg-white p-4 text-xs text-gray-500">
-              Loading escrow…
-            </div>
-          ) : paymentError ? (
-            <div className="rounded-lg border border-gray-200 bg-white p-4 text-xs text-red-600">
-              {paymentError}
-            </div>
-          ) : !payment ? (
-            <div className="rounded-lg border border-gray-200 bg-white p-4 text-xs text-gray-500">
-              No payment record yet. Accept this load to initiate escrow.
-            </div>
-          ) : (
-            <PaymentCard
-              payment={payment}
-              isShipper={currentUserRole?.toUpperCase() === "SHIPPER"}
-              onFund={handleFundEscrow}
-              funding={funding}
-              fundError={fundError}
-              paymentMode={(payment as any).payment_mode}
-            />
-          )}
-        </>
-      )}
-
-      <div className="rounded-lg border border-gray-200 bg-white p-4 space-y-3">
-        <div className="flex items-center justify-between">
-          <h2 className="text-sm font-semibold text-gray-900">Trip expenses</h2>
-          <p className="text-[11px] text-gray-500">
-            Logged against this load by hauler/driver
-          </p>
-        </div>
-
-        <form
-          onSubmit={handleAddExpense}
-          className="grid gap-3 md:grid-cols-[1fr_1fr_2fr_auto] md:items-end"
-        >
-          <div className="space-y-1">
-            <label className="text-[11px] font-medium text-gray-700">
-              Type
-            </label>
-            <select
-              value={expenseType}
-              onChange={(e) =>
-                setExpenseType(
-                  e.target.value as
-                    | "fuel"
-                    | "toll"
-                    | "washout"
-                    | "feed"
-                    | "repair"
-                    | "other"
-                )
-              }
-              className="block w-full rounded-md border border-gray-300 px-2 py-1.5 text-xs text-gray-900 focus:border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-500"
-            >
-              {EXPENSE_TYPES.map((option) => (
-                <option key={option} value={option}>
-                  {option === "feed" ? "Feed / Hay" : option.charAt(0).toUpperCase() + option.slice(1)}
-                </option>
-              ))}
-            </select>
-          </div>
-
-          <div className="space-y-1">
-            <label className="text-[11px] font-medium text-gray-700">
-              Amount (USD)
-            </label>
-            <input
-              type="number"
-              min="0"
-              step="0.01"
-              value={expenseAmount}
-              onChange={(e) => setExpenseAmount(e.target.value)}
-              className="block w-full rounded-md border border-gray-300 px-2 py-1.5 text-xs text-gray-900 focus:border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-500"
-              placeholder="e.g. 150.75"
-            />
-          </div>
-
-          <div className="space-y-1 md:col-span-2">
-            <label className="text-[11px] font-medium text-gray-700">
-              Note (optional)
-            </label>
-            <input
-              type="text"
-              value={expenseNote}
-              onChange={(e) => setExpenseNote(e.target.value)}
-              className="block w-full rounded-md border border-gray-300 px-2 py-1.5 text-xs text-gray-900 focus:border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-500"
-              placeholder="e.g. Fuel stop at XYZ station"
-            />
-          </div>
-
-          {expenseSubmitError && (
-            <div className="md:col-span-4 text-[11px] text-red-600">
-              {expenseSubmitError}
-            </div>
-          )}
-
-          <div className="flex justify-end">
-            <Button
-              type="submit"
-              disabled={expenseSubmitting || !tripId}
-              className="bg-[#29CA8D] hover:bg-[#24b67d] px-4 py-1.5 text-xs font-medium text-white disabled:opacity-60"
-            >
-              {expenseSubmitting ? "Saving…" : "Add expense"}
-            </Button>
-          </div>
-        </form>
-
-        {!tripId && !tripLoading && (
-          <div className="text-[11px] text-gray-500">
-            Accept this load to create a trip before logging expenses.
-          </div>
-        )}
-
-        <div className="border-t border-gray-100 pt-3">
-          {!tripId ? (
-            <div className="text-[11px] text-gray-500">
-              Trip not created yet. Expenses will appear here once the trip
-              starts.
-            </div>
-          ) : expensesLoading ? (
-            <div className="text-[11px] text-gray-500">Loading expenses…</div>
-          ) : expensesError ? (
-            <div className="text-[11px] text-red-600">{expensesError}</div>
-          ) : expenses.length === 0 ? (
-            <div className="text-[11px] text-gray-500">
-              No expenses logged yet for this trip.
-            </div>
-          ) : (
-            <div className="space-y-2">
-              {expenses.map((exp) => {
-                const isEditing = editingExpenseId === exp.id;
-                return (
-                  <div
-                    key={exp.id}
-                    className="rounded-md bg-gray-50 px-3 py-2 text-[11px]"
-                  >
-                    {isEditing ? (
-                      <form className="space-y-2" onSubmit={handleSaveExpenseEdit}>
-                        <div className="grid gap-2 md:grid-cols-4">
-                          <select
-                            value={editingExpenseFields.type}
-                            onChange={(e) =>
-                              setEditingExpenseFields((prev) => ({
-                                ...prev,
-                                type: e.target.value as
-                                  | "fuel"
-                                  | "toll"
-                                  | "washout"
-                                  | "feed"
-                                  | "repair"
-                                  | "other",
-                              }))
+                    {marketplaceContext.payments.map((pay, index) => (
+                      <div
+                        key={pay.id || index}
+                        className="rounded-md border border-gray-200 bg-gray-50 p-3 space-y-2"
+                      >
+                        <div className="flex items-center justify-between">
+                          <div className="text-xs font-semibold text-gray-900">
+                            Payment #{index + 1}
+                            {pay.load_id && (
+                              <span className="text-gray-500 font-normal ml-2">
+                                (Load #{pay.load_id})
+                              </span>
+                            )}
+                          </div>
+                          <Badge
+                            variant="secondary"
+                            className={
+                              pay.status === "ESCROW_FUNDED"
+                                ? "bg-emerald-50 text-emerald-800 border border-emerald-200"
+                                : pay.status === "ESCROW_RELEASED"
+                                ? "bg-blue-50 text-blue-800 border border-blue-200"
+                                : pay.status === "REFUNDED_TO_SHIPPER" || pay.status === "CANCELLED"
+                                ? "bg-red-50 text-red-800 border border-red-200"
+                                : "bg-gray-50 text-gray-800 border border-gray-200"
                             }
-                            className="rounded-md border border-gray-300 px-2 py-1.5 text-xs text-gray-900 focus:border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-500"
                           >
-                            {EXPENSE_TYPES.map((option) => (
-                              <option key={option} value={option}>
-                                {option === "feed"
-                                  ? "Feed / Hay"
-                                  : option.charAt(0).toUpperCase() + option.slice(1)}
-                              </option>
-                            ))}
-                          </select>
-                          <input
-                            type="number"
-                            min="0"
-                            step="0.01"
-                            value={editingExpenseFields.amount}
-                            onChange={(e) =>
-                              setEditingExpenseFields((prev) => ({
-                                ...prev,
-                                amount: e.target.value,
-                              }))
-                            }
-                            className="rounded-md border border-gray-300 px-2 py-1.5 text-xs text-gray-900 focus:border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-500"
-                            placeholder="Amount"
-                          />
-                          <input
-                            type="text"
-                            value={editingExpenseFields.currency}
-                            onChange={(e) =>
-                              setEditingExpenseFields((prev) => ({
-                                ...prev,
-                                currency: e.target.value,
-                              }))
-                            }
-                            className="rounded-md border border-gray-300 px-2 py-1.5 text-xs text-gray-900 focus:border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-500"
-                            placeholder="Currency"
-                          />
-                          <input
-                            type="text"
-                            value={editingExpenseFields.note}
-                            onChange={(e) =>
-                              setEditingExpenseFields((prev) => ({
-                                ...prev,
-                                note: e.target.value,
-                              }))
-                            }
-                            className="rounded-md border border-gray-300 px-2 py-1.5 text-xs text-gray-900 focus:border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-500 md:col-span-1"
-                            placeholder="Note"
-                          />
+                            {pay.status?.replace(/_/g, " ") || "Pending"}
+                          </Badge>
                         </div>
-                        {editError && (
-                          <div className="text-[11px] text-red-600">{editError}</div>
+                        <div className="grid grid-cols-2 gap-2 text-xs text-gray-700">
+                          <div>
+                            <span className="text-gray-500">Amount:</span>{" "}
+                            <span className="font-semibold">
+                              ${Number(pay.amount).toLocaleString()} {pay.currency || "USD"}
+                            </span>
+                          </div>
+                          <div>
+                            <span className="text-gray-500">Created:</span>{" "}
+                            <span className="font-semibold">
+                              {formatDateTime(pay.created_at)}
+                            </span>
+                          </div>
+                        </div>
+                        {pay.funded_at && (
+                          <div className="text-xs text-gray-600">
+                            <span className="text-gray-500">Funded:</span>{" "}
+                            {formatDateTime(pay.funded_at)}
+                          </div>
                         )}
-                        <div className="flex justify-end gap-2">
-                          <Button
-                            type="button"
-                            variant="outline"
-                            onClick={cancelEditingExpense}
-                            className="px-3 py-1 text-[11px]"
-                          >
-                            Cancel
-                          </Button>
-                          <Button
-                            type="submit"
-                            disabled={editSubmitting}
-                            className="bg-[#29CA8D] hover:bg-[#24b67d] px-3 py-1 text-[11px] font-medium text-white disabled:opacity-60"
-                          >
-                            {editSubmitting ? "Saving…" : "Save"}
-                          </Button>
-                        </div>
-                      </form>
-                    ) : (
-                      <div className="flex flex-col gap-3 rounded-xl border border-gray-100 bg-white p-3 shadow-sm md:flex-row md:items-center md:justify-between">
-                        <div className="space-y-1">
-                          <div className="font-medium text-gray-900 capitalize">
-                            {normalizeExpenseType(exp.expense_type)} ·{" "}
-                            {Number(exp.amount).toFixed(2)} {exp.currency}
+                        {pay.released_at && (
+                          <div className="text-xs text-gray-600">
+                            <span className="text-gray-500">Released:</span>{" "}
+                            {formatDateTime(pay.released_at)}
                           </div>
-                          {exp.description && (
-                            <div className="text-gray-700">{exp.description}</div>
-                          )}
-                          <div className="text-[10px] text-gray-400">
-                            {new Date(exp.created_at).toLocaleString()}
-                          </div>
-                        </div>
-                        <div className="flex items-center gap-3 text-[10px]">
-                          {exp.driver_id && (
-                            <div className="text-gray-500 text-right">
-                              Driver ID
-                              <br />
-                              <span className="font-mono">{exp.driver_id}</span>
-                            </div>
-                          )}
-                          <div className="flex gap-2">
-                            <Button
-                              type="button"
-                              variant="outline"
-                              size="sm"
-                              className="h-7 px-3 text-[10px] border-gray-300 text-gray-600 hover:bg-gray-100"
-                              onClick={() => startEditingExpense(exp)}
-                            >
-                              Edit
-                            </Button>
-                            <Button
-                              type="button"
-                              variant="outline"
-                              size="sm"
-                              className="h-7 px-3 text-[10px] font-medium text-rose-700 border-rose-200 hover:bg-rose-50 disabled:opacity-60"
-                              onClick={() => handleDeleteExpense(exp.id)}
-                              disabled={deletingExpenseId === exp.id}
-                            >
-                              {deletingExpenseId === exp.id ? "Deleting…" : "Delete"}
-                            </Button>
-                          </div>
-                        </div>
+                        )}
                       </div>
-                    )}
+                    ))}
+                    <div className="pt-2 border-t border-gray-200">
+                      <div className="flex items-center justify-between text-sm">
+                        <span className="text-gray-700 font-medium">Total Amount:</span>
+                        <span className="text-gray-900 font-semibold">
+                          $
+                          {marketplaceContext.payments
+                            .reduce((sum, p) => sum + Number(p.amount || 0), 0)
+                            .toLocaleString()}
+                        </span>
+                      </div>
+                    </div>
                   </div>
-                );
-              })}
-            </div>
-          )}
-        </div>
+                ) : payment ? (
+                  <PaymentCard
+                    payment={payment}
+                    isShipper={currentUserRole?.toUpperCase() === "SHIPPER"}
+                    onFund={handleFundEscrow}
+                    funding={funding}
+                    fundError={fundError}
+                    paymentMode={(payment as any).payment_mode}
+                  />
+                ) : (
+                  <div className="text-xs text-gray-500">
+                    No payment record yet. Accept this load to initiate escrow.
+                  </div>
+                )}
+              </>
+            )}
+          </>
+        )}
       </div>
+
 
       <Dialog open={directCompleteOpen} onOpenChange={setDirectCompleteOpen}>
         <DialogContent>

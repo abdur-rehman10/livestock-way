@@ -27,6 +27,7 @@ import {
   Plus,
   ChevronDown,
   Inbox,
+  Route,
 } from "lucide-react";
 import { ThemeToggle } from "./ThemeToggle";
 import { NotificationsCenter } from "./NotificationsCenter";
@@ -46,6 +47,7 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "./ui/dropdown-menu";
+import { CreateTripModal } from "./CreateTripModal";
 
 interface AppLayoutProps {
   children: React.ReactNode;
@@ -54,15 +56,16 @@ interface AppLayoutProps {
 }
 
 export function AppLayout({ children, userRole, onLogout }: AppLayoutProps) {
+  const navigate = useNavigate();
+  const location = useLocation();
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
   const [showNotifications, setShowNotifications] = useState(false);
   const [haulerBookingCount, setHaulerBookingCount] = useState(0);
   const [haulerUnreadCount, setHaulerUnreadCount] = useState(0);
+  const [createTripModalOpen, setCreateTripModalOpen] = useState(false);
   const [haulerContractCount, setHaulerContractCount] = useState(0);
   const [shipperOfferCount, setShipperOfferCount] = useState(0);
   const [shipperContractCount, setShipperContractCount] = useState(0);
-  const navigate = useNavigate();
-  const location = useLocation();
   const accountMode = storage.get<string>(STORAGE_KEYS.ACCOUNT_MODE, 'COMPANY');
   const {
     isIndividualHauler,
@@ -483,6 +486,25 @@ export function AppLayout({ children, userRole, onLogout }: AppLayoutProps) {
                   </DropdownMenuContent>
                 </DropdownMenu>
               )}
+
+              {/* Create New Trip Button - For Haulers Only */}
+              {userRole === 'hauler' && (
+                <button
+                  onClick={() => setCreateTripModalOpen(true)}
+                  className={`
+                    w-full relative flex items-center gap-3 px-3 py-2.5 rounded-lg transition-colors
+                    text-sm font-medium
+                    bg-primary text-white hover:bg-[#45b887] active:bg-[#3da575]
+                    shadow-sm hover:shadow-md
+                    ${!isSidebarOpen && 'justify-center'}
+                  `}
+                  title="Create New Trip"
+                >
+                  <Route className="w-5 h-5 flex-shrink-0" />
+                  {isSidebarOpen && <span>Create New Trip</span>}
+                </button>
+              )}
+
               {routes.map((route) => {
                 const Icon = route.icon;
                 const showBookingBadge =
@@ -634,6 +656,23 @@ export function AppLayout({ children, userRole, onLogout }: AppLayoutProps) {
           )}
         </div>
       </aside>
+
+      {/* Create Trip Modal */}
+      {userRole === 'hauler' && (
+        <CreateTripModal
+          open={createTripModalOpen}
+          onOpenChange={setCreateTripModalOpen}
+          onTripCreated={() => {
+            setCreateTripModalOpen(false);
+            // Refresh trips if on trips page
+            if (location.pathname.includes('/trips')) {
+              window.location.reload();
+            } else {
+              navigate('/hauler/trips');
+            }
+          }}
+        />
+      )}
 
       {/* Main Content */}
       <div 
@@ -789,6 +828,23 @@ export function AppLayout({ children, userRole, onLogout }: AppLayoutProps) {
         <div 
           className="lg:hidden fixed inset-0 bg-black/50 z-30"
           onClick={() => setIsSidebarOpen(false)}
+        />
+      )}
+
+      {/* Create Trip Modal */}
+      {userRole === 'hauler' && (
+        <CreateTripModal
+          open={createTripModalOpen}
+          onOpenChange={setCreateTripModalOpen}
+          onTripCreated={() => {
+            setCreateTripModalOpen(false);
+            // Refresh trips if on trips page
+            if (location.pathname.includes('/trips')) {
+              window.location.reload();
+            } else {
+              navigate('/hauler/trips');
+            }
+          }}
         />
       )}
     </div>

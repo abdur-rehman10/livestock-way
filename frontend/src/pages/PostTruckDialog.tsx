@@ -12,6 +12,9 @@ import { Label } from "../components/ui/label";
 import { Textarea } from "../components/ui/textarea";
 import { Switch } from "../components/ui/switch";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../components/ui/select";
+import { Calendar } from "../components/ui/calendar";
+import { Popover, PopoverContent, PopoverTrigger } from "../components/ui/popover";
+import { CalendarIcon } from "lucide-react";
 import { toast } from "sonner";
 import { AddressSearch, type MappedAddress } from "../components/AddressSearch";
 import {
@@ -26,7 +29,33 @@ type PostTruckDialogProps = {
   onPosted?: () => void;
 };
 
-const nowLocal = () => new Date().toISOString().slice(0, 16);
+const formatDateTimeLocal = (date: Date): string => {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  const hours = String(date.getHours()).padStart(2, '0');
+  const minutes = String(date.getMinutes()).padStart(2, '0');
+  return `${year}-${month}-${day}T${hours}:${minutes}`;
+};
+
+const formatDateRangeDisplay = (range: { from: Date | undefined; to: Date | undefined }): string => {
+  if (!range.from && !range.to) return "Select date range";
+  if (range.from && !range.to) {
+    return `${range.from.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })} - Select end`;
+  }
+  if (range.from && range.to) {
+    return `${range.from.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })} - ${range.to.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}`;
+  }
+  return "Select date range";
+};
+
+const combineDateAndTime = (date: Date | undefined): string | null => {
+  if (!date) return null;
+  // Always use 00:00 (midnight) for time
+  const combined = new Date(date);
+  combined.setHours(0, 0, 0, 0);
+  return formatDateTimeLocal(combined);
+};
 
 function parseNumber(value: string, allowNull = true): number | null {
   if (!value || value.trim() === "") return allowNull ? null : 0;
@@ -48,12 +77,15 @@ export function PostTruckDialog({ open, onOpenChange, onPosted }: PostTruckDialo
   const [trucks, setTrucks] = useState<HaulerVehicleOption[]>([]);
   const [trucksLoading, setTrucksLoading] = useState(false);
 
+  const [dateRange, setDateRange] = useState<{ from: Date | undefined; to: Date | undefined }>({
+    from: undefined,
+    to: undefined,
+  });
+
   const [form, setForm] = useState({
     truck_id: "",
     origin: "",
     destination: "",
-    available_from: nowLocal(),
-    available_until: "",
     capacity_headcount: "",
     capacity_weight_kg: "",
     origin_lat: "",
@@ -108,23 +140,38 @@ export function PostTruckDialog({ open, onOpenChange, onPosted }: PostTruckDialo
       setError("Origin is required.");
       return;
     }
-    const availableFromDate = new Date(form.available_from);
-    if (Number.isNaN(availableFromDate.getTime())) {
-      setError("Available from must be a valid date/time.");
+    if (!dateRange.from) {
+      setError("Available from date is required.");
       return;
     }
+    
+    const availableFromDateTime = combineDateAndTime(dateRange.from);
+    if (!availableFromDateTime) {
+      setError("Available from must be a valid date.");
+      return;
+    }
+    
+    const availableFromDateObj = new Date(availableFromDateTime);
+    if (Number.isNaN(availableFromDateObj.getTime())) {
+      setError("Available from must be a valid date.");
+      return;
+    }
+    
     let availableUntilIso: string | null = null;
-    if (form.available_until) {
-      const until = new Date(form.available_until);
-      if (Number.isNaN(until.getTime())) {
-        setError("Available until must be a valid date/time.");
-        return;
+    if (dateRange.to) {
+      const availableUntilDateTime = combineDateAndTime(dateRange.to);
+      if (availableUntilDateTime) {
+        const until = new Date(availableUntilDateTime);
+        if (Number.isNaN(until.getTime())) {
+          setError("Available until must be a valid date.");
+          return;
+        }
+        if (until.getTime() < availableFromDateObj.getTime()) {
+          setError("End date must be after the start date.");
+          return;
+        }
+        availableUntilIso = until.toISOString();
       }
-      if (until.getTime() < availableFromDate.getTime()) {
-        setError("End date must be after the start date.");
-        return;
-      }
-      availableUntilIso = until.toISOString();
     }
 
     let capacityHeadcount: number | null = null;
@@ -162,7 +209,7 @@ export function PostTruckDialog({ open, onOpenChange, onPosted }: PostTruckDialo
         truck_id: form.truck_id,
         origin_location_text: form.origin,
         destination_location_text: form.destination || null,
-        available_from: availableFromDate.toISOString(),
+        available_from: availableFromDateObj.toISOString(),
         available_until: availableUntilIso,
         capacity_headcount: capacityHeadcount,
         capacity_weight_kg: capacityWeight,
@@ -178,12 +225,11 @@ export function PostTruckDialog({ open, onOpenChange, onPosted }: PostTruckDialo
       });
       onPosted?.();
       onOpenChange(false);
+      setDateRange({ from: undefined, to: undefined });
       setForm({
         truck_id: trucks[0]?.id ? String(trucks[0].id) : "",
         origin: "",
         destination: "",
-        available_from: nowLocal(),
-        available_until: "",
         capacity_headcount: "",
         capacity_weight_kg: "",
         origin_lat: "",
@@ -265,19 +311,32 @@ export function PostTruckDialog({ open, onOpenChange, onPosted }: PostTruckDialo
 
             <div className="space-y-2">
               <Label>Availability window</Label>
-              <div className="grid grid-cols-2 gap-2">
-                <Input
-                  type="datetime-local"
-                  value={form.available_from}
-                  onChange={(e) => setForm((prev) => ({ ...prev, available_from: e.target.value }))}
-                />
-                <Input
-                  type="datetime-local"
-                  value={form.available_until}
-                  onChange={(e) => setForm((prev) => ({ ...prev, available_until: e.target.value }))}
-                  placeholder="Optional"
-                />
-              </div>
+              <Popover>
+                <PopoverTrigger asChild>
+                  <Button
+                    variant="outline"
+                    className="w-full justify-start text-left h-10"
+                  >
+                    <CalendarIcon className="mr-2 h-4 w-4" />
+                    {formatDateRangeDisplay(dateRange)}
+                  </Button>
+                </PopoverTrigger>
+                <PopoverContent className="w-auto p-0" align="start">
+                  <Calendar
+                    mode="range"
+                    selected={dateRange}
+                    onSelect={(range) => {
+                      if (range) {
+                        setDateRange(range);
+                      }
+                    }}
+                    initialFocus
+                    numberOfMonths={2}
+                    hidden={{}}
+                  />
+                </PopoverContent>
+              </Popover>
+              <p className="text-xs text-gray-500">Times will be set to 00:00 (midnight) for both dates</p>
             </div>
           </div>
 
