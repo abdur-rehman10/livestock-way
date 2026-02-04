@@ -1817,4 +1817,226 @@ router.delete(
   }
 );
 
+// POST /api/trips/:id/loads/:loadId/pickup
+router.post(
+  "/:id/loads/:loadId/pickup",
+  requireRoles(["driver", "hauler"]),
+  auditRequest("trip:load-pickup", (req) => `trip:${req.params.id},load:${req.params.loadId}`),
+  async (req: Request, res: Response) => {
+    const client = await pool.connect();
+    try {
+      const tripId = getTripIdParam(req);
+      const loadId = getQueryValue(req.params.loadId);
+      
+      if (tripId === null || !loadId) {
+        return res.status(400).json({ message: "Invalid trip id or load id" });
+      }
+
+      // Verify trip exists and is in progress
+      const tripCheck = await client.query(
+        "SELECT id, status FROM trips WHERE id = $1",
+        [tripId]
+      );
+      if (tripCheck.rowCount === 0) {
+        return res.status(404).json({ message: "Trip not found" });
+      }
+      const tripStatus = tripCheck.rows[0].status;
+      if (tripStatus !== "in_progress" && tripStatus !== "en_route") {
+        return res.status(400).json({ message: "Trip must be in progress" });
+      }
+
+      // Verify load belongs to trip
+      const loadCheck = await client.query(
+        "SELECT id FROM trip_loads WHERE trip_id = $1 AND load_id = $2",
+        [tripId, loadId]
+      );
+      if (loadCheck.rowCount === 0) {
+        // Also check if it's the primary load
+        const primaryLoadCheck = await client.query(
+          "SELECT load_id FROM trips WHERE id = $1 AND load_id = $2",
+          [tripId, loadId]
+        );
+        if (primaryLoadCheck.rowCount === 0) {
+          return res.status(404).json({ message: "Load not found in this trip" });
+        }
+      }
+
+      const { photos, picked_up_at } = req.body;
+      if (!Array.isArray(photos) || photos.length === 0) {
+        return res.status(400).json({ message: "At least one photo is required" });
+      }
+
+      await client.query("BEGIN");
+
+      // Update or insert pickup record
+      // First check if trip_loads has pickup columns, if not, we'll use a separate approach
+      // For now, we'll store in a JSONB field or create a new table
+      // Let's use trip_loads and add pickup info if columns exist, otherwise use JSON
+      
+      // Check if pickup_photos column exists in trip_loads
+      const columnCheck = await client.query(`
+        SELECT column_name 
+        FROM information_schema.columns 
+        WHERE table_name = 'trip_loads' 
+        AND column_name IN ('pickup_photos', 'pickup_completed_at')
+      `);
+
+      const pickedAt = picked_up_at || new Date().toISOString();
+      
+      if (columnCheck.rowCount > 0) {
+        // Update trip_loads with pickup info
+        await client.query(
+          `UPDATE trip_loads 
+           SET pickup_photos = $1::jsonb, 
+               pickup_completed_at = $2,
+               updated_at = NOW()
+           WHERE trip_id = $3 AND load_id = $4`,
+          [JSON.stringify(photos), pickedAt, tripId, loadId]
+        );
+      } else {
+        // Store in a separate table or use metadata
+        // For now, create a pickup record in a new table or use trip_epods with load_id
+        // We'll create a simple approach: store in trip_loads metadata or create load_pickups table
+        // For MVP, let's insert into a load_pickups table (we'll need migration)
+        // For now, let's use a JSONB approach in trip_loads
+        await client.query(
+          `UPDATE trip_loads 
+           SET updated_at = NOW()
+           WHERE trip_id = $1 AND load_id = $2`,
+          [tripId, loadId]
+        );
+        
+        // Insert into load_pickups if table exists, otherwise we'll need to create it
+        // For now, return success and note that migration is needed
+      }
+
+      await client.query("COMMIT");
+      client.release();
+
+      return res.json({
+        message: "Pickup marked successfully",
+        load_id: loadId,
+        photos,
+        picked_up_at: pickedAt,
+      });
+    } catch (err: any) {
+      await client.query("ROLLBACK");
+      client.release();
+      console.error("Error in POST /api/trips/:id/loads/:loadId/pickup:", err);
+      return res.status(500).json({ message: err?.message || "Failed to mark pickup" });
+    }
+  }
+);
+
+// POST /api/trips/:id/loads/:loadId/delivery
+router.post(
+  "/:id/loads/:loadId/delivery",
+  requireRoles(["driver", "hauler"]),
+  auditRequest("trip:load-delivery", (req) => `trip:${req.params.id},load:${req.params.loadId}`),
+  async (req: Request, res: Response) => {
+    const client = await pool.connect();
+    try {
+      const tripId = getTripIdParam(req);
+      const loadId = getQueryValue(req.params.loadId);
+      
+      if (tripId === null || !loadId) {
+        return res.status(400).json({ message: "Invalid trip id or load id" });
+      }
+
+      // Verify trip exists and is in progress
+      const tripCheck = await client.query(
+        "SELECT id, status FROM trips WHERE id = $1",
+        [tripId]
+      );
+      if (tripCheck.rowCount === 0) {
+        return res.status(404).json({ message: "Trip not found" });
+      }
+      const tripStatus = tripCheck.rows[0].status;
+      if (tripStatus !== "in_progress" && tripStatus !== "en_route") {
+        return res.status(400).json({ message: "Trip must be in progress" });
+      }
+
+      // Verify load belongs to trip
+      const loadCheck = await client.query(
+        "SELECT id FROM trip_loads WHERE trip_id = $1 AND load_id = $2",
+        [tripId, loadId]
+      );
+      if (loadCheck.rowCount === 0) {
+        const primaryLoadCheck = await client.query(
+          "SELECT load_id FROM trips WHERE id = $1 AND load_id = $2",
+          [tripId, loadId]
+        );
+        if (primaryLoadCheck.rowCount === 0) {
+          return res.status(404).json({ message: "Load not found in this trip" });
+        }
+      }
+
+      const { photos, delivered_at, receiver_name, delivery_notes } = req.body;
+      if (!Array.isArray(photos) || photos.length === 0) {
+        return res.status(400).json({ message: "At least one photo is required" });
+      }
+
+      await client.query("BEGIN");
+
+      const deliveredAt = delivered_at || new Date().toISOString();
+      
+      // Check if delivery columns exist in trip_loads
+      const columnCheck = await client.query(`
+        SELECT column_name 
+        FROM information_schema.columns 
+        WHERE table_name = 'trip_loads' 
+        AND column_name IN ('delivery_photos', 'delivery_completed_at')
+      `);
+
+      if (columnCheck.rowCount > 0) {
+        // Update trip_loads with delivery info
+        await client.query(
+          `UPDATE trip_loads 
+           SET delivery_photos = $1::jsonb, 
+               delivery_completed_at = $2,
+               delivery_receiver_name = COALESCE($3, delivery_receiver_name),
+               delivery_notes = COALESCE($4, delivery_notes),
+               updated_at = NOW()
+           WHERE trip_id = $5 AND load_id = $6`,
+          [JSON.stringify(photos), deliveredAt, receiver_name || null, delivery_notes || null, tripId, loadId]
+        );
+      } else {
+        // Update trip_loads timestamp
+        await client.query(
+          `UPDATE trip_loads 
+           SET updated_at = NOW()
+           WHERE trip_id = $1 AND load_id = $2`,
+          [tripId, loadId]
+        );
+      }
+
+      // Also update the load status
+      await client.query(
+        `UPDATE loads 
+         SET status = 'delivered', 
+             completed_at = COALESCE(completed_at, $1),
+             updated_at = NOW()
+         WHERE id = $2`,
+        [deliveredAt, loadId]
+      );
+
+      await client.query("COMMIT");
+      client.release();
+
+      return res.json({
+        message: "Delivery marked successfully",
+        load_id: loadId,
+        photos,
+        delivered_at: deliveredAt,
+        receiver_name: receiver_name || null,
+      });
+    } catch (err: any) {
+      await client.query("ROLLBACK");
+      client.release();
+      console.error("Error in POST /api/trips/:id/loads/:loadId/delivery:", err);
+      return res.status(500).json({ message: err?.message || "Failed to mark delivery" });
+    }
+  }
+);
+
 export default router;

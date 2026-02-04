@@ -1273,7 +1273,86 @@ router.get("/trips/:tripId", authRequired, async (req, res) => {
       context.trip.payment_mode === "DIRECT"
         ? await getDirectPaymentForTrip(context.trip.id)
         : null;
-    return res.json({ trip: context.trip, load: context.load, payment, payments: allPayments, direct_payment });
+    
+    // Fetch trip_loads with pickup/delivery status
+    const { pool } = await import("../config/database");
+    const tripLoadsResult = await pool.query(
+      `
+        SELECT 
+          tl.id,
+          tl.trip_id,
+          tl.load_id,
+          tl.sequence_order,
+          tl.pickup_photos,
+          tl.pickup_completed_at,
+          tl.delivery_photos,
+          tl.delivery_completed_at,
+          tl.delivery_receiver_name,
+          tl.delivery_notes,
+          l.id AS load_id_full,
+          l.title,
+          l.species,
+          l.animal_count,
+          l.pickup_location_text,
+          l.dropoff_location_text,
+          l.pickup_lat,
+          l.pickup_lng,
+          l.dropoff_lat,
+          l.dropoff_lng,
+          l.pickup_window_start,
+          l.pickup_window_end,
+          l.delivery_window_start,
+          l.delivery_window_end,
+          l.status AS load_status
+        FROM trip_loads tl
+        JOIN loads l ON l.id = tl.load_id
+        WHERE tl.trip_id = $1
+        ORDER BY tl.sequence_order ASC, tl.created_at ASC
+      `,
+      [context.trip.id]
+    );
+    
+    // If no trip_loads found, check if this is a single-load trip (old format)
+    let loads = tripLoadsResult.rows;
+    if (loads.length === 0 && context.load) {
+      // This is a single-load trip, return the load as if it were in trip_loads
+      loads = [{
+        id: null,
+        trip_id: context.trip.id,
+        load_id: context.load.id,
+        sequence_order: 0,
+        pickup_photos: null,
+        pickup_completed_at: null,
+        delivery_photos: null,
+        delivery_completed_at: null,
+        delivery_receiver_name: null,
+        delivery_notes: null,
+        load_id_full: context.load.id,
+        title: context.load.title,
+        species: context.load.species,
+        animal_count: context.load.animal_count,
+        pickup_location_text: context.load.pickup_location_text,
+        dropoff_location_text: context.load.dropoff_location_text,
+        pickup_lat: context.load.pickup_lat,
+        pickup_lng: context.load.pickup_lng,
+        dropoff_lat: context.load.dropoff_lat,
+        dropoff_lng: context.load.dropoff_lng,
+        pickup_window_start: context.load.pickup_window_start,
+        pickup_window_end: context.load.pickup_window_end,
+        delivery_window_start: context.load.delivery_window_start,
+        delivery_window_end: context.load.delivery_window_end,
+        load_status: context.load.status,
+      }];
+    }
+    
+    return res.json({ 
+      trip: context.trip, 
+      load: context.load, 
+      loads: loads,
+      payment, 
+      payments: allPayments, 
+      direct_payment 
+    });
   } catch (err) {
     console.error("getTrip error", err);
     res.status(500).json({ error: "Failed to load trip" });
