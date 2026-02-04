@@ -1883,7 +1883,7 @@ router.post(
 
       const pickedAt = picked_up_at || new Date().toISOString();
       
-      if (columnCheck.rowCount > 0) {
+      if ((columnCheck.rowCount ?? 0) > 0) {
         // Update trip_loads with pickup info
         await client.query(
           `UPDATE trip_loads 
@@ -1988,7 +1988,7 @@ router.post(
         AND column_name IN ('delivery_photos', 'delivery_completed_at')
       `);
 
-      if (columnCheck.rowCount > 0) {
+      if ((columnCheck.rowCount ?? 0) > 0) {
         // Update trip_loads with delivery info
         await client.query(
           `UPDATE trip_loads 

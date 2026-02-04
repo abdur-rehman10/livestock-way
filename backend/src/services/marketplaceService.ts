@@ -188,6 +188,19 @@ export interface LoadRecord {
   payment_mode?: PaymentMode;
   direct_payment_disclaimer_accepted_at?: string | null;
   direct_payment_disclaimer_version?: string | null;
+  title?: string | null;
+  species?: string | null;
+  animal_count?: number | null;
+  pickup_location_text?: string | null;
+  dropoff_location_text?: string | null;
+  pickup_window_start?: string | null;
+  pickup_window_end?: string | null;
+  delivery_window_start?: string | null;
+  delivery_window_end?: string | null;
+  pickup_lat?: number | null;
+  pickup_lng?: number | null;
+  dropoff_lat?: number | null;
+  dropoff_lng?: number | null;
 }
 
 export interface LoadOfferRecord {
@@ -548,6 +561,19 @@ type LoadRow = {
   payment_mode?: string | null;
   direct_payment_disclaimer_accepted_at?: string | null;
   direct_payment_disclaimer_version?: string | null;
+  title?: string | null;
+  species?: string | null;
+  animal_count?: number | null;
+  pickup_location_text?: string | null;
+  dropoff_location_text?: string | null;
+  pickup_window_start?: string | null;
+  pickup_window_end?: string | null;
+  delivery_window_start?: string | null;
+  delivery_window_end?: string | null;
+  pickup_lat?: number | null;
+  pickup_lng?: number | null;
+  dropoff_lat?: number | null;
+  dropoff_lng?: number | null;
 };
 
 export interface HaulerSummary {
@@ -1150,7 +1176,20 @@ export async function getLoadById(loadId: string): Promise<LoadRecord | null> {
              l.is_external,
              l.payment_mode,
              l.direct_payment_disclaimer_accepted_at,
-             l.direct_payment_disclaimer_version
+             l.direct_payment_disclaimer_version,
+             l.title,
+             l.species,
+             l.animal_count::int AS animal_count,
+             l.pickup_location_text,
+             l.dropoff_location_text,
+             l.pickup_window_start::text AS pickup_window_start,
+             l.pickup_window_end::text AS pickup_window_end,
+             l.delivery_window_start::text AS delivery_window_start,
+             l.delivery_window_end::text AS delivery_window_end,
+             l.pickup_lat::float AS pickup_lat,
+             l.pickup_lng::float AS pickup_lng,
+             l.dropoff_lat::float AS dropoff_lat,
+             l.dropoff_lng::float AS dropoff_lng
       FROM loads l
       JOIN shippers s ON s.id = l.shipper_id
       WHERE l.id = $1
