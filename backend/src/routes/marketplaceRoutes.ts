@@ -1248,18 +1248,9 @@ router.get("/trips/:tripId", authRequired, async (req, res) => {
     if (!context) {
       return res.status(404).json({ error: "Trip not found" });
     }
-    try {
-      assertDisputesEnabled(context.trip);
-    } catch (err: any) {
-      if (err?.code === "DISPUTES_DISABLED") return disputesDisabledResponse(res);
-      throw err;
-    }
-    try {
-      assertDisputesEnabled(context.trip);
-    } catch (err: any) {
-      if (err?.code === "DISPUTES_DISABLED") return disputesDisabledResponse(res);
-      throw err;
-    }
+    
+    // Check authorization - allow viewing trip details for all authorized users
+    // (disputes are only disabled for creating/managing disputes, not viewing trip details)
     const user = getAuthUser(req);
     const isShipper = isShipperForLoad(user, context.load);
     const isHauler = await isAuthorizedHaulerForTrip(user, context.trip);
@@ -1312,8 +1303,15 @@ router.get("/trips/:tripId", authRequired, async (req, res) => {
       [context.trip.id]
     );
     
+    // Parse JSONB fields for trip_loads
+    const parsedTripLoads = tripLoadsResult.rows.map((row: any) => ({
+      ...row,
+      pickup_photos: row.pickup_photos ? (typeof row.pickup_photos === 'string' ? JSON.parse(row.pickup_photos) : row.pickup_photos) : [],
+      delivery_photos: row.delivery_photos ? (typeof row.delivery_photos === 'string' ? JSON.parse(row.delivery_photos) : row.delivery_photos) : [],
+    }));
+    
     // If no trip_loads found, check if this is a single-load trip (old format)
-    let loads = tripLoadsResult.rows;
+    let loads = parsedTripLoads;
     if (loads.length === 0 && context.load) {
       // This is a single-load trip, return the load as if it were in trip_loads
       loads = [{

@@ -699,7 +699,107 @@ router.get(
       return res.status(404).json({ message: "Trip not found" });
     }
 
-    return res.json(result.rows[0]);
+    const trip = result.rows[0];
+
+    // Also fetch trip_loads with pickup/delivery status for drivers
+    let loads: any[] = [];
+    try {
+      const tripLoadsResult = await pool.query(
+        `
+          SELECT 
+            tl.id,
+            tl.trip_id,
+            tl.load_id,
+            tl.sequence_order,
+            tl.pickup_photos,
+            tl.pickup_completed_at,
+            tl.delivery_photos,
+            tl.delivery_completed_at,
+            tl.delivery_receiver_name,
+            tl.delivery_notes,
+            l.id AS load_id_full,
+            l.title,
+            l.species,
+            l.animal_count,
+            l.pickup_location_text,
+            l.dropoff_location_text,
+            l.pickup_lat,
+            l.pickup_lng,
+            l.dropoff_lat,
+            l.dropoff_lng,
+            l.pickup_window_start,
+            l.pickup_window_end,
+            l.delivery_window_start,
+            l.delivery_window_end,
+            l.status AS load_status
+          FROM trip_loads tl
+          JOIN loads l ON l.id = tl.load_id
+          WHERE tl.trip_id = $1
+          ORDER BY tl.sequence_order ASC, tl.created_at ASC
+        `,
+        [id]
+      );
+      
+      // Parse JSONB fields for trip_loads
+      loads = tripLoadsResult.rows.map((row: any) => ({
+        ...row,
+        pickup_photos: row.pickup_photos ? (typeof row.pickup_photos === 'string' ? JSON.parse(row.pickup_photos) : row.pickup_photos) : [],
+        delivery_photos: row.delivery_photos ? (typeof row.delivery_photos === 'string' ? JSON.parse(row.delivery_photos) : row.delivery_photos) : [],
+      }));
+    } catch (loadsError) {
+      // If trip_loads query fails (e.g., table doesn't exist or columns missing), continue without loads
+      console.warn("Failed to fetch trip_loads:", loadsError);
+    }
+
+    // If no trip_loads found but we have a load_id, fetch the primary load
+    let load: any = null;
+    if (loads.length === 0 && trip.load_id) {
+      try {
+        const loadResult = await pool.query(
+          `SELECT * FROM loads WHERE id = $1`,
+          [trip.load_id]
+        );
+        if (loadResult.rowCount > 0) {
+          load = loadResult.rows[0];
+          // Create a loads array with the primary load
+          loads = [{
+            id: null,
+            trip_id: trip.id,
+            load_id: load.id,
+            sequence_order: 0,
+            pickup_photos: [],
+            pickup_completed_at: null,
+            delivery_photos: [],
+            delivery_completed_at: null,
+            delivery_receiver_name: null,
+            delivery_notes: null,
+            load_id_full: load.id,
+            title: load.title,
+            species: load.species,
+            animal_count: load.animal_count,
+            pickup_location_text: load.pickup_location_text,
+            dropoff_location_text: load.dropoff_location_text,
+            pickup_lat: load.pickup_lat,
+            pickup_lng: load.pickup_lng,
+            dropoff_lat: load.dropoff_lat,
+            dropoff_lng: load.dropoff_lng,
+            pickup_window_start: load.pickup_window_start,
+            pickup_window_end: load.pickup_window_end,
+            delivery_window_start: load.delivery_window_start,
+            delivery_window_end: load.delivery_window_end,
+            load_status: load.status,
+          }];
+        }
+      } catch (loadError) {
+        console.warn("Failed to fetch primary load:", loadError);
+      }
+    }
+
+    return res.json({
+      ...trip,
+      load: load || (loads.length > 0 ? loads[0] : null),
+      loads: loads,
+    });
   } catch (err) {
     console.error("Error in GET /api/trips/:id:", err);
     return res.status(500).json({ message: "Internal server error" });

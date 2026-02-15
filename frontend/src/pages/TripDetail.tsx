@@ -10,6 +10,7 @@ import {
   deleteTripExpense,
   fetchTripByLoadId,
   fetchTripRoutePlan,
+  fetchTripLatestLocation,
   generateTripRoutePlan,
   deleteTrip,
   type TripRoutePlan,
@@ -162,6 +163,7 @@ export function HaulerTripView() {
   const [directError, setDirectError] = useState<string | null>(null);
   const [deletingTrip, setDeletingTrip] = useState(false);
   const [deleteError, setDeleteError] = useState<string | null>(null);
+  const [driverLocation, setDriverLocation] = useState<{ lat: number; lng: number } | null>(null);
   const { isIndividualHauler, subscriptionStatus, freeTripUsed, monthlyPrice, yearlyPrice } =
     useHaulerSubscription();
   const marketplaceTripId = marketplaceContext?.trip ? Number(marketplaceContext.trip.id) : null;
@@ -474,6 +476,28 @@ export function HaulerTripView() {
       });
     return () => {
       active = false;
+    };
+  }, [tripId]);
+
+  // Poll latest driver location for live position on map
+  useEffect(() => {
+    if (!tripId || !Number.isFinite(tripId)) return;
+    let cancelled = false;
+    const poll = async () => {
+      try {
+        const loc = await fetchTripLatestLocation(tripId);
+        if (!cancelled && loc) {
+          setDriverLocation({ lat: loc.latitude, lng: loc.longitude });
+        }
+      } catch {
+        if (!cancelled) setDriverLocation(null);
+      }
+    };
+    poll();
+    const interval = setInterval(poll, 15000);
+    return () => {
+      cancelled = true;
+      clearInterval(interval);
     };
   }, [tripId]);
 
@@ -1332,7 +1356,7 @@ export function HaulerTripView() {
               {/* Route Map */}
               {routeCoordinates.length > 0 && (
                 <div className="rounded-md border border-gray-200 overflow-hidden" style={{ height: '300px' }}>
-                  <RouteMap coordinates={routeCoordinates} markers={mapMarkers} />
+                  <RouteMap coordinates={routeCoordinates} markers={mapMarkers} driverLocation={driverLocation} />
                 </div>
               )}
 

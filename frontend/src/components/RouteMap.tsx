@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useMemo, useRef } from "react";
 
 const LEAFLET_CSS =
   "https://unpkg.com/leaflet@1.9.4/dist/leaflet.css";
@@ -65,6 +65,11 @@ const createCustomIcon = (L: any, type?: string, label?: string) => {
       iconChar = "✅";
       size = 34;
       break;
+    case "driver":
+      color = "#2563eb"; // Blue
+      iconChar = "🚛";
+      size = 36;
+      break;
     default:
       color = "#6b7280"; // Gray
       iconChar = "📍";
@@ -99,20 +104,30 @@ const createCustomIcon = (L: any, type?: string, label?: string) => {
 type RouteMarker = {
   lat: number;
   lng: number;
-  type?: "origin" | "destination" | "pickup" | "dropoff" | "other";
+  type?: "origin" | "destination" | "pickup" | "dropoff" | "driver" | "other";
   label?: string;
 };
 
 type RouteMapProps = {
   coordinates: Array<[number, number]>;
   markers?: RouteMarker[];
+  /** Live driver position (e.g. from GET /api/trips/:id/location/latest). Shown as a distinct marker. */
+  driverLocation?: { lat: number; lng: number } | null;
 };
 
-export function RouteMap({ coordinates, markers }: RouteMapProps) {
+export function RouteMap({ coordinates, markers, driverLocation }: RouteMapProps) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const mapRef = useRef<any>(null);
   const polylineRef = useRef<any>(null);
   const markersRef = useRef<any[]>([]);
+
+  const allMarkers = useMemo((): RouteMarker[] => {
+    const list = markers && markers.length > 0 ? [...markers] : [];
+    if (driverLocation && Number.isFinite(driverLocation.lat) && Number.isFinite(driverLocation.lng)) {
+      list.push({ lat: driverLocation.lat, lng: driverLocation.lng, type: "driver", label: "Driver" });
+    }
+    return list;
+  }, [markers, driverLocation]);
 
   useEffect(() => {
     if (!containerRef.current) return;
@@ -148,9 +163,9 @@ export function RouteMap({ coordinates, markers }: RouteMapProps) {
           weight: 4,
         }).addTo(mapRef.current);
 
-        // Add markers: use provided markers if present, otherwise start/end
-        if (markers && markers.length > 0) {
-          markers.forEach((m) => {
+        // Add markers: use provided markers + optional driver; otherwise start/end
+        if (allMarkers.length > 0) {
+          allMarkers.forEach((m) => {
             const latlng = [m.lat, m.lng] as [number, number];
             const customIcon = createCustomIcon(window.L, m.type, m.label);
             const marker = window.L.marker(latlng, { icon: customIcon });
@@ -185,7 +200,7 @@ export function RouteMap({ coordinates, markers }: RouteMapProps) {
     return () => {
       active = false;
     };
-  }, [coordinates, markers]);
+  }, [coordinates, allMarkers]);
 
   return <div ref={containerRef} className="h-80 w-full rounded-md border" />;
 }

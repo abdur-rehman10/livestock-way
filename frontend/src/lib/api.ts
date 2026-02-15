@@ -578,3 +578,31 @@ export async function generateTripRoutePlan(tripId: number): Promise<TripRoutePl
   const json = await response.json();
   return json.plan as TripRoutePlan;
 }
+
+export interface TripLatestLocation {
+  latitude: number;
+  longitude: number;
+  recorded_at: string;
+}
+
+export async function fetchTripLatestLocation(
+  tripId: number
+): Promise<TripLatestLocation | null> {
+  const response = await fetch(
+    `${API_BASE_URL}/api/trips/${tripId}/location/latest`,
+    { headers: getAuthHeaders() }
+  );
+  if (response.status === 404) return null;
+  if (!response.ok) {
+    const text = await response.text().catch(() => "");
+    throw new Error(`Failed to fetch latest location (${response.status}): ${text}`);
+  }
+  const json = await response.json();
+  const loc = json.location;
+  if (loc?.latitude == null || loc?.longitude == null) return null;
+  return {
+    latitude: loc.latitude,
+    longitude: loc.longitude,
+    recorded_at: loc.recorded_at ?? new Date().toISOString(),
+  };
+}

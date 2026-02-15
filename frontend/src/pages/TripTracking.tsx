@@ -7,6 +7,7 @@ import {
   API_BASE_URL,
   fetchTripByLoadId,
   fetchTripRoutePlan,
+  fetchTripLatestLocation,
   type TripRoutePlan,
 } from "../lib/api";
 import type { TripRecord, Payment } from "../lib/types";
@@ -75,6 +76,7 @@ export function TripTracking() {
   const [routePlan, setRoutePlan] = useState<TripRoutePlan | null>(null);
   const [routePlanLoading, setRoutePlanLoading] = useState(false);
   const [routePlanError, setRoutePlanError] = useState<string | null>(null);
+  const [driverLocation, setDriverLocation] = useState<{ lat: number; lng: number } | null>(null);
 
   const marketplaceTripId = marketplaceContext?.trip ? Number(marketplaceContext.trip.id) : null;
   const tripId = trip?.id ?? marketplaceTripId;
@@ -328,6 +330,28 @@ export function TripTracking() {
     };
   }, [tripId]);
 
+  // Poll latest driver location so shipper/hauler can see live position on map
+  useEffect(() => {
+    if (!tripId || !Number.isFinite(tripId)) return;
+    let cancelled = false;
+    const poll = async () => {
+      try {
+        const loc = await fetchTripLatestLocation(tripId);
+        if (!cancelled && loc) {
+          setDriverLocation({ lat: loc.latitude, lng: loc.longitude });
+        }
+      } catch {
+        if (!cancelled) setDriverLocation(null);
+      }
+    };
+    poll();
+    const interval = setInterval(poll, 15000);
+    return () => {
+      cancelled = true;
+      clearInterval(interval);
+    };
+  }, [tripId]);
+
   if (loading) {
     return (
       <div className="p-4 text-sm text-gray-600">Loading trip tracking…</div>
@@ -577,7 +601,7 @@ export function TripTracking() {
             {/* Route Map */}
             {routeCoordinates.length > 0 && (
               <div className="rounded-md border border-gray-200 overflow-hidden" style={{ height: "400px" }}>
-                <RouteMap coordinates={routeCoordinates} markers={mapMarkers} />
+                <RouteMap coordinates={routeCoordinates} markers={mapMarkers} driverLocation={driverLocation} />
               </div>
             )}
 
