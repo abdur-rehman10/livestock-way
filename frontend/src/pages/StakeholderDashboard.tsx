@@ -1,251 +1,150 @@
-import { useEffect, useState } from 'react';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../components/ui/card';
-import { Button } from '../components/ui/button';
-import { Badge } from '../components/ui/badge';
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '../components/ui/tabs';
-import { useNavigate } from 'react-router-dom';
-import { 
-  Wrench, 
-  Plus, 
-  MapPin, 
-  Clock, 
-  DollarSign, 
-  CheckCircle, 
+import { useEffect, useState } from "react";
+import { useNavigate } from "react-router-dom";
+import {
+  Wrench,
+  Package,
+  FileText,
+  Clock,
+  DollarSign,
+  CheckCircle,
   XCircle,
+  MapPin,
   Calendar,
   Users,
-  TrendingUp,
-  Briefcase,
-  ShoppingBag
-} from 'lucide-react';
-import { Avatar, AvatarFallback } from '../components/ui/avatar';
-import { confirmServiceBookingPayment, fetchProviderServiceBookings, respondToServiceBooking, fetchMyServices, updateService, deleteService, uploadServiceImage } from '../api/services';
-import { toast } from 'sonner';
-import { Input } from '../components/ui/input';
-import { Textarea } from '../components/ui/textarea';
-import { Checkbox } from '../components/ui/checkbox';
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '../components/ui/dialog';
-import { Label } from '../components/ui/label';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../components/ui/select';
-import { AddressSearch, type MappedAddress } from '../components/AddressSearch';
+  Activity,
+  Plus,
+  AlertCircle,
+  MessageCircle,
+  Inbox,
+} from "lucide-react";
+import { Card } from "../components/ui/card";
+import { Button } from "../components/ui/button";
+import { Badge } from "../components/ui/badge";
+import { toast } from "sonner";
+import {
+  fetchProviderDashboard,
+  fetchProviderServiceBookings,
+  respondToServiceBooking,
+  confirmServiceBookingPayment,
+  type ProviderDashboardStats,
+  type ProviderDashboardActivity,
+  type ProviderDashboardBooking,
+  type ServiceBooking,
+} from "../api/services";
 
-interface MarketplaceListing {
-  id: string;
-  type: 'job' | 'item';
-  title: string;
-  price: number;
-  location: string;
-  category: string;
-  status: 'active' | 'sold' | 'closed';
-  views: number;
+/* ---------- helpers ---------- */
+
+function formatTimeAgo(dateStr: string): string {
+  const d = new Date(dateStr);
+  const now = new Date();
+  const diffMs = now.getTime() - d.getTime();
+  const diffMins = Math.floor(diffMs / 60000);
+  const diffHours = Math.floor(diffMs / 3600000);
+  const diffDays = Math.floor(diffMs / 86400000);
+  if (diffMins < 60) return `${diffMins} min ago`;
+  if (diffHours < 24) return `${diffHours} hours ago`;
+  if (diffDays < 7) return `${diffDays} days ago`;
+  return d.toLocaleDateString();
 }
+
+function activityMeta(a: ProviderDashboardActivity) {
+  const action = a.action ?? "";
+  const resource = a.resource ?? "";
+
+  if (action.includes("service:create") || action.includes("service:post")) {
+    return { Icon: Wrench, bgColor: "bg-green-100", iconColor: "text-green-600", title: "Service created", description: resource || "New service listing", nav: "services" };
+  }
+  if (action.includes("service:update")) {
+    return { Icon: Wrench, bgColor: "bg-blue-100", iconColor: "text-blue-600", title: "Service updated", description: resource || "Service listing edited", nav: "services" };
+  }
+  if (action.includes("service:delete") || action.includes("service:archive")) {
+    return { Icon: AlertCircle, bgColor: "bg-red-100", iconColor: "text-red-600", title: "Service removed", description: resource || "Service archived", nav: "services" };
+  }
+  if (action.includes("booking:accept")) {
+    return { Icon: CheckCircle, bgColor: "bg-green-100", iconColor: "text-green-600", title: "Booking accepted", description: resource || "A booking was accepted", nav: "bookings" };
+  }
+  if (action.includes("booking:reject")) {
+    return { Icon: XCircle, bgColor: "bg-red-100", iconColor: "text-red-600", title: "Booking rejected", description: resource || "A booking was declined", nav: "bookings" };
+  }
+  if (action.includes("booking:complete")) {
+    return { Icon: CheckCircle, bgColor: "bg-emerald-100", iconColor: "text-emerald-600", title: "Booking completed", description: resource || "A booking was completed", nav: "bookings" };
+  }
+  if (action.includes("booking") || action.includes("book")) {
+    return { Icon: Calendar, bgColor: "bg-orange-100", iconColor: "text-orange-600", title: "Booking activity", description: resource || "Booking updated", nav: "bookings" };
+  }
+  if (action.includes("resource:create") || action.includes("resource:post")) {
+    return { Icon: Package, bgColor: "bg-green-100", iconColor: "text-green-600", title: "Resource posted", description: resource || "New resource listing", nav: "resources-board" };
+  }
+  if (action.includes("resource")) {
+    return { Icon: Package, bgColor: "bg-blue-100", iconColor: "text-blue-600", title: "Resource activity", description: resource || "Resource updated", nav: "resources-board" };
+  }
+  if (action.includes("payment") || action.includes("fund") || action.includes("escrow")) {
+    return { Icon: DollarSign, bgColor: "bg-green-100", iconColor: "text-green-600", title: "Payment activity", description: resource || "Payment updated", nav: "earnings" };
+  }
+  if (action.includes("message")) {
+    return { Icon: MessageCircle, bgColor: "bg-sky-100", iconColor: "text-sky-600", title: "New message", description: resource || "Message received", nav: "messages" };
+  }
+  if (action.includes("kyc") || action.includes("document")) {
+    return { Icon: FileText, bgColor: "bg-orange-100", iconColor: "text-orange-600", title: "Document activity", description: resource || "Document submitted", nav: "documents" };
+  }
+  if (action.includes("job")) {
+    return { Icon: FileText, bgColor: "bg-violet-100", iconColor: "text-violet-600", title: "Job activity", description: resource || "Job listing updated", nav: "job-board" };
+  }
+  return { Icon: Activity, bgColor: "bg-gray-100", iconColor: "text-gray-600", title: action.replace(/:/g, " ").replace(/-/g, " "), description: resource || "—", nav: null as string | null };
+}
+
+/* ---------- component ---------- */
 
 export default function StakeholderDashboard() {
   const navigate = useNavigate();
-  const [activeTab, setActiveTab] = useState('overview');
-  const handleAddService = () => navigate('/stakeholder/services/new');
-  const [pendingServiceRequests, setPendingServiceRequests] = useState<any[]>([]);
-  const [acceptedServiceRequests, setAcceptedServiceRequests] = useState<any[]>([]);
-  const [isLoadingBookings, setIsLoadingBookings] = useState(false);
+  const [dashboard, setDashboard] = useState<ProviderDashboardStats | null>(null);
+  const [recentActivities, setRecentActivities] = useState<ProviderDashboardActivity[]>([]);
+  const [pendingBookings, setPendingBookings] = useState<ServiceBooking[]>([]);
+  const [loading, setLoading] = useState(true);
   const [respondingId, setRespondingId] = useState<number | null>(null);
-  const [services, setServices] = useState<any[]>([]);
-  const [isLoadingServices, setIsLoadingServices] = useState(false);
-  const [editOpen, setEditOpen] = useState(false);
-  const [editingService, setEditingService] = useState<any | null>(null);
-  const [editSubmitting, setEditSubmitting] = useState(false);
-  const [editForm, setEditForm] = useState({
-    title: '',
-    description: '',
-    service_type: '',
-    city: '',
-    state: '',
-    price_type: 'fixed',
-    base_price: '',
-    certifications: '',
-    insured: false,
-  });
-  const [serviceLocationSearch, setServiceLocationSearch] = useState('');
-  const [serviceLocationCoords, setServiceLocationCoords] = useState<{ lat: string; lon: string } | null>(null);
 
-  // Mock data
-  const stats = [
-    { label: 'Active Services', value: '4', icon: Wrench, color: 'text-blue-600', bg: 'bg-blue-50' },
-    { label: 'Pending Bookings', value: '3', icon: Clock, color: 'text-orange-600', bg: 'bg-orange-50' },
-    { label: 'Completed Jobs', value: '127', icon: CheckCircle, color: 'text-green-600', bg: 'bg-green-50' },
-    { label: 'This Month Revenue', value: '$12,450', icon: DollarSign, color: 'text-purple-600', bg: 'bg-purple-50' },
-  ];
-
-  const marketplaceListings: MarketplaceListing[] = [
-    {
-      id: '1',
-      type: 'job',
-      title: 'Livestock Handler Needed - Full Time',
-      price: 18,
-      location: 'Denver, CO',
-      category: 'Employment',
-      status: 'active',
-      views: 45,
-    },
-    {
-      id: '2',
-      type: 'item',
-      title: 'Used Cattle Panels - Set of 20',
-      price: 450,
-      location: 'Cheyenne, WY',
-      category: 'Equipment',
-      status: 'active',
-      views: 23,
-    },
-  ];
-
-  const getCategoryIcon = (category: string) => {
-    switch (category) {
-      case 'washout': return '🚿';
-      case 'feed': return '🌾';
-      case 'vet': return '🏥';
-      case 'fuel': return '⛽';
-      case 'job-listing': return '💼';
-      default: return '🔧';
-    }
-  };
-
-  const getCategoryLabel = (category: string) => {
-    return category.charAt(0).toUpperCase() + category.slice(1).replace('-', ' ');
-  };
-
-  const loadProviderBookings = async () => {
+  const loadDashboard = async () => {
     try {
-      setIsLoadingBookings(true);
-      const [pending, accepted] = await Promise.all([
-        fetchProviderServiceBookings({ status: ['pending'] }),
-        fetchProviderServiceBookings({ status: ['accepted'] }),
+      const [dashRes, bookingsRes] = await Promise.all([
+        fetchProviderDashboard(),
+        fetchProviderServiceBookings({ status: ["pending"] }),
       ]);
-      setPendingServiceRequests(pending);
-      setAcceptedServiceRequests(accepted);
-    } catch (err: any) {
-      console.error(err);
-      toast.error(err?.message ?? 'Failed to load service requests');
+      setDashboard(dashRes);
+      setRecentActivities(dashRes.recent_activities ?? []);
+      setPendingBookings(bookingsRes);
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : "Failed to load dashboard";
+      toast.error(message);
     } finally {
-      setIsLoadingBookings(false);
+      setLoading(false);
     }
   };
 
   useEffect(() => {
-    if (activeTab === 'overview') {
-      loadProviderBookings();
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeTab]);
+    loadDashboard();
+  }, []);
 
+  // Poll bookings every 15s
   useEffect(() => {
-    if (activeTab === 'bookings') {
-      loadProviderBookings();
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeTab]);
-
-  // lightweight polling to keep incoming requests fresh
-  useEffect(() => {
-    if (activeTab !== 'overview') return;
-    const interval = setInterval(() => {
-      loadProviderBookings();
+    const interval = setInterval(async () => {
+      try {
+        const bookings = await fetchProviderServiceBookings({ status: ["pending"] });
+        setPendingBookings(bookings);
+      } catch {
+        /* silent */
+      }
     }, 15000);
     return () => clearInterval(interval);
-  }, [activeTab]);
+  }, []);
 
-  // keep booking tab fresh as well
-  useEffect(() => {
-    if (activeTab !== 'bookings') return;
-    const interval = setInterval(() => {
-      loadProviderBookings();
-    }, 15000);
-    return () => clearInterval(interval);
-  }, [activeTab]);
-
-  const loadMyServices = async () => {
-    try {
-      setIsLoadingServices(true);
-      const items = await fetchMyServices();
-      setServices(items);
-    } catch (err: any) {
-      console.error(err);
-      toast.error(err?.message ?? 'Failed to load services');
-    } finally {
-      setIsLoadingServices(false);
-    }
-  };
-
-  useEffect(() => {
-    if (activeTab === 'overview') {
-      loadMyServices();
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeTab]);
-
-  const openEdit = (service: any) => {
-    setEditingService(service);
-    setEditForm({
-      title: service.title ?? '',
-      description: service.description ?? '',
-      service_type: service.service_type ?? '',
-      city: service.city ?? '',
-      state: service.state ?? '',
-      price_type: service.price_type ?? 'fixed',
-      base_price: service.base_price?.toString() ?? '',
-      certifications: service.certifications ?? '',
-      insured: Boolean(service.insured),
-    });
-    setEditOpen(true);
-  };
-
-  const handleEditSubmit = async () => {
-    if (!editingService) return;
-    try {
-      setEditSubmitting(true);
-      const updated = await updateService(editingService.id, {
-        title: editForm.title,
-        description: editForm.description,
-        service_type: editForm.service_type,
-        city: editForm.city,
-        state: editForm.state,
-        price_type: editForm.price_type,
-        base_price: editForm.base_price ? Number(editForm.base_price) : null,
-        certifications: editForm.certifications,
-        insured: editForm.insured,
-      });
-      setServices((prev) => prev.map((s) => (s.id === updated.id ? updated : s)));
-      toast.success('Service updated');
-      setEditOpen(false);
-    } catch (err: any) {
-      console.error(err);
-      toast.error(err?.message ?? 'Failed to update service');
-    } finally {
-      setEditSubmitting(false);
-    }
-  };
-
-  const handleDelete = async (serviceId: number) => {
-    const confirmed = window.confirm('Delete this service?');
-    if (!confirmed) return;
-    try {
-      await deleteService(serviceId);
-      setServices((prev) => prev.filter((s) => s.id !== serviceId));
-      toast.success('Service deleted');
-    } catch (err: any) {
-      console.error(err);
-      toast.error(err?.message ?? 'Failed to delete service');
-    }
-  };
-
-  const handleRespond = async (bookingId: number, action: 'accept' | 'reject' | 'complete') => {
+  const handleRespond = async (bookingId: number, action: "accept" | "reject" | "complete") => {
     try {
       setRespondingId(bookingId);
       await respondToServiceBooking(bookingId, action);
-      await loadProviderBookings();
-      toast.success(`Booking ${action === 'accept' ? 'accepted' : action === 'reject' ? 'rejected' : 'completed'}`);
-    } catch (err: any) {
-      console.error(err);
-      toast.error(err?.message ?? `Failed to ${action} booking`);
+      await loadDashboard();
+      toast.success(`Booking ${action === "accept" ? "accepted" : action === "reject" ? "declined" : "completed"}`);
+    } catch (err: unknown) {
+      toast.error(err instanceof Error ? err.message : `Failed to ${action} booking`);
     } finally {
       setRespondingId(null);
     }
@@ -255,352 +154,244 @@ export default function StakeholderDashboard() {
     try {
       setRespondingId(bookingId);
       await confirmServiceBookingPayment(bookingId);
-      await loadProviderBookings();
-      toast.success('Payment confirmed');
-    } catch (err: any) {
-      console.error(err);
-      toast.error(err?.message ?? 'Failed to confirm payment');
+      await loadDashboard();
+      toast.success("Payment confirmed");
+    } catch (err: unknown) {
+      toast.error(err instanceof Error ? err.message : "Failed to confirm payment");
     } finally {
       setRespondingId(null);
     }
   };
 
-  return (
-    <div className="min-h-screen bg-[#D1D5DB]/30 p-6">
-      <div className="max-w-7xl mx-auto space-y-6">
-        {/* Header */}
-        <div className="flex items-center justify-between">
-          <div>
-            <h1 className="text-3xl mb-1">Service Provider Dashboard</h1>
-            <p className="text-muted-foreground">Manage your services and bookings</p>
-          </div>
-          <Button className="bg-[#6B7280] hover:bg-[#4B5563]" onClick={handleAddService}>
-            <Plus className="w-4 h-4 mr-2" />
-            Add Service
-          </Button>
-        </div>
+  const handleNavigate = (section: string) => {
+    const path =
+      section === "services" || section === "listings"
+        ? "/stakeholder/services"
+        : section === "bookings"
+          ? "/stakeholder/bookings"
+          : section === "messages" || section === "messenger"
+            ? "/stakeholder/messages"
+            : section === "marketplace"
+              ? "/stakeholder/marketplace"
+              : section === "earnings"
+                ? "/stakeholder/earnings"
+                : section === "documents"
+                  ? "/stakeholder/documents"
+                  : section === "post-resource"
+                    ? "/stakeholder/post-resource"
+                    : section === "resources-board"
+                      ? "/stakeholder/resources-board"
+                      : section === "job-board"
+                        ? "/stakeholder/job-board"
+                        : `/stakeholder/${section}`;
+    navigate(path);
+  };
 
-        {/* Stats Cards */}
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-          {stats.map((stat, index) => {
-            const Icon = stat.icon;
+  /* ---- derived data ---- */
+
+  const stats = dashboard
+    ? [
+        {
+          label: "Active Services",
+          value: String(dashboard.active_services_count),
+          trend:
+            dashboard.active_services_count > 0
+              ? `${dashboard.active_services_count} listed`
+              : "None listed",
+          color: "#53ca97",
+          icon: Wrench,
+          clickAction: "services",
+        },
+        {
+          label: "Pending Bookings",
+          value: String(dashboard.pending_bookings_count),
+          trend:
+            dashboard.pending_bookings_count > 0
+              ? `${dashboard.pending_bookings_count} awaiting response`
+              : "All clear",
+          color: "#f59e0b",
+          icon: Clock,
+          clickAction: "bookings",
+        },
+        {
+          label: "Completed Jobs",
+          value: String(dashboard.completed_bookings_count),
+          trend: "Total completed",
+          color: "#3b82f6",
+          icon: CheckCircle,
+          clickAction: "services",
+        },
+        {
+          label: "Resource Listings",
+          value: String(dashboard.active_resources_count),
+          trend:
+            dashboard.active_resources_count > 0
+              ? `${dashboard.active_resources_count} active`
+              : "None posted",
+          color: "#8b5cf6",
+          icon: Package,
+          clickAction: "resources-board",
+        },
+      ]
+    : [];
+
+  const quickActions = [
+    { label: "Add Service", action: "services/new", icon: Wrench },
+    { label: "Post Resource", action: "post-resource", icon: Package },
+    { label: "View Listings", action: "services", icon: FileText },
+    { label: "Check Messages", action: "messages", icon: Inbox },
+  ];
+
+  if (loading) {
+    return (
+      <div className="p-6">
+        <div className="text-gray-500">Loading dashboard...</div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="p-6 space-y-6">
+      {/* Welcome */}
+      <div>
+        <h1 className="text-2xl font-semibold mb-2">Welcome back!</h1>
+        <p className="text-gray-500">
+          Here&apos;s what&apos;s happening with your resources &amp; services today.
+        </p>
+      </div>
+
+      {/* Stats Grid */}
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+        {stats.map((stat, index) => {
+          const Icon = stat.icon;
+          return (
+            <Card
+              key={index}
+              className="p-5 hover:shadow-lg transition-all cursor-pointer group"
+              onClick={() => handleNavigate(stat.clickAction)}
+            >
+              <div className="flex items-start justify-between mb-3">
+                <div
+                  className="w-11 h-11 rounded-lg flex items-center justify-center group-hover:scale-110 transition-transform"
+                  style={{ backgroundColor: `${stat.color}15` }}
+                >
+                  <Icon className="w-5 h-5" style={{ color: stat.color }} />
+                </div>
+              </div>
+              <div className="mb-1">
+                <div className="text-2xl mb-1">{stat.value}</div>
+                <div className="text-sm text-gray-600">{stat.label}</div>
+              </div>
+              <div className="text-xs text-gray-500 mt-2">{stat.trend}</div>
+            </Card>
+          );
+        })}
+      </div>
+
+      {/* Quick Actions */}
+      <div>
+        <h2 className="mb-3 text-lg font-medium">Quick Actions</h2>
+        <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
+          {quickActions.map((action, index) => {
+            const Icon = action.icon;
             return (
-              <Card key={index}>
-                <CardContent className="p-6">
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <p className="text-sm text-muted-foreground mb-1">{stat.label}</p>
-                      <p className="text-2xl">{stat.value}</p>
-                    </div>
-                    <div className={`w-12 h-12 rounded-full ${stat.bg} flex items-center justify-center`}>
-                      <Icon className={`w-6 h-6 ${stat.color}`} />
-                    </div>
+              <Card
+                key={index}
+                className="p-4 hover:shadow-md transition-all cursor-pointer group border-2 border-transparent hover:border-[#6B7280]"
+                onClick={() => handleNavigate(action.action)}
+              >
+                <div className="flex items-center gap-3">
+                  <div
+                    className="w-10 h-10 rounded-lg flex items-center justify-center transition-colors"
+                    style={{ backgroundColor: "#f3f4f6" }}
+                  >
+                    <Icon className="w-5 h-5 transition-colors" style={{ color: "#6B7280" }} />
                   </div>
-                </CardContent>
+                  <div className="text-sm font-medium group-hover:translate-x-1 transition-transform">
+                    {action.label}
+                  </div>
+                </div>
               </Card>
             );
           })}
         </div>
+      </div>
 
-        {/* Main Content Tabs */}
-        <Tabs value={activeTab} onValueChange={setActiveTab}>
-          <TabsList className="grid w-full grid-cols-3">
-            <TabsTrigger value="overview">Overview</TabsTrigger>
-            <TabsTrigger value="bookings">
-              Booking Requests
-              {pendingServiceRequests.length > 0 && (
-                <Badge variant="destructive" className="ml-2">
-                  {pendingServiceRequests.length}
-                </Badge>
-              )}
-            </TabsTrigger>
-            <TabsTrigger value="marketplace">Marketplace</TabsTrigger>
-          </TabsList>
+      {/* Pending Booking Requests */}
+      {pendingBookings.length > 0 && (
+        <div>
+          <div className="flex items-center justify-between mb-3">
+            <h2 className="text-lg font-medium flex items-center gap-2">
+              Pending Requests
+              <Badge className="text-xs px-2 py-0.5 bg-orange-500 text-white">
+                {pendingBookings.length}
+              </Badge>
+            </h2>
+            <Button
+              variant="outline"
+              size="sm"
+              className="text-sm"
+              onClick={() => handleNavigate("bookings")}
+            >
+              View All Bookings
+            </Button>
+          </div>
 
-          {/* Overview Tab */}
-          <TabsContent value="overview" className="space-y-6">
-            {/* Service Listings */}
-            <Card>
-              <CardHeader>
-                <div className="flex items-center justify-between">
-                  <div>
-                    <CardTitle>My Services</CardTitle>
-                    <CardDescription>Manage your service offerings</CardDescription>
-                  </div>
-                  <Button variant="outline" size="sm" onClick={handleAddService}>
-                    <Plus className="w-4 h-4 mr-2" />
-                    Add Service
-                  </Button>
-                </div>
-              </CardHeader>
-              <CardContent>
-                <div className="space-y-3">
-                  {isLoadingServices ? (
-                    <div className="text-sm text-muted-foreground">Loading services...</div>
-                  ) : services.length === 0 ? (
-                    <div className="text-sm text-muted-foreground">No services yet. Post one to get started.</div>
-                  ) : (
-                    services.map((service) => (
-                      <div
-                        key={service.id}
-                        className="flex items-center justify-between p-4 border rounded-lg hover:bg-muted/50 transition-colors gap-4"
-                      >
-                        <div className="flex items-start gap-3 flex-1">
-                          {service.images?.length ? (
-                            <img
-                              src={service.images[0]}
-                              alt={service.title}
-                              className="h-12 w-12 rounded-lg object-cover border"
-                            />
-                          ) : (
-                            <div className="h-12 w-12 rounded-lg bg-muted flex items-center justify-center text-lg">
-                              {getCategoryIcon(service.service_type)}
-                            </div>
-                          )}
-                          <div className="flex-1">
-                            <div className="flex items-center gap-2 mb-1">
-                              <h4>{service.title}</h4>
-                              <Badge variant="secondary" className="capitalize">{service.price_type}</Badge>
-                            </div>
-                            <div className="flex flex-wrap items-center gap-3 text-sm text-muted-foreground">
-                              {service.city ? (
-                                <span className="flex items-center gap-1">
-                                  <MapPin className="w-4 h-4" />
-                                  {service.city}{service.state ? `, ${service.state}` : ''}
-                                </span>
-                              ) : null}
-                              {service.base_price ? (
-                                <span>${service.base_price}</span>
-                              ) : null}
-                              {service.insured ? <Badge variant="outline">Insured</Badge> : null}
-                            </div>
-                          </div>
-                        </div>
-                        <div className="flex gap-2">
-                          <Button variant="outline" size="sm" onClick={() => openEdit(service)}>Edit</Button>
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            className="text-red-600 hover:text-red-700"
-                            onClick={() => handleDelete(service.id)}
-                          >
-                            Delete
-                          </Button>
-                        </div>
+          <div className="space-y-3">
+            {pendingBookings.slice(0, 5).map((booking) => {
+              const requestedBy = booking.hauler_company || booking.hauler_name || "Hauler";
+              const createdAt = booking.created_at ? new Date(booking.created_at) : null;
+              const dateLabel = createdAt ? createdAt.toLocaleDateString() : "—";
+              const locationLabel = booking.service?.city
+                ? `${booking.service.city}${booking.service.state ? `, ${booking.service.state}` : ""}`
+                : "—";
+              const priceLabel = booking.price ?? booking.service?.base_price ?? null;
+              const status = String(booking.status ?? "").toLowerCase();
+              const paymentStatus = String(booking.payment_status ?? "").toLowerCase();
+
+              return (
+                <Card
+                  key={booking.id}
+                  className="p-4 border-l-4 border-l-orange-400"
+                >
+                  <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+                    <div className="flex-1">
+                      <div className="flex items-center gap-2 mb-1">
+                        <h4 className="font-semibold">
+                          {booking.service?.title ?? "Service Request"}
+                        </h4>
+                        <Badge variant="secondary" className="capitalize text-xs">
+                          {booking.status}
+                        </Badge>
                       </div>
-                    ))
-                  )}
-                </div>
-              </CardContent>
-            </Card>
-
-            {/* Service Requests */}
-            <Card>
-              <CardHeader>
-                <div className="flex items-center justify-between">
-                  <div>
-                    <CardTitle>Service Requests</CardTitle>
-                    <CardDescription>Incoming requests awaiting your response</CardDescription>
-                  </div>
-                  <Badge variant="secondary">
-                    {isLoadingBookings ? 'Loading...' : `${pendingServiceRequests.length} pending`}
-                  </Badge>
-                </div>
-              </CardHeader>
-              <CardContent className="space-y-3">
-                {isLoadingBookings ? (
-                  <div className="text-sm text-muted-foreground">Loading requests...</div>
-                ) : pendingServiceRequests.length === 0 ? (
-                  <div className="text-sm text-muted-foreground">No requests yet.</div>
-                ) : (
-                  pendingServiceRequests.map((booking) => {
-                    const status = String(booking.status ?? '').toLowerCase();
-                    const paymentStatus = String(booking.payment_status ?? '').toLowerCase();
-                    const canAcceptReject = status === 'pending';
-                    const canComplete = status === 'accepted' && paymentStatus === 'paid';
-
-                    return (
-                    <div
-                      key={booking.id}
-                      className="flex flex-col gap-3 rounded-lg border p-4 md:flex-row md:items-center md:justify-between"
-                    >
-                      <div className="flex-1">
-                        <div className="flex items-center gap-2">
-                          <h4 className="font-semibold">{booking.service?.title ?? 'Service'}</h4>
-                          <Badge variant="secondary" className="capitalize">
-                            {booking.status}
-                          </Badge>
-                        </div>
-                        <p className="text-sm text-muted-foreground">
-                          Location: {booking.service?.city ? `${booking.service.city}${booking.service.state ? `, ${booking.service.state}` : ''}` : '—'}
-                        </p>
-                        <p className="text-xs text-muted-foreground">
-                          Payment: {booking.payment_status}
-                        </p>
+                      <div className="flex flex-wrap items-center gap-3 text-sm text-gray-500">
+                        <span className="flex items-center gap-1">
+                          <Users className="w-3.5 h-3.5" />
+                          {requestedBy}
+                        </span>
+                        <span className="flex items-center gap-1">
+                          <Calendar className="w-3.5 h-3.5" />
+                          {dateLabel}
+                        </span>
+                        <span className="flex items-center gap-1">
+                          <MapPin className="w-3.5 h-3.5" />
+                          {locationLabel}
+                        </span>
+                        {priceLabel !== null && (
+                          <span className="flex items-center gap-1">
+                            <DollarSign className="w-3.5 h-3.5" />
+                            ${priceLabel}
+                          </span>
+                        )}
                       </div>
-                      <div className="flex flex-wrap gap-2">
-                        <Button
-                          size="sm"
-                          variant="secondary"
-                          onClick={() => handleRespond(booking.id, 'complete')}
-                          disabled={
-                            respondingId === booking.id || !canComplete
-                          }
-                        >
-                          Mark Complete
-                        </Button>
-                        {status === 'accepted' && (paymentStatus === 'sent' || paymentStatus === 'pending') ? (
+                    </div>
+                    <div className="flex flex-wrap gap-2">
+                      {status === "pending" && (
+                        <>
                           <Button
                             size="sm"
-                            className="bg-[#303845] hover:bg-[#1f2735]"
-                            onClick={() => handleConfirmPayment(booking.id)}
-                            disabled={respondingId === booking.id}
-                          >
-                            Confirm Payment
-                          </Button>
-                        ) : null}
-                        {canAcceptReject ? (
-                          <>
-                            <Button
-                              size="sm"
-                              className="bg-green-600 hover:bg-green-700"
-                              onClick={() => handleRespond(booking.id, 'accept')}
-                              disabled={respondingId === booking.id}
-                            >
-                              Accept
-                            </Button>
-                            <Button
-                              size="sm"
-                              variant="outline"
-                              onClick={() => handleRespond(booking.id, 'reject')}
-                              disabled={respondingId === booking.id}
-                            >
-                              Reject
-                            </Button>
-                          </>
-                        ) : null}
-                      </div>
-                    </div>
-                    );
-                  })
-                )}
-              </CardContent>
-            </Card>
-
-            {/* Quick Stats */}
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <Card>
-                <CardHeader>
-                  <CardTitle className="text-lg">Recent Activity</CardTitle>
-                </CardHeader>
-                <CardContent>
-                  <div className="space-y-3">
-                    <div className="flex items-center gap-3 text-sm">
-                      <div className="w-2 h-2 rounded-full bg-green-500" />
-                      <span className="text-muted-foreground">Booking confirmed for Washout Service</span>
-                      <span className="text-xs text-muted-foreground ml-auto">2h ago</span>
-                    </div>
-                    <div className="flex items-center gap-3 text-sm">
-                      <div className="w-2 h-2 rounded-full bg-blue-500" />
-                      <span className="text-muted-foreground">New booking request received</span>
-                      <span className="text-xs text-muted-foreground ml-auto">4h ago</span>
-                    </div>
-                    <div className="flex items-center gap-3 text-sm">
-                      <div className="w-2 h-2 rounded-full bg-orange-500" />
-                      <span className="text-muted-foreground">Service updated: Fuel Station</span>
-                      <span className="text-xs text-muted-foreground ml-auto">1d ago</span>
-                    </div>
-                  </div>
-                </CardContent>
-              </Card>
-
-              <Card>
-                <CardHeader>
-                  <CardTitle className="text-lg">Top Services</CardTitle>
-                </CardHeader>
-                <CardContent>
-                  <div className="space-y-3">
-                    <div className="flex items-center justify-between">
-                      <span className="text-sm">Fuel Station</span>
-                      <Badge>156 bookings</Badge>
-                    </div>
-                    <div className="flex items-center justify-between">
-                      <span className="text-sm">Veterinary Services</span>
-                      <Badge variant="secondary">45 bookings</Badge>
-                    </div>
-                    <div className="flex items-center justify-between">
-                      <span className="text-sm">Hay & Feed Supply</span>
-                      <Badge variant="secondary">28 bookings</Badge>
-                    </div>
-                  </div>
-                </CardContent>
-              </Card>
-            </div>
-          </TabsContent>
-
-          {/* Booking Requests Tab */}
-          <TabsContent value="bookings" className="space-y-4">
-            <Card>
-              <CardHeader>
-                <CardTitle>Pending Booking Requests</CardTitle>
-                <CardDescription>Review and respond to service booking requests</CardDescription>
-              </CardHeader>
-              <CardContent>
-                <div className="space-y-3">
-                  {pendingServiceRequests.map((booking: any) => {
-                    const requestedBy =
-                      booking.hauler_company || booking.hauler_name || 'Hauler';
-                    const createdAt = booking.created_at ? new Date(booking.created_at) : null;
-                    const dateLabel = createdAt ? createdAt.toLocaleDateString() : '—';
-                    const timeLabel = createdAt
-                      ? createdAt.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
-                      : '—';
-                    const locationLabel = booking.service?.city
-                      ? `${booking.service.city}${booking.service.state ? `, ${booking.service.state}` : ''}`
-                      : '—';
-                    const priceLabel = booking.price ?? booking.service?.base_price ?? null;
-                    return (
-                    <div
-                      key={booking.id}
-                      className="flex items-center justify-between p-4 border rounded-lg bg-orange-50 border-orange-200"
-                    >
-                      <div className="flex items-start gap-4 flex-1">
-                        <Avatar className="w-12 h-12">
-                          <AvatarFallback className="bg-orange-200 text-orange-700">
-                            {requestedBy.charAt(0)}
-                          </AvatarFallback>
-                        </Avatar>
-                        <div className="flex-1">
-                          <h4 className="mb-1">{booking.service?.title ?? 'Service request'}</h4>
-                          <p className="text-sm text-muted-foreground mb-2">
-                            Requested by {requestedBy}
-                          </p>
-                          <div className="flex items-center gap-4 text-sm text-muted-foreground">
-                            <span className="flex items-center gap-1">
-                              <Calendar className="w-4 h-4" />
-                              {dateLabel}
-                            </span>
-                            <span className="flex items-center gap-1">
-                              <Clock className="w-4 h-4" />
-                              {timeLabel}
-                            </span>
-                            <span className="flex items-center gap-1">
-                              <MapPin className="w-4 h-4" />
-                              {locationLabel}
-                            </span>
-                          </div>
-                        </div>
-                      </div>
-                      <div className="text-right">
-                        <p className="text-lg mb-3">{priceLabel !== null ? `$${priceLabel}` : 'Request Quote'}</p>
-                        <p className="text-xs text-muted-foreground mb-2">
-                          Payment: {booking.payment_status}
-                        </p>
-                        <div className="flex gap-2">
-                          <Button
-                            size="sm"
-                            className="bg-green-600 hover:bg-green-700"
-                            onClick={() => handleRespond(booking.id, 'accept')}
+                            className="bg-green-600 hover:bg-green-700 text-white"
+                            onClick={() => handleRespond(booking.id, "accept")}
                             disabled={respondingId === booking.id}
                           >
                             <CheckCircle className="w-4 h-4 mr-1" />
@@ -610,264 +401,228 @@ export default function StakeholderDashboard() {
                             size="sm"
                             variant="outline"
                             className="text-red-600 hover:text-red-700"
-                            onClick={() => handleRespond(booking.id, 'reject')}
+                            onClick={() => handleRespond(booking.id, "reject")}
                             disabled={respondingId === booking.id}
                           >
                             <XCircle className="w-4 h-4 mr-1" />
                             Decline
                           </Button>
-                        </div>
-                      </div>
+                        </>
+                      )}
+                      {status === "accepted" && (paymentStatus === "sent" || paymentStatus === "pending") && (
+                        <Button
+                          size="sm"
+                          className="bg-[#303845] hover:bg-[#1f2735] text-white"
+                          onClick={() => handleConfirmPayment(booking.id)}
+                          disabled={respondingId === booking.id}
+                        >
+                          Confirm Payment
+                        </Button>
+                      )}
+                      {status === "accepted" && paymentStatus === "paid" && (
+                        <Button
+                          size="sm"
+                          variant="secondary"
+                          onClick={() => handleRespond(booking.id, "complete")}
+                          disabled={respondingId === booking.id}
+                        >
+                          Mark Complete
+                        </Button>
+                      )}
                     </div>
-                    );
-                  })}
-
-                  {pendingServiceRequests.length === 0 && (
-                    <div className="text-center py-12 text-muted-foreground">
-                      <Clock className="w-12 h-12 mx-auto mb-3 opacity-20" />
-                      <p>No pending booking requests</p>
-                    </div>
-                  )}
-                </div>
-              </CardContent>
-            </Card>
-
-            {/* Confirmed Bookings */}
-            <Card>
-              <CardHeader>
-                <CardTitle>Upcoming Confirmed Bookings</CardTitle>
-              </CardHeader>
-              <CardContent>
-                <div className="space-y-3">
-                  {acceptedServiceRequests.map((booking: any) => {
-                    const requestedBy =
-                      booking.hauler_company || booking.hauler_name || 'Hauler';
-                    const createdAt = booking.created_at ? new Date(booking.created_at) : null;
-                    const dateLabel = createdAt ? createdAt.toLocaleDateString() : '—';
-                    const timeLabel = createdAt
-                      ? createdAt.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
-                      : '—';
-                    return (
-                    <div
-                      key={booking.id}
-                      className="flex items-center justify-between p-4 border rounded-lg"
-                    >
-                      <div className="flex items-start gap-4 flex-1">
-                        <Avatar className="w-12 h-12">
-                          <AvatarFallback>{requestedBy.charAt(0)}</AvatarFallback>
-                        </Avatar>
-                        <div>
-                          <h4 className="mb-1">{booking.service?.title ?? 'Service booking'}</h4>
-                          <p className="text-sm text-muted-foreground">{requestedBy}</p>
-                          <p className="text-sm text-muted-foreground">
-                            {dateLabel} at {timeLabel}
-                          </p>
-                        </div>
-                      </div>
-                      <div className="flex items-center gap-2">
-                        <Badge>Confirmed</Badge>
-                        <Badge variant={booking.payment_status === 'paid' ? 'default' : 'secondary'}>
-                          {booking.payment_status}
-                        </Badge>
-                      </div>
-                    </div>
-                    );
-                  })}
-                  {acceptedServiceRequests.length === 0 && (
-                    <div className="text-center py-8 text-muted-foreground">
-                      <CheckCircle className="w-12 h-12 mx-auto mb-3 opacity-20" />
-                      <p>No confirmed bookings yet</p>
-                      <p className="text-sm">Accept pending requests to see them here</p>
-                    </div>
-                  )}
-                </div>
-              </CardContent>
-            </Card>
-          </TabsContent>
-
-          {/* Marketplace Tab */}
-          <TabsContent value="marketplace" className="space-y-4">
-            <Card>
-              <CardHeader>
-                <div className="flex items-center justify-between">
-                  <div>
-                    <CardTitle>My Marketplace Listings</CardTitle>
-                    <CardDescription>Job postings and items for sale</CardDescription>
                   </div>
-                  <div className="flex gap-2">
-                    <Button variant="outline" size="sm">
-                      <Briefcase className="w-4 h-4 mr-2" />
-                      Post Job
-                    </Button>
-                    <Button variant="outline" size="sm">
-                      <ShoppingBag className="w-4 h-4 mr-2" />
-                      Sell Item
-                    </Button>
-                  </div>
+                </Card>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+      {/* Services & Bookings Overview */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+        {/* My Services overview */}
+        <Card className="p-5">
+          <div className="flex items-center justify-between mb-4">
+            <div className="flex items-center gap-2">
+              <Wrench className="w-5 h-5 text-[#6B7280]" />
+              <h3 className="text-sm font-medium">My Services</h3>
+            </div>
+            <Button
+              variant="outline"
+              size="sm"
+              className="text-xs"
+              onClick={() => handleNavigate("services")}
+            >
+              Manage
+            </Button>
+          </div>
+          <div className="space-y-3">
+            <div className="p-3 bg-gray-50 rounded-lg">
+              <div className="flex items-center justify-between mb-1">
+                <span className="text-sm text-gray-600">Active Services</span>
+                <span className="text-lg font-medium">{dashboard?.active_services_count ?? 0}</span>
+              </div>
+              <p className="text-xs text-gray-500">Listed and available for bookings</p>
+            </div>
+            <div className="p-3 bg-gray-50 rounded-lg">
+              <div className="flex items-center justify-between mb-1">
+                <span className="text-sm text-gray-600">Completed Bookings</span>
+                <span className="text-lg font-medium">{dashboard?.completed_bookings_count ?? 0}</span>
+              </div>
+              <p className="text-xs text-gray-500">All-time completed jobs</p>
+            </div>
+            <Button
+              className="w-full bg-[#6B7280] hover:bg-[#4B5563] text-white"
+              size="sm"
+              onClick={() => handleNavigate("services/new")}
+            >
+              <Plus className="w-4 h-4 mr-2" />
+              Add New Service
+            </Button>
+          </div>
+        </Card>
+
+        {/* Resource Listings overview */}
+        <Card className="p-5">
+          <div className="flex items-center justify-between mb-4">
+            <div className="flex items-center gap-2">
+              <Package className="w-5 h-5 text-[#8b5cf6]" />
+              <h3 className="text-sm font-medium">Resource Listings</h3>
+            </div>
+            <Button
+              variant="outline"
+              size="sm"
+              className="text-xs"
+              onClick={() => handleNavigate("resources-board")}
+            >
+              View Board
+            </Button>
+          </div>
+          <div className="space-y-3">
+            <div className="p-3 bg-gray-50 rounded-lg">
+              <div className="flex items-center justify-between mb-1">
+                <span className="text-sm text-gray-600">Active Listings</span>
+                <span className="text-lg font-medium">{dashboard?.active_resources_count ?? 0}</span>
+              </div>
+              <p className="text-xs text-gray-500">Resource listings you have posted</p>
+            </div>
+            <div className="p-3 bg-violet-50 border border-violet-200 rounded-lg">
+              <div className="flex items-start gap-2">
+                <Package className="w-4 h-4 text-violet-600 mt-0.5" />
+                <div>
+                  <p className="text-sm text-violet-900 font-medium">Post a Resource</p>
+                  <p className="text-xs text-violet-700 mt-0.5">
+                    Share logistics, insurance, washout, hay and more with the community.
+                  </p>
                 </div>
-              </CardHeader>
-              <CardContent>
-                <div className="space-y-3">
-                  {marketplaceListings.map((listing) => (
-                    <div
-                      key={listing.id}
-                      className="flex items-center justify-between p-4 border rounded-lg hover:bg-muted/50 transition-colors"
-                    >
-                      <div className="flex items-start gap-4 flex-1">
-                        <div className="w-16 h-16 rounded-lg bg-muted flex items-center justify-center text-2xl">
-                          {listing.type === 'job' ? '💼' : '🛒'}
-                        </div>
-                        <div className="flex-1">
-                          <div className="flex items-center gap-2 mb-1">
-                            <h4>{listing.title}</h4>
-                            <Badge variant={listing.status === 'active' ? 'default' : 'secondary'}>
-                              {listing.status}
-                            </Badge>
-                          </div>
-                          <div className="flex items-center gap-4 text-sm text-muted-foreground">
-                            <span>{listing.category}</span>
-                            <span className="flex items-center gap-1">
-                              <MapPin className="w-4 h-4" />
-                              {listing.location}
-                            </span>
-                            <span>{listing.views} views</span>
-                          </div>
-                        </div>
-                      </div>
-                      <div className="text-right">
-                        <p className="mb-2">
-                          ${listing.price}
-                          <span className="text-sm text-muted-foreground">
-                            {listing.type === 'job' ? '/hr' : ''}
-                          </span>
-                        </p>
-                        <div className="flex gap-2">
-                          <Button variant="outline" size="sm">Edit</Button>
-                          <Button variant="ghost" size="sm" className="text-red-600">Remove</Button>
-                        </div>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </CardContent>
-            </Card>
-          </TabsContent>
-        </Tabs>
+              </div>
+            </div>
+            <Button
+              className="w-full bg-[#8b5cf6] hover:bg-[#7c3aed] text-white"
+              size="sm"
+              onClick={() => handleNavigate("post-resource")}
+            >
+              <Plus className="w-4 h-4 mr-2" />
+              Post a Resource
+            </Button>
+          </div>
+        </Card>
       </div>
 
-      <Dialog open={editOpen} onOpenChange={setEditOpen}>
-        <DialogContent className="max-w-xl">
-          <DialogHeader>
-            <DialogTitle>Edit Service</DialogTitle>
-            <DialogDescription>Update service details</DialogDescription>
-          </DialogHeader>
-          <div className="space-y-3">
-            <div className="space-y-1">
-              <Label>Title</Label>
-              <Input
-                value={editForm.title}
-                onChange={(e) => setEditForm((f) => ({ ...f, title: e.target.value }))}
-              />
-            </div>
-            <div className="space-y-1">
-              <Label>Description</Label>
-              <Textarea
-                value={editForm.description}
-                onChange={(e) => setEditForm((f) => ({ ...f, description: e.target.value }))}
-                rows={3}
-              />
-            </div>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-              <div className="space-y-1">
-                <Label>Service Type</Label>
-                <Input
-                  value={editForm.service_type}
-                  onChange={(e) => setEditForm((f) => ({ ...f, service_type: e.target.value }))}
-                  placeholder="e.g., washout"
-                />
-              </div>
-              <div className="space-y-1">
-                <Label>Price Type</Label>
-                <Select
-                  value={editForm.price_type}
-                  onValueChange={(val) => setEditForm((f) => ({ ...f, price_type: val }))}
-                >
-                  <SelectTrigger>
-                    <SelectValue placeholder="Select" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="fixed">Fixed</SelectItem>
-                    <SelectItem value="hourly">Hourly</SelectItem>
-                    <SelectItem value="quote">Request Quote</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-            </div>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-              <div className="space-y-1">
-                <Label>Base Price</Label>
-                <Input
-                  type="number"
-                  value={editForm.base_price}
-                  onChange={(e) => setEditForm((f) => ({ ...f, base_price: e.target.value }))}
-                />
-              </div>
-              <div className="space-y-1">
-                <Label>Location</Label>
-                <AddressSearch
-                  value={serviceLocationSearch}
-                  onChange={setServiceLocationSearch}
-                  onSelect={(mapped: MappedAddress) => {
-                    setServiceLocationSearch(mapped.fullText);
-                    setServiceLocationCoords({ lat: mapped.lat, lon: mapped.lon });
-                    setEditForm((f) => ({
-                      ...f,
-                      city: mapped.city,
-                      state: mapped.state,
-                    }));
-                  }}
-                  disabled={editSubmitting}
-                />
-                <div className="flex gap-2">
-                  <Input
-                    placeholder="City"
-                    value={editForm.city}
-                    onChange={(e) => setEditForm((f) => ({ ...f, city: e.target.value }))}
-                  />
-                  <Input
-                    placeholder="State"
-                    value={editForm.state}
-                    onChange={(e) => setEditForm((f) => ({ ...f, state: e.target.value }))}
-                  />
-                </div>
-              </div>
-            </div>
-            <div className="space-y-1">
-              <Label>Certifications</Label>
-              <Textarea
-                rows={2}
-                value={editForm.certifications}
-                onChange={(e) => setEditForm((f) => ({ ...f, certifications: e.target.value }))}
-              />
-            </div>
-            <div className="flex items-center gap-2">
-              <Checkbox
-                checked={editForm.insured}
-                onCheckedChange={(checked) => setEditForm((f) => ({ ...f, insured: !!checked }))}
-              />
-              <Label>Fully Insured & Bonded</Label>
-            </div>
+      {/* Recent Bookings + Recent Activities */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+        {/* Recent Bookings */}
+        <Card className="p-5">
+          <div className="flex items-center justify-between mb-4">
+            <h3 className="text-sm font-medium">Recent Bookings</h3>
+            <Button
+              variant="outline"
+              size="sm"
+              className="text-xs"
+              onClick={() => handleNavigate("bookings")}
+            >
+              View All
+            </Button>
           </div>
-          <DialogFooter className="mt-4">
-            <Button variant="outline" onClick={() => setEditOpen(false)} disabled={editSubmitting}>
-              Cancel
-            </Button>
-            <Button onClick={handleEditSubmit} disabled={editSubmitting}>
-              {editSubmitting ? 'Saving...' : 'Save'}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+          <div className="space-y-3">
+            {(dashboard?.recent_bookings ?? []).length === 0 ? (
+              <div className="text-center py-6 text-gray-400">
+                <Calendar className="w-10 h-10 mx-auto mb-2 opacity-30" />
+                <p className="text-sm">No bookings yet</p>
+              </div>
+            ) : (
+              (dashboard?.recent_bookings ?? []).slice(0, 6).map((b: ProviderDashboardBooking) => {
+                const statusColor =
+                  b.status === "completed"
+                    ? "bg-green-100 text-green-700"
+                    : b.status === "accepted"
+                      ? "bg-blue-100 text-blue-700"
+                      : b.status === "pending"
+                        ? "bg-orange-100 text-orange-700"
+                        : "bg-gray-100 text-gray-600";
+                return (
+                  <div
+                    key={b.id}
+                    className="flex items-center justify-between py-2 border-b last:border-0"
+                  >
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-medium truncate">{b.service_title}</p>
+                      <p className="text-xs text-gray-500">
+                        {b.city ? `${b.city}${b.state ? `, ${b.state}` : ""}` : "—"} &middot;{" "}
+                        {formatTimeAgo(b.created_at)}
+                      </p>
+                    </div>
+                    <div className="flex items-center gap-2 ml-2">
+                      {b.price != null && (
+                        <span className="text-sm font-medium">${b.price}</span>
+                      )}
+                      <Badge className={`text-xs capitalize ${statusColor}`}>{b.status}</Badge>
+                    </div>
+                  </div>
+                );
+              })
+            )}
+          </div>
+        </Card>
+
+        {/* Recent Activities */}
+        <Card className="p-5">
+          <div className="flex items-center justify-between mb-4">
+            <h3 className="text-sm font-medium">Recent Activities</h3>
+          </div>
+          <div className="space-y-3">
+            {recentActivities.length === 0 ? (
+              <div className="text-center py-6 text-gray-400">
+                <Activity className="w-10 h-10 mx-auto mb-2 opacity-30" />
+                <p className="text-sm">No recent activity</p>
+              </div>
+            ) : (
+              recentActivities.slice(0, 8).map((act) => {
+                const m = activityMeta(act);
+                const Icon = m.Icon;
+                return (
+                  <div
+                    key={act.id}
+                    className={`flex items-start gap-3 p-2 rounded-lg hover:bg-gray-50 transition-colors ${m.nav ? "cursor-pointer" : ""}`}
+                    onClick={() => m.nav && handleNavigate(m.nav)}
+                  >
+                    <div className={`w-8 h-8 rounded-full ${m.bgColor} flex items-center justify-center flex-shrink-0 mt-0.5`}>
+                      <Icon className={`w-4 h-4 ${m.iconColor}`} />
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-medium">{m.title}</p>
+                      <p className="text-xs text-gray-500 truncate">{m.description}</p>
+                    </div>
+                    <span className="text-xs text-gray-400 flex-shrink-0">
+                      {formatTimeAgo(act.created_at)}
+                    </span>
+                  </div>
+                );
+              })
+            )}
+          </div>
+        </Card>
+      </div>
     </div>
   );
 }

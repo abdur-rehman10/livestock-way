@@ -14,6 +14,7 @@ import {
   archiveServiceListing,
   confirmBookingPayment,
 } from "../services/serviceListingsService";
+import { pool } from "../config/database";
 
 const router = Router();
 
@@ -162,6 +163,99 @@ router.get("/bookings/provider/mine", authRequired, async (req, res) => {
   } catch (err) {
     console.error("list provider bookings failed", err);
     res.status(500).json({ error: "Failed to load bookings" });
+  }
+});
+
+router.get("/provider/dashboard", authRequired, async (req, res) => {
+  const userId = requireUserId(req, res);
+  if (!userId) return;
+  try {
+    const [statsResult, pendingBookingsResult, recentBookingsResult, activityResult] = await Promise.all([
+      pool.query(
+        `
+        SELECT
+          (SELECT COUNT(*)::int FROM service_listings sl WHERE sl.owner_user_id = $1 AND (sl.status IS NULL OR sl.status <> 'archived')) AS active_services_count,
+          (SELECT COUNT(*)::int FROM service_bookings sb JOIN service_listings sl2 ON sl2.id = sb.service_id WHERE sl2.owner_user_id = $1 AND LOWER(sb.status::text) = 'pending') AS pending_bookings_count,
+          (SELECT COUNT(*)::int FROM service_bookings sb JOIN service_listings sl2 ON sl2.id = sb.service_id WHERE sl2.owner_user_id = $1 AND LOWER(sb.status::text) = 'completed') AS completed_bookings_count,
+          (SELECT COUNT(*)::int FROM resources_listings rl WHERE rl.posted_by_user_id = $1 AND (rl.status IS NULL OR rl.status NOT IN ('withdrawn'))) AS active_resources_count
+        `,
+        [userId]
+      ),
+      pool.query(
+        `
+        SELECT sb.id::text, sb.status, sb.payment_status, sb.price, sb.created_at,
+               sl.title AS service_title, sl.service_type, sl.city, sl.state
+        FROM service_bookings sb
+        JOIN service_listings sl ON sl.id = sb.service_id
+        WHERE sl.owner_user_id = $1 AND LOWER(sb.status::text) = 'pending'
+        ORDER BY sb.created_at DESC
+        LIMIT 5
+        `,
+        [userId]
+      ),
+      pool.query(
+        `
+        SELECT sb.id::text, sb.status, sb.payment_status, sb.price, sb.created_at,
+               sl.title AS service_title, sl.service_type, sl.city, sl.state
+        FROM service_bookings sb
+        JOIN service_listings sl ON sl.id = sb.service_id
+        WHERE sl.owner_user_id = $1
+        ORDER BY sb.updated_at DESC NULLS LAST
+        LIMIT 10
+        `,
+        [userId]
+      ),
+      pool.query(
+        `
+        SELECT id::text, action, resource, metadata, created_at
+        FROM audit_logs
+        WHERE user_id = $1
+        ORDER BY created_at DESC
+        LIMIT 15
+        `,
+        [userId]
+      ),
+    ]);
+
+    const s = statsResult.rows[0];
+    res.json({
+      active_services_count: Number(s?.active_services_count ?? 0),
+      pending_bookings_count: Number(s?.pending_bookings_count ?? 0),
+      completed_bookings_count: Number(s?.completed_bookings_count ?? 0),
+      active_resources_count: Number(s?.active_resources_count ?? 0),
+      pending_bookings: pendingBookingsResult.rows.map((r: any) => ({
+        id: r.id,
+        status: r.status,
+        payment_status: r.payment_status,
+        price: r.price ? Number(r.price) : null,
+        created_at: r.created_at,
+        service_title: r.service_title,
+        service_type: r.service_type,
+        city: r.city,
+        state: r.state,
+      })),
+      recent_bookings: recentBookingsResult.rows.map((r: any) => ({
+        id: r.id,
+        status: r.status,
+        payment_status: r.payment_status,
+        price: r.price ? Number(r.price) : null,
+        created_at: r.created_at,
+        service_title: r.service_title,
+        service_type: r.service_type,
+        city: r.city,
+        state: r.state,
+      })),
+      recent_activities: activityResult.rows.map((r: any) => ({
+        id: r.id,
+        action: r.action,
+        resource: r.resource ?? null,
+        metadata: r.metadata ?? null,
+        created_at: r.created_at,
+      })),
+    });
+  } catch (err) {
+    console.error("provider dashboard error", err);
+    res.status(500).json({ error: "Failed to load dashboard" });
   }
 });
 

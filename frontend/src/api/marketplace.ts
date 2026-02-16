@@ -470,6 +470,83 @@ export async function fetchHaulerTrips() {
   return marketplaceRequest<{ items: HaulerTripSummary[] }>(`/hauler/trips`);
 }
 
+export interface HaulerDashboardActivity {
+  id: string;
+  action: string;
+  resource: string | null;
+  metadata: Record<string, unknown> | null;
+  created_at: string;
+}
+
+export interface HaulerDashboardStats {
+  active_trips_count: number;
+  available_trucks_count: number;
+  pending_contracts_count: number;
+  monthly_revenue: number;
+  monthly_revenue_trend_percent: number;
+  active_trip: {
+    id: string;
+    driver: string;
+    route: string;
+    status: string;
+    progress: number | null;
+    eta: string | null;
+    current_location: string | null;
+  } | null;
+  recent_activities: HaulerDashboardActivity[];
+}
+
+export async function fetchHaulerDashboard(): Promise<HaulerDashboardStats> {
+  return marketplaceRequest<HaulerDashboardStats>(`/hauler/dashboard`);
+}
+
+/* ---------- Shipper Dashboard ---------- */
+
+export interface ShipperDashboardActivity {
+  id: string;
+  action: string;
+  resource: string | null;
+  metadata: Record<string, unknown> | null;
+  created_at: string;
+}
+
+export interface ShipperDashboardPendingOffer {
+  id: string;
+  offered_amount: number | null;
+  currency: string;
+  status: string;
+  created_at: string;
+  load_title: string | null;
+  species: string | null;
+  animal_count: number | null;
+  pickup_location_text: string | null;
+  dropoff_location_text: string | null;
+}
+
+export interface ShipperDashboardStats {
+  active_loads_count: number;
+  active_trips_count: number;
+  pending_contracts_count: number;
+  completed_loads_count: number;
+  monthly_spent: number;
+  monthly_spent_trend_percent: number;
+  active_trip: {
+    id: string;
+    driver: string;
+    hauler: string;
+    species: string | null;
+    animal_count: number | null;
+    route: string;
+    status: string;
+  } | null;
+  pending_offers: ShipperDashboardPendingOffer[];
+  recent_activities: ShipperDashboardActivity[];
+}
+
+export async function fetchShipperDashboard(): Promise<ShipperDashboardStats> {
+  return marketplaceRequest<ShipperDashboardStats>(`/shipper/dashboard`);
+}
+
 export interface LoadBooking {
   id: string;
   load_id: string;

@@ -221,3 +221,46 @@ export async function deleteService(serviceId: number): Promise<void> {
     throw new Error(`Failed to delete service (${res.status}): ${text}`);
   }
 }
+
+/* ---------- Provider Dashboard ---------- */
+
+export interface ProviderDashboardActivity {
+  id: string;
+  action: string;
+  resource: string | null;
+  metadata: Record<string, unknown> | null;
+  created_at: string;
+}
+
+export interface ProviderDashboardBooking {
+  id: string;
+  status: string;
+  payment_status: string;
+  price: number | null;
+  created_at: string;
+  service_title: string;
+  service_type: string | null;
+  city: string | null;
+  state: string | null;
+}
+
+export interface ProviderDashboardStats {
+  active_services_count: number;
+  pending_bookings_count: number;
+  completed_bookings_count: number;
+  active_resources_count: number;
+  pending_bookings: ProviderDashboardBooking[];
+  recent_bookings: ProviderDashboardBooking[];
+  recent_activities: ProviderDashboardActivity[];
+}
+
+export async function fetchProviderDashboard(): Promise<ProviderDashboardStats> {
+  const res = await fetch(`${API_BASE_URL}/api/services/provider/dashboard`, {
+    headers: getAuthHeaders(),
+  });
+  if (!res.ok) {
+    const text = await res.text().catch(() => "");
+    throw new Error(`Failed to load provider dashboard (${res.status}): ${text}`);
+  }
+  return (await res.json()) as ProviderDashboardStats;
+}

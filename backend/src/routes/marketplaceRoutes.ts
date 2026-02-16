@@ -540,6 +540,276 @@ router.get(
 );
 
 router.get(
+  "/hauler/dashboard",
+  authRequired,
+  async (req, res) => {
+    try {
+      const authUser = getAuthUser(req);
+      if (!isHaulerUser(authUser)) {
+        return res.status(403).json({ error: "Only haulers can access dashboard" });
+      }
+      const haulerId = await resolveHaulerId(authUser);
+      if (!haulerId) {
+        return res.status(400).json({ error: "Invalid hauler profile" });
+      }
+
+      const now = new Date();
+      const thisMonthStart = new Date(now.getFullYear(), now.getMonth(), 1).toISOString();
+      const nextMonthStart = new Date(now.getFullYear(), now.getMonth() + 1, 1).toISOString();
+      const lastMonthStart = new Date(now.getFullYear(), now.getMonth() - 1, 1).toISOString();
+
+      const [statsResult, activeTripResult, revenueResult, prevRevenueResult] = await Promise.all([
+        pool.query(
+          `
+          SELECT
+            (SELECT COUNT(*)::int FROM trips t WHERE t.hauler_id = $1 AND LOWER(t.status::text) = 'in_progress') AS active_trips_count,
+            (SELECT COUNT(*)::int FROM trucks tk WHERE tk.hauler_id = $1 AND (tk.status IS NULL OR LOWER(tk.status::text) <> 'inactive')) AS available_trucks_count,
+            (SELECT COUNT(*)::int FROM contracts c WHERE c.hauler_id = $1 AND c.status = 'SENT') AS pending_contracts_count
+          `,
+          [haulerId]
+        ),
+        pool.query(
+          `
+          SELECT t.id::text, t.status,
+            (SELECT u.full_name FROM app_users u JOIN drivers d ON d.user_id = u.id WHERE d.id = t.driver_id LIMIT 1) AS driver_name,
+            l.pickup_location_text AS origin_text,
+            l.dropoff_location_text AS dest_text
+          FROM trips t
+          LEFT JOIN loads l ON l.id = t.load_id
+          WHERE t.hauler_id = $1 AND LOWER(t.status::text) = 'in_progress'
+          ORDER BY t.updated_at DESC NULLS LAST
+          LIMIT 1
+          `,
+          [haulerId]
+        ),
+        pool.query(
+          `SELECT COALESCE(SUM(p.amount)::numeric, 0) AS total
+           FROM payments p
+           JOIN haulers h ON h.user_id = p.payee_user_id
+           WHERE h.id = $1 AND LOWER(p.status::text) = 'released'
+             AND p.released_at >= $2 AND p.released_at < $3`,
+          [haulerId, thisMonthStart, nextMonthStart]
+        ),
+        pool.query(
+          `SELECT COALESCE(SUM(p.amount)::numeric, 0) AS total
+           FROM payments p
+           JOIN haulers h ON h.user_id = p.payee_user_id
+           WHERE h.id = $1 AND LOWER(p.status::text) = 'released'
+             AND p.released_at >= $2 AND p.released_at < $3`,
+          [haulerId, lastMonthStart, thisMonthStart]
+        ),
+      ]);
+
+      const stats = statsResult.rows[0];
+      const activeTripRow = activeTripResult.rows[0];
+      const monthlyRevenue = Number(revenueResult.rows[0]?.total ?? 0);
+      const previousMonthRevenue = Number(prevRevenueResult.rows[0]?.total ?? 0);
+      const revenueTrendPercent =
+        previousMonthRevenue > 0
+          ? Math.round(((monthlyRevenue - previousMonthRevenue) / previousMonthRevenue) * 100)
+          : (monthlyRevenue > 0 ? 100 : 0);
+
+      const active_trip =
+        activeTripRow && stats && Number(stats.active_trips_count) > 0
+          ? {
+              id: activeTripRow.id,
+              driver: activeTripRow.driver_name ?? "—",
+              route: [activeTripRow.origin_text, activeTripRow.dest_text].filter(Boolean).join(" → ") || "—",
+              status: "In Transit",
+              progress: null as number | null,
+              eta: null as string | null,
+              current_location: null as string | null,
+            }
+          : null;
+
+      // Fetch recent activity from audit_logs for this hauler
+      const userId = String(authUser.id ?? "");
+      const activityResult = await pool.query(
+        `
+        SELECT id::text, action, resource, metadata, created_at
+        FROM audit_logs
+        WHERE user_id = $1
+          AND action NOT IN ('trip:location-update', 'trip:location-latest')
+        ORDER BY created_at DESC
+        LIMIT 15
+        `,
+        [userId]
+      );
+      const recent_activities = activityResult.rows.map((row: any) => ({
+        id: row.id,
+        action: row.action,
+        resource: row.resource ?? null,
+        metadata: row.metadata ?? null,
+        created_at: row.created_at,
+      }));
+
+      return res.json({
+        active_trips_count: Number(stats?.active_trips_count ?? 0),
+        available_trucks_count: Number(stats?.available_trucks_count ?? 0),
+        pending_contracts_count: Number(stats?.pending_contracts_count ?? 0),
+        monthly_revenue: monthlyRevenue,
+        monthly_revenue_trend_percent: revenueTrendPercent,
+        active_trip,
+        recent_activities,
+      });
+    } catch (err) {
+      console.error("hauler dashboard error", err);
+      res.status(500).json({ error: "Failed to load dashboard" });
+    }
+  }
+);
+
+router.get(
+  "/shipper/dashboard",
+  authRequired,
+  async (req, res) => {
+    try {
+      const authUser = getAuthUser(req);
+      if (!isShipperUser(authUser)) {
+        return res.status(403).json({ error: "Only shippers can access dashboard" });
+      }
+      const shipperId = await resolveShipperId(authUser);
+      if (!shipperId) {
+        return res.status(400).json({ error: "Invalid shipper profile" });
+      }
+
+      const now = new Date();
+      const thisMonthStart = new Date(now.getFullYear(), now.getMonth(), 1).toISOString();
+      const nextMonthStart = new Date(now.getFullYear(), now.getMonth() + 1, 1).toISOString();
+      const lastMonthStart = new Date(now.getFullYear(), now.getMonth() - 1, 1).toISOString();
+      const userId = String(authUser.id ?? "");
+
+      const [statsResult, activeTripResult, spentResult, prevSpentResult, pendingOffersResult, activityResult] = await Promise.all([
+        pool.query(
+          `
+          SELECT
+            (SELECT COUNT(*)::int FROM loads l WHERE l.shipper_id = $1 AND l.is_deleted = FALSE AND LOWER(l.status::text) IN ('open','assigned','in_transit')) AS active_loads_count,
+            (SELECT COUNT(*)::int FROM trips t JOIN loads l2 ON l2.id = t.load_id WHERE l2.shipper_id = $1 AND LOWER(t.status::text) IN ('in_progress','en_route','assigned','planned')) AS active_trips_count,
+            (SELECT COUNT(*)::int FROM contracts c WHERE c.shipper_id = $1 AND c.status IN ('DRAFT','SENT')) AS pending_contracts_count,
+            (SELECT COUNT(*)::int FROM loads l3 WHERE l3.shipper_id = $1 AND l3.is_deleted = FALSE AND LOWER(l3.status::text) IN ('delivered','completed')) AS completed_loads_count
+          `,
+          [shipperId]
+        ),
+        pool.query(
+          `
+          SELECT t.id::text, t.status,
+            l.species, l.animal_count, l.pickup_location_text, l.dropoff_location_text,
+            (SELECT u.full_name FROM app_users u JOIN drivers d ON d.user_id = u.id WHERE d.id = t.driver_id LIMIT 1) AS driver_name,
+            (SELECT u.full_name FROM app_users u JOIN haulers h ON h.user_id = u.id WHERE h.id = t.hauler_id LIMIT 1) AS hauler_name
+          FROM trips t
+          JOIN loads l ON l.id = t.load_id
+          WHERE l.shipper_id = $1 AND LOWER(t.status::text) IN ('in_progress','en_route','assigned')
+          ORDER BY t.updated_at DESC NULLS LAST
+          LIMIT 1
+          `,
+          [shipperId]
+        ),
+        pool.query(
+          `SELECT COALESCE(SUM(p.amount)::numeric, 0) AS total
+           FROM payments p
+           JOIN shippers s ON s.user_id = p.payer_user_id
+           WHERE s.id = $1 AND LOWER(p.status::text) IN ('funded','released','completed')
+             AND p.created_at >= $2 AND p.created_at < $3`,
+          [shipperId, thisMonthStart, nextMonthStart]
+        ),
+        pool.query(
+          `SELECT COALESCE(SUM(p.amount)::numeric, 0) AS total
+           FROM payments p
+           JOIN shippers s ON s.user_id = p.payer_user_id
+           WHERE s.id = $1 AND LOWER(p.status::text) IN ('funded','released','completed')
+             AND p.created_at >= $2 AND p.created_at < $3`,
+          [shipperId, lastMonthStart, thisMonthStart]
+        ),
+        pool.query(
+          `
+          SELECT lo.id::text, lo.offered_amount, lo.currency, lo.status, lo.created_at,
+                 l.title AS load_title, l.species, l.animal_count,
+                 l.pickup_location_text, l.dropoff_location_text
+          FROM load_offers lo
+          JOIN loads l ON l.id = lo.load_id
+          WHERE l.shipper_id = $1 AND l.is_deleted = FALSE AND lo.status = 'PENDING'
+          ORDER BY lo.created_at DESC
+          LIMIT 5
+          `,
+          [shipperId]
+        ),
+        pool.query(
+          `
+          SELECT id::text, action, resource, metadata, created_at
+          FROM audit_logs
+          WHERE user_id = $1
+            AND action NOT IN ('trip:location-update', 'trip:location-latest')
+          ORDER BY created_at DESC
+          LIMIT 15
+          `,
+          [userId]
+        ),
+      ]);
+
+      const s = statsResult.rows[0];
+      const activeTripRow = activeTripResult.rows[0] ?? null;
+
+      const monthlySpent = Number(spentResult.rows[0]?.total ?? 0);
+      const prevMonthSpent = Number(prevSpentResult.rows[0]?.total ?? 0);
+      const spentTrendPercent =
+        prevMonthSpent > 0
+          ? Math.round(((monthlySpent - prevMonthSpent) / prevMonthSpent) * 100)
+          : monthlySpent > 0
+            ? 100
+            : 0;
+
+      const active_trip = activeTripRow
+        ? {
+            id: activeTripRow.id,
+            driver: activeTripRow.driver_name ?? "—",
+            hauler: activeTripRow.hauler_name ?? "—",
+            species: activeTripRow.species ?? null,
+            animal_count: activeTripRow.animal_count != null ? Number(activeTripRow.animal_count) : null,
+            route: [activeTripRow.pickup_location_text, activeTripRow.dropoff_location_text].filter(Boolean).join(" → ") || "—",
+            status: activeTripRow.status ?? "—",
+          }
+        : null;
+
+      const pending_offers = pendingOffersResult.rows.map((r: any) => ({
+        id: r.id,
+        offered_amount: r.offered_amount != null ? Number(r.offered_amount) : null,
+        currency: r.currency ?? "USD",
+        status: r.status,
+        created_at: r.created_at,
+        load_title: r.load_title ?? null,
+        species: r.species ?? null,
+        animal_count: r.animal_count != null ? Number(r.animal_count) : null,
+        pickup_location_text: r.pickup_location_text ?? null,
+        dropoff_location_text: r.dropoff_location_text ?? null,
+      }));
+
+      const recent_activities = activityResult.rows.map((r: any) => ({
+        id: r.id,
+        action: r.action,
+        resource: r.resource ?? null,
+        metadata: r.metadata ?? null,
+        created_at: r.created_at,
+      }));
+
+      return res.json({
+        active_loads_count: Number(s?.active_loads_count ?? 0),
+        active_trips_count: Number(s?.active_trips_count ?? 0),
+        pending_contracts_count: Number(s?.pending_contracts_count ?? 0),
+        completed_loads_count: Number(s?.completed_loads_count ?? 0),
+        monthly_spent: monthlySpent,
+        monthly_spent_trend_percent: spentTrendPercent,
+        active_trip,
+        pending_offers,
+        recent_activities,
+      });
+    } catch (err) {
+      console.error("shipper dashboard error", err);
+      res.status(500).json({ error: "Failed to load dashboard" });
+    }
+  }
+);
+
+router.get(
   "/shipper/offers/count",
   authRequired,
   async (req, res) => {

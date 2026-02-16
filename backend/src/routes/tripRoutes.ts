@@ -759,7 +759,7 @@ router.get(
           `SELECT * FROM loads WHERE id = $1`,
           [trip.load_id]
         );
-        if (loadResult.rowCount > 0) {
+        if ((loadResult.rowCount ?? 0) > 0) {
           load = loadResult.rows[0];
           // Create a loads array with the primary load
           loads = [{
