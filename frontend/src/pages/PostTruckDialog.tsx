@@ -23,10 +23,18 @@ import {
   type HaulerVehicleOption,
 } from "../api/marketplace";
 
+export type PostTruckInitialValues = {
+  capacity_headcount?: string;
+  capacity_weight_kg?: string;
+  notes?: string;
+  allow_shared?: boolean;
+};
+
 type PostTruckDialogProps = {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   onPosted?: () => void;
+  initialValues?: PostTruckInitialValues;
 };
 
 const formatDateTimeLocal = (date: Date): string => {
@@ -71,7 +79,7 @@ function parseCoordinate(value: string, label: string): number | null {
   return num;
 }
 
-export function PostTruckDialog({ open, onOpenChange, onPosted }: PostTruckDialogProps) {
+export function PostTruckDialog({ open, onOpenChange, onPosted, initialValues }: PostTruckDialogProps) {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [trucks, setTrucks] = useState<HaulerVehicleOption[]>([]);
@@ -104,6 +112,17 @@ export function PostTruckDialog({ open, onOpenChange, onPosted }: PostTruckDialo
     if (!t) return "";
     return t.truck_name || t.plate_number || `Truck #${t.id}`;
   }, [form.truck_id, trucks]);
+
+  useEffect(() => {
+    if (!open || !initialValues) return;
+    setForm((prev) => ({
+      ...prev,
+      capacity_headcount: initialValues.capacity_headcount ?? prev.capacity_headcount,
+      capacity_weight_kg: initialValues.capacity_weight_kg ?? prev.capacity_weight_kg,
+      notes: initialValues.notes ?? prev.notes,
+      allow_shared: initialValues.allow_shared ?? prev.allow_shared,
+    }));
+  }, [open, initialValues]);
 
   useEffect(() => {
     if (!open) return;

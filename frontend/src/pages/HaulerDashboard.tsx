@@ -220,6 +220,7 @@ export function HaulerDashboard(_props: HaulerDashboardProps) {
   const navigate = useNavigate();
   const [dashboard, setDashboard] = useState<HaulerDashboardStats | null>(null);
   const [contractsAwaitingResponse, setContractsAwaitingResponse] = useState<ContractRecord[]>([]);
+  const [acceptedContracts, setAcceptedContracts] = useState<ContractRecord[]>([]);
   const [recentActivities, setRecentActivities] = useState<HaulerDashboardActivity[]>([]);
   const [loading, setLoading] = useState(true);
   const [showEmergencyPopup, setShowEmergencyPopup] = useState(false);
@@ -238,13 +239,15 @@ export function HaulerDashboard(_props: HaulerDashboardProps) {
     async function load() {
       setLoading(true);
       try {
-        const [dashRes, contractsRes] = await Promise.all([
+        const [dashRes, contractsRes, acceptedRes] = await Promise.all([
           fetchHaulerDashboard(),
           fetchContracts({ status: "SENT" }),
+          fetchContracts({ status: "ACCEPTED" }),
         ]);
         if (cancelled) return;
         setDashboard(dashRes);
         setContractsAwaitingResponse(contractsRes.items ?? []);
+        setAcceptedContracts(acceptedRes.items ?? []);
         setRecentActivities(dashRes.recent_activities ?? []);
       } catch (err: unknown) {
         const message = err instanceof Error ? err.message : "Failed to load dashboard";
@@ -590,16 +593,17 @@ export function HaulerDashboard(_props: HaulerDashboardProps) {
         </div>
       </div>
 
-      {/* Contracts Under Negotiation */}
+      {/* Contracts */}
       <div>
         <div className="flex items-center justify-between mb-3">
-          <h2 className="text-lg font-medium">Contracts Under Negotiation</h2>
+          <h2 className="text-lg font-medium">Contracts</h2>
           <Button variant="outline" size="sm" className="text-sm" onClick={() => handleNavigate("contracts")}>
             View All Contracts
           </Button>
         </div>
 
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+          {/* Awaiting Response */}
           <Card className="p-4">
             <h3 className="text-sm font-medium mb-3 flex items-center gap-2">
               Awaiting Your Response
@@ -619,7 +623,7 @@ export function HaulerDashboard(_props: HaulerDashboardProps) {
                   >
                     <div className="flex items-start justify-between mb-2">
                       <div>
-                        <p className="text-sm font-medium">{contract.id}</p>
+                        <p className="text-sm font-medium">Contract #{contract.id.slice(0, 8)}</p>
                         <p className="text-xs text-gray-500">
                           {contract.updated_at ? formatTimeAgo(contract.updated_at) : ""}
                         </p>
@@ -654,13 +658,55 @@ export function HaulerDashboard(_props: HaulerDashboardProps) {
             </div>
           </Card>
 
+          {/* Accepted / Confirmed */}
           <Card className="p-4">
             <h3 className="text-sm font-medium mb-3 flex items-center gap-2">
-              Awaiting Counter Party
-              <Badge className="text-xs px-2 py-0.5 bg-blue-100 text-blue-700">0 Waiting</Badge>
+              Accepted Contracts
+              <Badge className="text-xs px-2 py-0.5 bg-green-100 text-green-700">
+                {acceptedContracts.length} Confirmed
+              </Badge>
             </h3>
             <div className="space-y-2 max-h-80 overflow-y-auto pr-2">
-              <p className="text-sm text-gray-500">No contracts waiting for counterparty.</p>
+              {acceptedContracts.length === 0 ? (
+                <p className="text-sm text-gray-500">No accepted contracts yet.</p>
+              ) : (
+                acceptedContracts.slice(0, 4).map((contract) => (
+                  <div
+                    key={contract.id}
+                    className="p-3 border-2 rounded-lg hover:border-green-400 transition-all bg-white cursor-pointer hover:shadow-md border-green-200"
+                    onClick={() => handleNavigate("contracts")}
+                  >
+                    <div className="flex items-start justify-between mb-2">
+                      <div>
+                        <p className="text-sm font-medium">Contract #{contract.id.slice(0, 8)}</p>
+                        <p className="text-xs text-gray-500">
+                          {contract.accepted_at
+                            ? `Accepted ${formatTimeAgo(contract.accepted_at)}`
+                            : contract.updated_at
+                              ? formatTimeAgo(contract.updated_at)
+                              : ""}
+                        </p>
+                      </div>
+                      <Badge className="text-xs px-2 py-0.5 bg-green-100 text-green-700">
+                        Accepted
+                      </Badge>
+                    </div>
+                    <div className="text-xs text-gray-600 space-y-1">
+                      <p>
+                        <span className="font-medium">Price:</span>{" "}
+                        {contract.price_amount != null
+                          ? `$${Number(contract.price_amount).toLocaleString()}`
+                          : "—"}
+                      </p>
+                      {contract.payment_method && (
+                        <p>
+                          <span className="font-medium">Payment:</span> {contract.payment_method}
+                        </p>
+                      )}
+                    </div>
+                  </div>
+                ))
+              )}
             </div>
           </Card>
         </div>

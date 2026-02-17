@@ -130,6 +130,7 @@ export function ShipperDashboard(_props: ShipperDashboardProps) {
   const navigate = useNavigate();
   const [dashboard, setDashboard] = useState<ShipperDashboardStats | null>(null);
   const [contractsNegotiating, setContractsNegotiating] = useState<ContractRecord[]>([]);
+  const [acceptedContracts, setAcceptedContracts] = useState<ContractRecord[]>([]);
   const [recentActivities, setRecentActivities] = useState<ShipperDashboardActivity[]>([]);
   const [loading, setLoading] = useState(true);
   const [isPostLoadOpen, setIsPostLoadOpen] = useState(false);
@@ -145,14 +146,16 @@ export function ShipperDashboard(_props: ShipperDashboardProps) {
     async function load() {
       setLoading(true);
       try {
-        const [dashRes, contractsRes] = await Promise.all([
+        const [dashRes, contractsRes, acceptedRes] = await Promise.all([
           fetchShipperDashboard(),
           fetchContracts({ status: "SENT" }),
+          fetchContracts({ status: "ACCEPTED" }),
         ]);
         if (cancelled) return;
         setDashboard(dashRes);
         setRecentActivities(dashRes.recent_activities ?? []);
         setContractsNegotiating(contractsRes.items ?? []);
+        setAcceptedContracts(acceptedRes.items ?? []);
       } catch (err: unknown) {
         const message = err instanceof Error ? err.message : "Failed to load dashboard";
         toast.error(message);
@@ -275,6 +278,8 @@ export function ShipperDashboard(_props: ShipperDashboardProps) {
               className="p-5 hover:shadow-lg transition-all cursor-pointer group"
               onClick={() => handleNavigate(stat.clickAction)}
             >
+              <div className="p-3">
+
               <div className="flex items-start justify-between mb-3">
                 <div
                   className="w-11 h-11 rounded-lg flex items-center justify-center group-hover:scale-110 transition-transform"
@@ -288,6 +293,8 @@ export function ShipperDashboard(_props: ShipperDashboardProps) {
                 <div className="text-sm text-gray-600">{stat.label}</div>
               </div>
               <div className="text-xs text-gray-500 mt-2">{stat.trend}</div>
+              </ div>
+          
             </Card>
           );
         })}
@@ -477,11 +484,11 @@ export function ShipperDashboard(_props: ShipperDashboardProps) {
         </div>
       )}
 
-      {/* Contracts Under Negotiation */}
-      {contractsNegotiating.length > 0 && (
+      {/* Contracts */}
+      {(contractsNegotiating.length > 0 || acceptedContracts.length > 0) && (
         <div>
           <div className="flex items-center justify-between mb-3">
-            <h2 className="text-lg font-medium">Contracts Awaiting Response</h2>
+            <h2 className="text-lg font-medium">Contracts</h2>
             <Button
               variant="outline"
               size="sm"
@@ -491,31 +498,92 @@ export function ShipperDashboard(_props: ShipperDashboardProps) {
               View All Contracts
             </Button>
           </div>
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-            {contractsNegotiating.slice(0, 4).map((c) => {
-              const price = c.price_amount ? formatCurrency(Number(c.price_amount)) : "TBD";
-              return (
-                <Card
-                  key={c.id}
-                  className="p-4 hover:shadow-md transition-all cursor-pointer"
-                  onClick={() => handleNavigate("contracts")}
-                >
-                  <div className="flex items-center justify-between mb-2">
-                    <Badge className="text-xs bg-amber-100 text-amber-700 capitalize">
-                      {c.status}
-                    </Badge>
-                    <span className="text-xs text-gray-500">
-                      {formatTimeAgo(c.created_at)}
-                    </span>
-                  </div>
-                  <p className="text-sm font-medium mb-1">Contract #{c.id.slice(0, 8)}</p>
-                  <div className="flex items-center justify-between text-xs text-gray-500">
-                    <span>{c.payment_method ?? "—"}</span>
-                    <span className="font-medium text-gray-900">{price}</span>
-                  </div>
-                </Card>
-              );
-            })}
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+            {/* Awaiting Response */}
+            <Card className="p-4">
+              <h3 className="text-sm font-medium mb-3 flex items-center gap-2">
+                Awaiting Response
+                <Badge className="text-xs px-2 py-0.5 bg-orange-100 text-orange-700">
+                  {contractsNegotiating.length} Pending
+                </Badge>
+              </h3>
+              <div className="space-y-2 max-h-80 overflow-y-auto pr-2">
+                {contractsNegotiating.length === 0 ? (
+                  <p className="text-sm text-gray-500">No contracts awaiting response.</p>
+                ) : (
+                  contractsNegotiating.slice(0, 4).map((c) => {
+                    const price = c.price_amount ? formatCurrency(Number(c.price_amount)) : "TBD";
+                    return (
+                      <div
+                        key={c.id}
+                        className="p-3 border-2 rounded-lg hover:border-[#F97316] transition-all bg-white cursor-pointer hover:shadow-md border-gray-200"
+                        onClick={() => handleNavigate("contracts")}
+                      >
+                        <div className="flex items-start justify-between mb-2">
+                          <div>
+                            <p className="text-sm font-medium">Contract #{c.id.slice(0, 8)}</p>
+                            <p className="text-xs text-gray-500">
+                              {formatTimeAgo(c.created_at)}
+                            </p>
+                          </div>
+                          <Badge className="text-xs px-2 py-0.5 bg-amber-100 text-amber-700 capitalize">
+                            {c.status}
+                          </Badge>
+                        </div>
+                        <div className="flex items-center justify-between text-xs text-gray-600">
+                          <span>{c.payment_method ?? "—"}</span>
+                          <span className="font-medium text-gray-900">{price}</span>
+                        </div>
+                      </div>
+                    );
+                  })
+                )}
+              </div>
+            </Card>
+
+            {/* Accepted / Confirmed */}
+            <Card className="p-4">
+              <h3 className="text-sm font-medium mb-3 flex items-center gap-2">
+                Accepted Contracts
+                <Badge className="text-xs px-2 py-0.5 bg-green-100 text-green-700">
+                  {acceptedContracts.length} Confirmed
+                </Badge>
+              </h3>
+              <div className="space-y-2 max-h-80 overflow-y-auto pr-2">
+                {acceptedContracts.length === 0 ? (
+                  <p className="text-sm text-gray-500">No accepted contracts yet.</p>
+                ) : (
+                  acceptedContracts.slice(0, 4).map((c) => {
+                    const price = c.price_amount ? formatCurrency(Number(c.price_amount)) : "TBD";
+                    return (
+                      <div
+                        key={c.id}
+                        className="p-3 border-2 rounded-lg hover:border-green-400 transition-all bg-white cursor-pointer hover:shadow-md border-green-200"
+                        onClick={() => handleNavigate("contracts")}
+                      >
+                        <div className="flex items-start justify-between mb-2">
+                          <div>
+                            <p className="text-sm font-medium">Contract #{c.id.slice(0, 8)}</p>
+                            <p className="text-xs text-gray-500">
+                              {c.accepted_at
+                                ? `Accepted ${formatTimeAgo(c.accepted_at)}`
+                                : formatTimeAgo(c.updated_at)}
+                            </p>
+                          </div>
+                          <Badge className="text-xs px-2 py-0.5 bg-green-100 text-green-700">
+                            Accepted
+                          </Badge>
+                        </div>
+                        <div className="flex items-center justify-between text-xs text-gray-600">
+                          <span>{c.payment_method ?? "—"}</span>
+                          <span className="font-medium text-gray-900">{price}</span>
+                        </div>
+                      </div>
+                    );
+                  })
+                )}
+              </div>
+            </Card>
           </div>
         </div>
       )}

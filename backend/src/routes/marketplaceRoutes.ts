@@ -564,7 +564,8 @@ router.get(
           SELECT
             (SELECT COUNT(*)::int FROM trips t WHERE t.hauler_id = $1 AND LOWER(t.status::text) = 'in_progress') AS active_trips_count,
             (SELECT COUNT(*)::int FROM trucks tk WHERE tk.hauler_id = $1 AND (tk.status IS NULL OR LOWER(tk.status::text) <> 'inactive')) AS available_trucks_count,
-            (SELECT COUNT(*)::int FROM contracts c WHERE c.hauler_id = $1 AND c.status = 'SENT') AS pending_contracts_count
+            (SELECT COUNT(*)::int FROM contracts c WHERE c.hauler_id = $1 AND c.status = 'SENT') AS pending_contracts_count,
+            (SELECT COUNT(*)::int FROM contracts c2 WHERE c2.hauler_id = $1 AND c2.status = 'ACCEPTED') AS accepted_contracts_count
           `,
           [haulerId]
         ),
@@ -647,6 +648,7 @@ router.get(
         active_trips_count: Number(stats?.active_trips_count ?? 0),
         available_trucks_count: Number(stats?.available_trucks_count ?? 0),
         pending_contracts_count: Number(stats?.pending_contracts_count ?? 0),
+        accepted_contracts_count: Number(stats?.accepted_contracts_count ?? 0),
         monthly_revenue: monthlyRevenue,
         monthly_revenue_trend_percent: revenueTrendPercent,
         active_trip,
@@ -686,6 +688,7 @@ router.get(
             (SELECT COUNT(*)::int FROM loads l WHERE l.shipper_id = $1 AND l.is_deleted = FALSE AND LOWER(l.status::text) IN ('open','assigned','in_transit')) AS active_loads_count,
             (SELECT COUNT(*)::int FROM trips t JOIN loads l2 ON l2.id = t.load_id WHERE l2.shipper_id = $1 AND LOWER(t.status::text) IN ('in_progress','en_route','assigned','planned')) AS active_trips_count,
             (SELECT COUNT(*)::int FROM contracts c WHERE c.shipper_id = $1 AND c.status IN ('DRAFT','SENT')) AS pending_contracts_count,
+            (SELECT COUNT(*)::int FROM contracts c2 WHERE c2.shipper_id = $1 AND c2.status = 'ACCEPTED') AS accepted_contracts_count,
             (SELECT COUNT(*)::int FROM loads l3 WHERE l3.shipper_id = $1 AND l3.is_deleted = FALSE AND LOWER(l3.status::text) IN ('delivered','completed')) AS completed_loads_count
           `,
           [shipperId]
@@ -795,6 +798,7 @@ router.get(
         active_loads_count: Number(s?.active_loads_count ?? 0),
         active_trips_count: Number(s?.active_trips_count ?? 0),
         pending_contracts_count: Number(s?.pending_contracts_count ?? 0),
+        accepted_contracts_count: Number(s?.accepted_contracts_count ?? 0),
         completed_loads_count: Number(s?.completed_loads_count ?? 0),
         monthly_spent: monthlySpent,
         monthly_spent_trend_percent: spentTrendPercent,

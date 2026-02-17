@@ -55,6 +55,8 @@ import PostBuyAndSell from '../pages/PostBuyAndSell';
 import BuyAndSellBoard from '../pages/BuyAndSellBoard';
 import PostResource from '../pages/PostResource';
 import ResourcesBoard from '../pages/ResourcesBoard';
+import ComingSoon from '../pages/ComingSoon';
+import { WeightCalculator } from '../pages/WeightCalculator';
 
 type UserRole = 'shipper' | 'driver' | 'hauler' | 'stakeholder' | 'super-admin' | null;
 type LandingRole = 'hauler' | 'shipper' | 'stakeholder';
@@ -297,6 +299,12 @@ export function AppRouter({ showKeyboardShortcuts, onKeyboardShortcutsToggle }: 
                   <Route path="truck-board" element={<TruckBoard />} />
                   <Route path="marketplace" element={<MarketplaceTab userRole="hauler" />} />
                   <Route path="documents" element={<DocumentsTab />} />
+                  <Route path="weight-calculator" element={<WeightCalculator />} />
+                  <Route path="compliance" element={<ComingSoon />} />
+                  <Route path="fuel" element={<ComingSoon />} />
+                  <Route path="performance" element={<ComingSoon />} />
+                  <Route path="finance" element={<ComingSoon />} />
+                  <Route path="hr" element={<ComingSoon />} />
                   <Route path="settings" element={<ProfileSettings role="hauler" onBack={() => navigate(-1)} />} />
                   <Route path="support" element={<SupportTab />} />
                   <Route path="*" element={<Navigate to="/hauler/dashboard" replace />} />
@@ -333,6 +341,9 @@ export function AppRouter({ showKeyboardShortcuts, onKeyboardShortcutsToggle }: 
                   <Route path="trips/:id/tracking" element={<TripTracking />} />
                   <Route path="trips/:id/chat" element={<TripChat />} />
                   <Route path="payments" element={<WalletTab />} />
+                  <Route path="welfare" element={<ComingSoon />} />
+                  <Route path="checklists" element={<ComingSoon />} />
+                  <Route path="grouping" element={<ComingSoon />} />
                   <Route path="documents" element={<DocumentsTab />} />
                   <Route path="truck-board" element={<TruckBoard />} />
                   <Route path="marketplace" element={<MarketplaceTab userRole="shipper" />} />

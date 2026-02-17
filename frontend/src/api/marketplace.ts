@@ -482,6 +482,7 @@ export interface HaulerDashboardStats {
   active_trips_count: number;
   available_trucks_count: number;
   pending_contracts_count: number;
+  accepted_contracts_count: number;
   monthly_revenue: number;
   monthly_revenue_trend_percent: number;
   active_trip: {
@@ -527,6 +528,7 @@ export interface ShipperDashboardStats {
   active_loads_count: number;
   active_trips_count: number;
   pending_contracts_count: number;
+  accepted_contracts_count: number;
   completed_loads_count: number;
   monthly_spent: number;
   monthly_spent_trend_percent: number;
