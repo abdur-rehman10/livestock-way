@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { Routes, Route, Navigate, useNavigate, useLocation } from 'react-router-dom';
 import OnboardingWizard from './OnboardingWizard';
-import SignupLogin from '../pages/SignupLogin';
+import { AuthWrapper, type BackendRole } from './auth/AuthWrapper';
 import LandingPage from '../pages/LandingPage';
 import { Verification } from './Verification';
 import { ForgotPassword } from '../pages/ForgotPassword';
@@ -118,6 +118,10 @@ export function AppRouter({ showKeyboardShortcuts, onKeyboardShortcutsToggle }: 
     toast.success(`Logged in as ${role}`);
   };
 
+  const handleAuthComplete = (backendRole: BackendRole, _token: string, _userData: any) => {
+    handleLogin(backendRole as UserRole);
+  };
+
   const handleNeedVerification = (contact: string, role: UserRole) => {
     setVerificationContact(contact);
     setPendingRole(role);
@@ -215,11 +219,7 @@ export function AppRouter({ showKeyboardShortcuts, onKeyboardShortcutsToggle }: 
 
         <Route path="/login" element={
           <AuthRoute>
-            <SignupLogin 
-              preselectedRole={selectedLandingRole ?? undefined}
-              onAuth={handleLogin}
-              onNeedVerification={handleNeedVerification}
-            />
+            <AuthWrapper onAuthComplete={handleAuthComplete} />
           </AuthRoute>
         } />
 

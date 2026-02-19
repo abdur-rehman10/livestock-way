@@ -4,7 +4,7 @@
   "description": "LivestockWay backend API",
   "main": "dist/server.js",
   "scripts": {
-    "dev": "nodemon src/server.ts",
+    "dev": "nodemon",
     "build": "tsc",
     "start": "node dist/server.js",
     "test": "node -r ts-node/register src/tests/runTests.ts",
@@ -17,6 +17,7 @@
     "express": "^5.1.0",
     "jsonwebtoken": "^9.0.2",
     "multer": "^1.4.5-lts.1",
+    "nodemailer": "^8.0.1",
     "pg": "^8.16.3",
     "socket.io": "^4.8.1"
   },
@@ -27,6 +28,7 @@
     "@types/jsonwebtoken": "^9.0.10",
     "@types/multer": "^1.4.12",
     "@types/node": "^24.10.0",
+    "@types/nodemailer": "^7.0.10",
     "@types/pg": "^8.15.6",
     "nodemon": "^3.1.11",
     "ts-node": "^10.9.2",
