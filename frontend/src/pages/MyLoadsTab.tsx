@@ -32,7 +32,7 @@ import {
   SOCKET_EVENTS,
   subscribeToSocketEvent,
 } from "../lib/socket";
-import { toast } from "sonner";
+import { toast, swalConfirm } from '../lib/swal';
 import {
   createEscrowPaymentIntent,
   triggerPaymentWebhook,
@@ -270,7 +270,9 @@ export default function MyLoadsTab() {
         if (intentId) {
           await triggerPaymentWebhook(intentId, "payment_succeeded");
         }
-        toast.success("Escrow funded successfully.");
+        toast.success("Escrow funded successfully.", {
+          description: "Funds are secured and will be released upon delivery confirmation.",
+        });
         tripContextCache.current[loadId] = await fetchMarketplaceTripByLoad(loadId);
         refresh();
       } catch (err: unknown) {
@@ -337,9 +339,12 @@ export default function MyLoadsTab() {
   };
 
   const handleDeleteLoad = async (loadId: number) => {
-    if (!window.confirm("Delete this load? This cannot be undone.")) {
-      return;
-    }
+    const confirmed = await swalConfirm({
+      title: 'Delete Load',
+      text: 'Delete this load? This cannot be undone.',
+      confirmText: 'Yes, delete',
+    });
+    if (!confirmed) return;
     try {
       setDeletingLoadId(loadId);
       await deleteLoad(loadId);
@@ -372,7 +377,9 @@ export default function MyLoadsTab() {
     }
     try {
       await createTripDispute(disputeDialog.tripId, disputeForm);
-      toast.success("Dispute submitted.");
+      toast.success("Dispute submitted.", {
+        description: "Our team will review your case and respond shortly.",
+      });
       setDisputeDialog((prev) => ({ ...prev, open: false }));
       refresh();
     } catch (err: unknown) {

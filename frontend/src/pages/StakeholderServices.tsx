@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { toast } from 'sonner';
+import { toast, swalConfirm } from '../lib/swal';
 import { Button } from '../components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../components/ui/card';
 import { Badge } from '../components/ui/badge';
@@ -112,7 +112,11 @@ export default function StakeholderServices() {
   };
 
   const onDelete = async (serviceId: number) => {
-    const ok = window.confirm('Delete this service?');
+    const ok = await swalConfirm({
+      title: 'Delete Service',
+      text: 'Delete this service?',
+      confirmText: 'Yes, delete',
+    });
     if (!ok) return;
     try {
       await deleteService(serviceId);

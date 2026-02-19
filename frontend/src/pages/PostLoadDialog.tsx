@@ -10,12 +10,13 @@ import { Popover, PopoverContent, PopoverTrigger } from "../components/ui/popove
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "../components/ui/tabs";
 import { Badge } from "../components/ui/badge";
 import { Checkbox } from "../components/ui/checkbox";
-import { CalendarIcon, MapPin, Lock, Globe, Users, X } from "lucide-react";
-import { toast } from "sonner";
+import { CalendarIcon, MapPin, Lock, Globe, X } from "lucide-react";
+import { toast } from '../lib/swal';
 import { createLoad } from "../lib/api";
 import type { CreateLoadPayload } from "../lib/api";
 import { AddressSearch, type MappedAddress } from "../components/AddressSearch";
 import { Dialog as AlertDialog, DialogContent as AlertDialogContent } from "../components/ui/dialog";
+import { FormStepper, FormStepperNav } from "../components/ui/form-stepper";
 
 interface PostLoadDialogProps {
   open?: boolean;
@@ -36,7 +37,14 @@ const mockCarriers: Carrier[] = [
   { id: 'C004', name: 'Swift Livestock Carriers', rating: 4.6 },
 ];
 
+const STEPS = [
+  { label: "Load Details" },
+  { label: "Route & Schedule" },
+  { label: "Pricing & Options" },
+];
+
 export function PostLoadDialog({ open = false, onOpenChange, initialData }: PostLoadDialogProps) {
+  const [step, setStep] = useState(0);
   const [date, setDate] = useState<Date>();
   const [formData, setFormData] = useState({
     species: initialData?.species || '',
@@ -56,7 +64,6 @@ export function PostLoadDialog({ open = false, onOpenChange, initialData }: Post
   const [carrierSearch, setCarrierSearch] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
-  const [successMessage, setSuccessMessage] = useState<string | null>(null);
   const [pickupSearch, setPickupSearch] = useState('');
   const [dropoffSearch, setDropoffSearch] = useState('');
   const [pickupCoords, setPickupCoords] = useState<{ lat: string; lon: string } | null>(null);
@@ -69,26 +76,34 @@ export function PostLoadDialog({ open = false, onOpenChange, initialData }: Post
       ? '$850 - $950'
       : '--';
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setErrorMessage(null);
-    setSuccessMessage(null);
+  const validateStep = (s: number): boolean => {
+    if (s === 0) {
+      if (!formData.species) { toast.error('Please select a livestock type'); return false; }
+      if (!formData.quantity || Number(formData.quantity) <= 0) { toast.error('Please enter a valid quantity'); return false; }
+      return true;
+    }
+    if (s === 1) {
+      if (!formData.pickup) { toast.error('Please enter a pickup location'); return false; }
+      if (!formData.dropoff) { toast.error('Please enter a dropoff location'); return false; }
+      if (!date) { toast.error('Please select a pickup date'); return false; }
+      return true;
+    }
+    return true;
+  };
+
+  const handleNext = () => {
+    if (validateStep(step)) setStep(step + 1);
+  };
+
+  const handleBack = () => setStep(Math.max(0, step - 1));
+
+  const handleSubmit = async () => {
+    if (!validateStep(0) || !validateStep(1)) return;
 
     if (formData.visibility === 'private' && invitedCarriers.length === 0) {
       toast.error('Please invite at least one carrier for private loads');
       return;
     }
-    if (!date) {
-      toast.error('Please select a pickup date');
-      return;
-    }
-
-    const quantityNumber = Number(formData.quantity);
-    if (Number.isNaN(quantityNumber) || quantityNumber <= 0) {
-      toast.error('Please enter a valid quantity');
-      return;
-    }
-
     if (paymentMode === "DIRECT" && !directDisclaimerAccepted) {
       toast.error("Please acknowledge the direct payment warning.");
       setDirectWarningOpen(true);
@@ -98,10 +113,10 @@ export function PostLoadDialog({ open = false, onOpenChange, initialData }: Post
     const payload: CreateLoadPayload = {
       title: `${formData.species || 'Livestock'} load`,
       species: formData.species,
-      quantity: quantityNumber,
+      quantity: Number(formData.quantity),
       pickup_location: formData.pickup,
       dropoff_location: formData.dropoff,
-      pickup_date: date.toISOString(),
+      pickup_date: date!.toISOString(),
       payment_mode: paymentMode,
       direct_payment_disclaimer_accepted:
         paymentMode === "DIRECT" ? directDisclaimerAccepted : undefined,
@@ -123,7 +138,7 @@ export function PostLoadDialog({ open = false, onOpenChange, initialData }: Post
 
     try {
       setIsSubmitting(true);
-
+      setErrorMessage(null);
       await createLoad(payload);
 
       const message =
@@ -132,63 +147,53 @@ export function PostLoadDialog({ open = false, onOpenChange, initialData }: Post
           : 'Load posted successfully! Matching with nearby carriers...';
 
       toast.success(message);
-      setSuccessMessage(message);
       onOpenChange?.(false);
-
-      setFormData({
-        species: '',
-        quantity: '',
-        weight: '',
-        pickup: '',
-        dropoff: '',
-        specialRequirements: '',
-        visibility: 'public',
-        offerPrice: '',
-        currency: 'USD',
-      });
-      setDate(undefined);
-      setInvitedCarriers([]);
-      setCarrierSearch('');
+      resetForm();
     } catch (err: any) {
-      console.error('Failed to create load:', err);
       const friendlyMessage = err?.message || 'Failed to post load';
       setErrorMessage(friendlyMessage);
       toast.error(friendlyMessage);
     } finally {
       setIsSubmitting(false);
     }
-    
+  };
+
+  const resetForm = () => {
+    setFormData({
+      species: '', quantity: '', weight: '', pickup: '', dropoff: '',
+      specialRequirements: '', visibility: 'public', offerPrice: '', currency: 'USD',
+    });
+    setDate(undefined);
+    setInvitedCarriers([]);
+    setCarrierSearch('');
+    setStep(0);
+    setErrorMessage(null);
   };
 
   const handleInviteCarrier = (carrierId: string) => {
-    if (invitedCarriers.includes(carrierId)) {
-      setInvitedCarriers(invitedCarriers.filter(id => id !== carrierId));
-    } else {
-      setInvitedCarriers([...invitedCarriers, carrierId]);
-    }
+    setInvitedCarriers(prev =>
+      prev.includes(carrierId) ? prev.filter(id => id !== carrierId) : [...prev, carrierId]
+    );
   };
 
-  const filteredCarriers = mockCarriers.filter(c => 
+  const filteredCarriers = mockCarriers.filter(c =>
     c.name.toLowerCase().includes(carrierSearch.toLowerCase())
   );
 
   const handlePickupSelect = (mapped: MappedAddress) => {
     setPickupSearch(mapped.fullText);
     setPickupCoords({ lat: mapped.lat, lon: mapped.lon });
-    setFormData((prev) => ({ ...prev, pickup: mapped.fullText }));
+    setFormData(prev => ({ ...prev, pickup: mapped.fullText }));
   };
 
   const handleDropoffSelect = (mapped: MappedAddress) => {
     setDropoffSearch(mapped.fullText);
     setDropoffCoords({ lat: mapped.lat, lon: mapped.lon });
-    setFormData((prev) => ({ ...prev, dropoff: mapped.fullText }));
+    setFormData(prev => ({ ...prev, dropoff: mapped.fullText }));
   };
 
   const handleSelectPaymentMode = (mode: "ESCROW" | "DIRECT") => {
-    if (mode === "DIRECT") {
-      setDirectWarningOpen(true);
-      return;
-    }
+    if (mode === "DIRECT") { setDirectWarningOpen(true); return; }
     setPaymentMode("ESCROW");
     setDirectDisclaimerAccepted(false);
   };
@@ -200,361 +205,217 @@ export function PostLoadDialog({ open = false, onOpenChange, initialData }: Post
   };
 
   return (
-    <Dialog open={open} onOpenChange={(value) => onOpenChange?.(value)}>
-<DialogContent className="!max-w-[50vw] max-h-[90vh] overflow-y-auto"  style={{ maxWidth: '60vw' }}> 
-        <DialogHeader className="pb-4">
+    <Dialog open={open} onOpenChange={(value) => { onOpenChange?.(value); if (!value) resetForm(); }}>
+      <DialogContent className="!max-w-[50vw] max-h-[90vh] overflow-y-auto" style={{ maxWidth: '60vw' }}>
+        <DialogHeader className="pb-2">
           <DialogTitle className="text-2xl">Post a Load</DialogTitle>
           <DialogDescription className="text-base">
-            Fill in the details below to post your livestock load and get matched with carriers
+            Fill in the details below to post your livestock load
           </DialogDescription>
         </DialogHeader>
 
-        <form onSubmit={handleSubmit} className="space-y-6">
-          {/* Payment Mode */}
-          <div className="space-y-3">
-            <Label className="text-base font-semibold">Payment Mode</Label>
-            <div className="grid grid-cols-2 gap-4">
-              <Button
-                type="button"
-                variant={paymentMode === "ESCROW" ? "default" : "outline"}
-                className="h-auto py-4 justify-start"
-                onClick={() => handleSelectPaymentMode("ESCROW")}
-              >
-                <div className="text-left">
-                  <div className="font-semibold text-base mb-1">Escrow (Recommended)</div>
-                  <div className="text-xs opacity-90 leading-relaxed">
-                    Funds held until delivery, disputes supported.
-                  </div>
-                </div>
-              </Button>
-              <Button
-                type="button"
-                variant={paymentMode === "DIRECT" ? "default" : "outline"}
-                className="h-auto py-4 justify-start"
-                onClick={() => handleSelectPaymentMode("DIRECT")}
-              >
-                <div className="text-left">
-                  <div className="font-semibold text-base mb-1">Direct Payment</div>
-                  <div className="text-xs opacity-90 leading-relaxed">
-                    Pay hauler directly; no escrow protections.
-                  </div>
-                </div>
-              </Button>
-            </div>
-          </div>
+        <FormStepper steps={STEPS} currentStep={step} onStepClick={setStep} />
 
-          {/* Species */}
-          <div className="space-y-3">
-            <Label htmlFor="species" className="text-base font-semibold">Livestock Type</Label>
-            <Select
-              value={formData.species}
-              onValueChange={(value) => setFormData({ ...formData, species: value })}
-              required
-            >
-              <SelectTrigger className="h-11">
-                <SelectValue placeholder="Select livestock type" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="cattle">Cattle</SelectItem>
-                <SelectItem value="sheep">Sheep</SelectItem>
-                <SelectItem value="pigs">Pigs</SelectItem>
-                <SelectItem value="goats">Goats</SelectItem>
-                <SelectItem value="horses">Horses</SelectItem>
-              </SelectContent>
-            </Select>
-          </div>
-
-          {/* Quantity and Weight */}
-          <div className="grid grid-cols-2 gap-4">
-            <div className="space-y-3">
-              <Label htmlFor="quantity" className="text-base font-semibold">Quantity (Head)</Label>
-              <Input
-                id="quantity"
-                type="number"
-                placeholder="50"
-                className="h-11"
-                value={formData.quantity}
-                onChange={(e) => setFormData({ ...formData, quantity: e.target.value })}
-                required
-              />
-            </div>
-            <div className="space-y-3">
-              <Label htmlFor="weight" className="text-base font-semibold">Avg Weight (lbs)</Label>
-              <Input
-                id="weight"
-                type="number"
-                placeholder="1200"
-                className="h-11"
-                value={formData.weight}
-                onChange={(e) => setFormData({ ...formData, weight: e.target.value })}
-              />
-            </div>
-          </div>
-
-          {/* Pickup Location */}
-          <div className="space-y-3">
-            <Label htmlFor="pickup" className="text-base font-semibold">Pickup Location</Label>
-            <AddressSearch
-              value={pickupSearch}
-              onChange={setPickupSearch}
-              onSelect={handlePickupSelect}
-              disabled={isSubmitting}
-            />
-            <div className="relative">
-              <MapPin className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400" />
-              <Input
-                id="pickup"
-                className="pl-10 h-11"
-                placeholder="Enter address or city"
-                value={formData.pickup}
-                onChange={(e) => setFormData({ ...formData, pickup: e.target.value })}
-                required
-              />
-            </div>
-          </div>
-
-          {/* Dropoff Location */}
-          <div className="space-y-3">
-            <Label htmlFor="dropoff" className="text-base font-semibold">Dropoff Location</Label>
-            <AddressSearch
-              value={dropoffSearch}
-              onChange={setDropoffSearch}
-              onSelect={handleDropoffSelect}
-              disabled={isSubmitting}
-            />
-            <div className="relative">
-              <MapPin className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400" />
-              <Input
-                id="dropoff"
-                className="pl-10 h-11"
-                placeholder="Enter address or city"
-                value={formData.dropoff}
-                onChange={(e) => setFormData({ ...formData, dropoff: e.target.value })}
-                required
-              />
-            </div>
-          </div>
-
-          {/* Pickup Date */}
-          <div className="space-y-3">
-            <Label className="text-base font-semibold">Pickup Date</Label>
-            <Popover>
-              <PopoverTrigger asChild>
-                <Button
-                  variant="outline"
-                  className="w-full justify-start text-left h-11"
-                >
-                  <CalendarIcon className="mr-2 w-5 h-5" />
-                  {date ? date.toLocaleDateString() : 'Select pickup date'}
-                </Button>
-              </PopoverTrigger>
-              <PopoverContent className="w-auto p-0" align="start">
-                <Calendar
-                  mode="single"
-                  selected={date}
-                  onSelect={setDate}
-                  initialFocus
-                />
-              </PopoverContent>
-            </Popover>
-          </div>
-
-          {/* Offer Price */}
-          <div className="grid grid-cols-3 gap-4">
-            <div className="col-span-2 space-y-3">
-              <Label htmlFor="offerPrice" className="text-base font-semibold">Offer Price</Label>
-              <Input
-                id="offerPrice"
-                type="number"
-                min="0"
-                step="0.01"
-                placeholder="Enter amount"
-                className="h-11"
-                value={formData.offerPrice}
-                onChange={(e) => setFormData({ ...formData, offerPrice: e.target.value })}
-              />
-            </div>
-            <div className="space-y-3">
-              <Label className="text-base font-semibold">Currency</Label>
-              <Select
-                value={formData.currency}
-                onValueChange={(value) => setFormData({ ...formData, currency: value })}
-              >
-                <SelectTrigger className="h-11">
-                  <SelectValue placeholder="Select currency" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="USD">USD</SelectItem>
-                  <SelectItem value="CAD">CAD</SelectItem>
-                  <SelectItem value="AUD">AUD</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-          </div>
-
-          {/* Visibility Control */}
-          <div className="space-y-4">
-            <Label className="text-base font-semibold">Load Visibility</Label>
-            <Tabs 
-              value={formData.visibility} 
-              onValueChange={(value) => setFormData({ ...formData, visibility: value })}
-              className="w-full"
-            >
-              <TabsList className="grid w-full grid-cols-2 h-12 p-1 bg-gray-100">
-                <TabsTrigger 
-                  value="public" 
-                  className="flex items-center gap-2 text-base data-[state=active]:bg-white data-[state=active]:shadow-sm"
-                >
-                  <Globe className="w-5 h-5" />
-                  Public
-                </TabsTrigger>
-                <TabsTrigger 
-                  value="private" 
-                  className="flex items-center gap-2 text-base data-[state=active]:bg-white data-[state=active]:shadow-sm"
-                >
-                  <Lock className="w-5 h-5" />
-                  Invite-Only
-                </TabsTrigger>
-              </TabsList>
-              
-              <TabsContent value="public" className="mt-4">
-                <div className="p-4 bg-blue-50 rounded-lg border-2 border-blue-200">
-                  <p className="text-sm text-blue-900 leading-relaxed">
-                    <strong className="font-semibold">Public:</strong> All verified carriers can see and bid on this load
-                  </p>
-                </div>
-              </TabsContent>
-              
-              <TabsContent value="private" className="mt-4 space-y-4">
-                <div className="p-4 bg-purple-50 rounded-lg border-2 border-purple-200">
-                  <p className="text-sm text-purple-900 leading-relaxed">
-                    <strong className="font-semibold">Private:</strong> Only invited carriers can see and bid on this load
-                  </p>
-                </div>
-
-                {/* Invited Carriers */}
-                {invitedCarriers.length > 0 && (
-                  <div className="space-y-3">
-                    <Label className="text-base font-semibold">Invited Carriers ({invitedCarriers.length})</Label>
-                    <div className="flex flex-wrap gap-2">
-                      {invitedCarriers.map(carrierId => {
-                        const carrier = mockCarriers.find(c => c.id === carrierId);
-                        return carrier ? (
-                          <Badge key={carrierId} variant="outline" className="pr-1 py-1.5 text-sm">
-                            {carrier.name}
-                            <button
-                              type="button"
-                              onClick={() => handleInviteCarrier(carrierId)}
-                              className="ml-2 hover:bg-gray-200 rounded-full p-1"
-                            >
-                              <X className="w-3 h-3" />
-                            </button>
-                          </Badge>
-                        ) : null;
-                      })}
+        <div className="space-y-6 min-h-[320px]">
+          {/* Step 1: Load Details */}
+          {step === 0 && (
+            <>
+              <div className="space-y-3">
+                <Label className="text-base font-semibold">Payment Mode</Label>
+                <div className="grid grid-cols-2 gap-4">
+                  <Button type="button" variant={paymentMode === "ESCROW" ? "default" : "outline"} className="h-auto py-4 justify-start" onClick={() => handleSelectPaymentMode("ESCROW")}>
+                    <div className="text-left">
+                      <div className="font-semibold text-base mb-1">Escrow (Recommended)</div>
+                      <div className="text-xs opacity-90 leading-relaxed">Funds held until delivery, disputes supported.</div>
                     </div>
-                  </div>
-                )}
+                  </Button>
+                  <Button type="button" variant={paymentMode === "DIRECT" ? "default" : "outline"} className="h-auto py-4 justify-start" onClick={() => handleSelectPaymentMode("DIRECT")}>
+                    <div className="text-left">
+                      <div className="font-semibold text-base mb-1">Direct Payment</div>
+                      <div className="text-xs opacity-90 leading-relaxed">Pay hauler directly; no escrow protections.</div>
+                    </div>
+                  </Button>
+                </div>
+              </div>
 
-                {/* Carrier Search */}
+              <div className="space-y-3">
+                <Label htmlFor="species" className="text-base font-semibold">Livestock Type</Label>
+                <Select value={formData.species} onValueChange={(value) => setFormData({ ...formData, species: value })}>
+                  <SelectTrigger className="h-11"><SelectValue placeholder="Select livestock type" /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="cattle">Cattle</SelectItem>
+                    <SelectItem value="sheep">Sheep</SelectItem>
+                    <SelectItem value="pigs">Pigs</SelectItem>
+                    <SelectItem value="goats">Goats</SelectItem>
+                    <SelectItem value="horses">Horses</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+
+              <div className="grid grid-cols-2 gap-4">
                 <div className="space-y-3">
-                  <Label className="text-base font-semibold">Search and Invite Carriers</Label>
-                  <Input
-                    placeholder="Search carriers..."
-                    className="h-11"
-                    value={carrierSearch}
-                    onChange={(e) => setCarrierSearch(e.target.value)}
-                  />
-                  <div className="max-h-56 overflow-y-auto space-y-2 border-2 rounded-lg p-3">
-                    {filteredCarriers.map(carrier => (
-                      <div
-                        key={carrier.id}
-                        className="flex items-center justify-between p-3 hover:bg-gray-50 rounded-lg cursor-pointer transition-colors"
-                        onClick={() => handleInviteCarrier(carrier.id)}
-                      >
-                        <div className="flex items-center gap-3">
-                          <Checkbox checked={invitedCarriers.includes(carrier.id)} />
-                          <div>
-                            <p className="text-sm font-medium">{carrier.name}</p>
-                            <p className="text-xs text-gray-600">Rating: {carrier.rating} ⭐</p>
-                          </div>
+                  <Label htmlFor="quantity" className="text-base font-semibold">Quantity (Head)</Label>
+                  <Input id="quantity" type="number" placeholder="50" className="h-11" value={formData.quantity} onChange={(e) => setFormData({ ...formData, quantity: e.target.value })} />
+                </div>
+                <div className="space-y-3">
+                  <Label htmlFor="weight" className="text-base font-semibold">Avg Weight (lbs)</Label>
+                  <Input id="weight" type="number" placeholder="1200" className="h-11" value={formData.weight} onChange={(e) => setFormData({ ...formData, weight: e.target.value })} />
+                </div>
+              </div>
+            </>
+          )}
+
+          {/* Step 2: Route & Schedule */}
+          {step === 1 && (
+            <>
+              <div className="space-y-3">
+                <Label className="text-base font-semibold">Pickup Location</Label>
+                <AddressSearch value={pickupSearch} onChange={setPickupSearch} onSelect={handlePickupSelect} disabled={isSubmitting} />
+                <div className="relative">
+                  <MapPin className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400" />
+                  <Input className="pl-10 h-11" placeholder="Enter address or city" value={formData.pickup} onChange={(e) => setFormData({ ...formData, pickup: e.target.value })} />
+                </div>
+              </div>
+
+              <div className="space-y-3">
+                <Label className="text-base font-semibold">Dropoff Location</Label>
+                <AddressSearch value={dropoffSearch} onChange={setDropoffSearch} onSelect={handleDropoffSelect} disabled={isSubmitting} />
+                <div className="relative">
+                  <MapPin className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400" />
+                  <Input className="pl-10 h-11" placeholder="Enter address or city" value={formData.dropoff} onChange={(e) => setFormData({ ...formData, dropoff: e.target.value })} />
+                </div>
+              </div>
+
+              <div className="space-y-3">
+                <Label className="text-base font-semibold">Pickup Date</Label>
+                <Popover>
+                  <PopoverTrigger asChild>
+                    <Button variant="outline" className="w-full justify-start text-left h-11">
+                      <CalendarIcon className="mr-2 w-5 h-5" />
+                      {date ? date.toLocaleDateString() : 'Select pickup date'}
+                    </Button>
+                  </PopoverTrigger>
+                  <PopoverContent className="w-auto p-0" align="start">
+                    <Calendar mode="single" selected={date} onSelect={setDate} initialFocus />
+                  </PopoverContent>
+                </Popover>
+              </div>
+            </>
+          )}
+
+          {/* Step 3: Pricing & Options */}
+          {step === 2 && (
+            <>
+              <div className="grid grid-cols-3 gap-4">
+                <div className="col-span-2 space-y-3">
+                  <Label htmlFor="offerPrice" className="text-base font-semibold">Offer Price</Label>
+                  <Input id="offerPrice" type="number" min="0" step="0.01" placeholder="Enter amount" className="h-11" value={formData.offerPrice} onChange={(e) => setFormData({ ...formData, offerPrice: e.target.value })} />
+                </div>
+                <div className="space-y-3">
+                  <Label className="text-base font-semibold">Currency</Label>
+                  <Select value={formData.currency} onValueChange={(value) => setFormData({ ...formData, currency: value })}>
+                    <SelectTrigger className="h-11"><SelectValue placeholder="Currency" /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="USD">USD</SelectItem>
+                      <SelectItem value="CAD">CAD</SelectItem>
+                      <SelectItem value="AUD">AUD</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+              </div>
+
+              <div className="bg-gradient-to-br from-orange-50 to-orange-100 rounded-xl p-5 border-2 border-orange-200">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <div className="text-sm text-gray-700 mb-2 font-medium">Estimated Price</div>
+                    <div className="text-3xl font-bold text-[#F97316]">{estimatedPrice}</div>
+                  </div>
+                  <div className="text-xs text-gray-700 text-right bg-white/50 rounded-lg px-3 py-2">Based on distance<br />and livestock type</div>
+                </div>
+              </div>
+
+              <div className="space-y-4">
+                <Label className="text-base font-semibold">Load Visibility</Label>
+                <Tabs value={formData.visibility} onValueChange={(value) => setFormData({ ...formData, visibility: value })} className="w-full">
+                  <TabsList className="grid w-full grid-cols-2 h-12 p-1 bg-gray-100">
+                    <TabsTrigger value="public" className="flex items-center gap-2 text-base data-[state=active]:bg-white data-[state=active]:shadow-sm"><Globe className="w-5 h-5" />Public</TabsTrigger>
+                    <TabsTrigger value="private" className="flex items-center gap-2 text-base data-[state=active]:bg-white data-[state=active]:shadow-sm"><Lock className="w-5 h-5" />Invite-Only</TabsTrigger>
+                  </TabsList>
+                  <TabsContent value="public" className="mt-4">
+                    <div className="p-4 bg-blue-50 rounded-lg border-2 border-blue-200">
+                      <p className="text-sm text-blue-900 leading-relaxed"><strong>Public:</strong> All verified carriers can see and bid on this load</p>
+                    </div>
+                  </TabsContent>
+                  <TabsContent value="private" className="mt-4 space-y-4">
+                    <div className="p-4 bg-purple-50 rounded-lg border-2 border-purple-200">
+                      <p className="text-sm text-purple-900 leading-relaxed"><strong>Private:</strong> Only invited carriers can see and bid on this load</p>
+                    </div>
+                    {invitedCarriers.length > 0 && (
+                      <div className="space-y-3">
+                        <Label className="text-base font-semibold">Invited Carriers ({invitedCarriers.length})</Label>
+                        <div className="flex flex-wrap gap-2">
+                          {invitedCarriers.map(carrierId => {
+                            const carrier = mockCarriers.find(c => c.id === carrierId);
+                            return carrier ? (
+                              <Badge key={carrierId} variant="outline" className="pr-1 py-1.5 text-sm">
+                                {carrier.name}
+                                <button type="button" onClick={() => handleInviteCarrier(carrierId)} className="ml-2 hover:bg-gray-200 rounded-full p-1"><X className="w-3 h-3" /></button>
+                              </Badge>
+                            ) : null;
+                          })}
                         </div>
                       </div>
-                    ))}
-                  </div>
-                </div>
-              </TabsContent>
-            </Tabs>
-          </div>
-
-          {/* Special Requirements */}
-          <div className="space-y-3">
-            <Label htmlFor="requirements" className="text-base font-semibold">Special Requirements (Optional)</Label>
-            <Textarea
-              id="requirements"
-              placeholder="e.g., Temperature controlled, hay required, rest stops needed"
-              rows={4}
-              className="resize-none"
-              value={formData.specialRequirements}
-              onChange={(e) => setFormData({ ...formData, specialRequirements: e.target.value })}
-            />
-          </div>
-
-          {/* Price Estimate */}
-          <div className="bg-gradient-to-br from-orange-50 to-orange-100 rounded-xl p-5 border-2 border-orange-200">
-            <div className="flex items-center justify-between">
-              <div>
-                <div className="text-sm text-gray-700 mb-2 font-medium">Estimated Price</div>
-                <div className="text-3xl font-bold text-[#F97316]">{estimatedPrice}</div>
+                    )}
+                    <div className="space-y-3">
+                      <Label className="text-base font-semibold">Search and Invite Carriers</Label>
+                      <Input placeholder="Search carriers..." className="h-11" value={carrierSearch} onChange={(e) => setCarrierSearch(e.target.value)} />
+                      <div className="max-h-56 overflow-y-auto space-y-2 border-2 rounded-lg p-3">
+                        {filteredCarriers.map(carrier => (
+                          <div key={carrier.id} className="flex items-center justify-between p-3 hover:bg-gray-50 rounded-lg cursor-pointer transition-colors" onClick={() => handleInviteCarrier(carrier.id)}>
+                            <div className="flex items-center gap-3">
+                              <Checkbox checked={invitedCarriers.includes(carrier.id)} />
+                              <div>
+                                <p className="text-sm font-medium">{carrier.name}</p>
+                                <p className="text-xs text-gray-600">Rating: {carrier.rating} ⭐</p>
+                              </div>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  </TabsContent>
+                </Tabs>
               </div>
-              <div className="text-xs text-gray-700 text-right bg-white/50 rounded-lg px-3 py-2">
-                Based on distance<br />and livestock type
+
+              <div className="space-y-3">
+                <Label htmlFor="requirements" className="text-base font-semibold">Special Requirements (Optional)</Label>
+                <Textarea id="requirements" placeholder="e.g., Temperature controlled, hay required, rest stops needed" rows={3} className="resize-none" value={formData.specialRequirements} onChange={(e) => setFormData({ ...formData, specialRequirements: e.target.value })} />
               </div>
-            </div>
-          </div>
 
-          {errorMessage && (
-            <div className="p-3 bg-red-50 border-2 border-red-200 rounded-lg text-sm text-red-700">
-              {errorMessage}
-            </div>
+              {errorMessage && (
+                <div className="p-3 bg-red-50 border-2 border-red-200 rounded-lg text-sm text-red-700">{errorMessage}</div>
+              )}
+            </>
           )}
-          {successMessage && (
-            <div className="p-3 bg-green-50 border-2 border-green-200 rounded-lg text-sm text-green-700">
-              {successMessage}
-            </div>
-          )}
+        </div>
 
-          {/* Actions */}
-          <div className="flex gap-4 pt-4">
-            <Button
-              type="button"
-              variant="outline"
-              className="flex-1 h-12 text-base"
-              onClick={() => onOpenChange?.(false)}
-            >
-              Cancel
-            </Button>
-            <Button
-              type="submit"
-              className="flex-1 h-12 text-base bg-[#F97316] hover:bg-[#ea580c] font-semibold"
-              disabled={isSubmitting}
-            >
-              {isSubmitting ? 'Posting...' : 'Post Load'}
-            </Button>
-          </div>
-        </form>
+        <FormStepperNav
+          currentStep={step}
+          totalSteps={STEPS.length}
+          onBack={handleBack}
+          onNext={handleNext}
+          onSubmit={handleSubmit}
+          submitting={isSubmitting}
+          submitLabel="Post Load"
+        />
       </DialogContent>
 
       <Dialog open={directWarningOpen} onOpenChange={setDirectWarningOpen}>
         <DialogContent className="max-w-lg">
           <div className="space-y-5">
             <div className="space-y-2">
-              <h3 className="text-xl font-semibold text-gray-900">
-                Direct payment is at your own risk
-              </h3>
-              <p className="text-sm text-gray-600 leading-relaxed">
-                Paying the hauler directly means Livestock Way will not hold funds or mediate issues.
-              </p>
+              <h3 className="text-xl font-semibold text-gray-900">Direct payment is at your own risk</h3>
+              <p className="text-sm text-gray-600 leading-relaxed">Paying the hauler directly means Livestock Way will not hold funds or mediate issues.</p>
             </div>
             <ul className="list-disc pl-5 text-sm text-gray-700 space-y-2 leading-relaxed">
               <li>Livestock Way is not responsible for fraud, non-delivery, or payment issues.</li>
@@ -562,33 +423,12 @@ export function PostLoadDialog({ open = false, onOpenChange, initialData }: Post
               <li>Coordinate payment directly with the hauler.</li>
             </ul>
             <label className="flex items-start gap-3 text-sm text-gray-800 cursor-pointer p-3 bg-gray-50 rounded-lg border">
-              <Checkbox
-                checked={directDisclaimerAccepted}
-                onCheckedChange={(checked) => setDirectDisclaimerAccepted(!!checked)}
-              />
+              <Checkbox checked={directDisclaimerAccepted} onCheckedChange={(checked) => setDirectDisclaimerAccepted(!!checked)} />
               <span className="leading-relaxed">I understand and accept the risks of direct payment</span>
             </label>
             <div className="flex justify-end gap-3 pt-2">
-              <Button
-                type="button"
-                variant="outline"
-                className="h-11"
-                onClick={() => {
-                  setDirectWarningOpen(false);
-                  setDirectDisclaimerAccepted(false);
-                  setPaymentMode("ESCROW");
-                }}
-              >
-                Cancel
-              </Button>
-              <Button
-                type="button"
-                className="bg-red-600 hover:bg-red-700 h-11 font-semibold"
-                disabled={!directDisclaimerAccepted}
-                onClick={confirmDirectPayment}
-              >
-                Proceed with Direct Payment
-              </Button>
+              <Button type="button" variant="outline" className="h-11" onClick={() => { setDirectWarningOpen(false); setDirectDisclaimerAccepted(false); setPaymentMode("ESCROW"); }}>Cancel</Button>
+              <Button type="button" className="bg-red-600 hover:bg-red-700 h-11 font-semibold" disabled={!directDisclaimerAccepted} onClick={confirmDirectPayment}>Proceed with Direct Payment</Button>
             </div>
           </div>
         </DialogContent>

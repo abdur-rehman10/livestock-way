@@ -14,7 +14,7 @@ import {
   type PricingCompanyTier,
   type IndividualPackage,
 } from "../api/admin";
-import { toast } from "sonner";
+import { toast, swalConfirm } from '../lib/swal';
 import {
   Dialog,
   DialogContent,
@@ -190,7 +190,13 @@ export default function AdminPricing() {
     setDialogOpen(true);
   };
 
-  const handleRemoveTier = (id?: number | null, tempId?: string) => {
+  const handleRemoveTier = async (id?: number | null, tempId?: string) => {
+    const confirmed = await swalConfirm({
+      title: 'Remove Tier',
+      text: 'Remove this pricing tier?',
+      confirmText: 'Yes, remove',
+    });
+    if (!confirmed) return;
     setTiers((prev) =>
       prev.filter(
         (t) =>

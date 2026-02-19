@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { Link, NavLink, useNavigate, useLocation } from "react-router-dom";
 import { Button } from "./ui/button";
+import { swalConfirm } from "../lib/swal";
 import { Avatar, AvatarFallback } from "./ui/avatar";
 import { Separator } from "./ui/separator";
 import {
@@ -355,8 +356,15 @@ export function AppLayout({ children, userRole, onLogout }: AppLayoutProps) {
     return location.pathname === path;
   };
 
-  const handleLogout = () => {
-    if (window.confirm('Are you sure you want to logout?')) {
+  const handleLogout = async () => {
+    const confirmed = await swalConfirm({
+      title: 'Logout',
+      text: 'Are you sure you want to logout?',
+      confirmText: 'Yes, logout',
+      icon: 'question',
+      confirmColor: '#ef4444',
+    });
+    if (confirmed) {
       onLogout();
       navigate('/');
     }
@@ -393,18 +401,6 @@ export function AppLayout({ children, userRole, onLogout }: AppLayoutProps) {
               )}
             </Button>
           </div>
-
-          {/* Role Badge */}
-          {isSidebarOpen && (
-            <div className="p-4">
-              <div 
-                className="px-3 py-2 rounded-lg text-sm text-white"
-                style={{ backgroundColor: config.color }}
-              >
-                {config.label}
-              </div>
-            </div>
-          )}
 
           {/* Navigation */}
           <nav className="flex-1 overflow-y-auto p-2">
@@ -462,36 +458,36 @@ export function AppLayout({ children, userRole, onLogout }: AppLayoutProps) {
                           }}
                         >
                           <Package className="w-4 h-4 mr-2" />
-                          Post a Load
+                          Load
                         </DropdownMenuItem>
                         <DropdownMenuItem
                           onClick={() => navigate('/shipper/post-job')}
                         >
                           <Briefcase className="w-4 h-4 mr-2" />
-                          Post a Job
+                          Job
                         </DropdownMenuItem>
                         <DropdownMenuItem
                           onClick={() => navigate('/shipper/post-buy-sell')}
                         >
                           <DollarSign className="w-4 h-4 mr-2" />
-                          Post Buy & Sell
+                          Buy & Sell
                         </DropdownMenuItem>
                         <DropdownMenuItem
                           onClick={() => navigate('/shipper/post-resource')}
                         >
                           <Wrench className="w-4 h-4 mr-2" />
-                          Post a Resource
+                          Resource
                         </DropdownMenuItem>
                       </>
                     )}
                     {userRole === 'hauler' && (
                       <>
-                        <DropdownMenuItem
+                        {/* <DropdownMenuItem
                           onClick={() => navigate('/hauler/fleet')}
                         >
                           <Truck className="w-4 h-4 mr-2" />
                           Post a Fleet
-                        </DropdownMenuItem>
+                        </DropdownMenuItem> */}
                         <DropdownMenuItem
                           onClick={() => {
                             navigate('/hauler/truck-listings');
@@ -502,25 +498,25 @@ export function AppLayout({ children, userRole, onLogout }: AppLayoutProps) {
                           }}
                         >
                           <Truck className="w-4 h-4 mr-2" />
-                          Post a Truck
+                          Truck / Route
                         </DropdownMenuItem>
                         <DropdownMenuItem
                           onClick={() => navigate('/hauler/post-job')}
                         >
                           <Briefcase className="w-4 h-4 mr-2" />
-                          Post a Job
+                        Job
                         </DropdownMenuItem>
                         <DropdownMenuItem
                           onClick={() => navigate('/hauler/post-buy-sell')}
                         >
                           <DollarSign className="w-4 h-4 mr-2" />
-                          Post Buy & Sell
+                          Buy & Sell
                         </DropdownMenuItem>
                         <DropdownMenuItem
                           onClick={() => navigate('/hauler/post-resource')}
                         >
                           <Wrench className="w-4 h-4 mr-2" />
-                          Post a Resource
+                          Resource
                         </DropdownMenuItem>
                       </>
                     )}
@@ -553,7 +549,7 @@ export function AppLayout({ children, userRole, onLogout }: AppLayoutProps) {
               {config.sections.map((section, sIdx) => (
                 <div key={sIdx}>
                   {sIdx > 0 && <div className="border-t border-gray-200 dark:border-gray-700 my-2" />}
-                  <div className="space-y-1">
+                  <div className="space-y-2">
                     {section.map((route) => {
                       const Icon = route.icon;
                       const showBookingBadge =
@@ -645,7 +641,7 @@ export function AppLayout({ children, userRole, onLogout }: AppLayoutProps) {
           <Separator />
 
           {/* Bottom Actions */}
-          <div className="p-2 space-y-1">
+          <div className="p-2 space-y-2">
             <Link
               to={`/${userRole === 'super-admin' ? 'admin' : userRole}/settings`}
               className={`

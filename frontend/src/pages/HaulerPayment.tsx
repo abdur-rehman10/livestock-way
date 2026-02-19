@@ -3,7 +3,7 @@ import { useNavigate } from "react-router-dom";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "../components/ui/card";
 import { Button } from "../components/ui/button";
 import { Separator } from "../components/ui/separator";
-import { toast } from "sonner";
+import { toast } from '../lib/swal';
 import { useHaulerSubscription } from "../hooks/useHaulerSubscription";
 import { fetchPublicIndividualPackages } from "../api/marketplace";
 import type { IndividualPackage } from "../api/marketplace";
@@ -90,7 +90,9 @@ export default function HaulerPayment() {
           Authorization: typeof window !== "undefined" ? `Bearer ${localStorage.getItem("token") ?? ""}` : "",
         },
       }).catch(() => null);
-      toast.success("Subscription activated");
+      toast.success("Subscription activated.", {
+        description: "You now have full access to all hauler features.",
+      });
       await refresh();
       navigate("/hauler/dashboard", { replace: true });
     } catch (err: any) {

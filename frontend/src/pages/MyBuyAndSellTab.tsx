@@ -19,7 +19,7 @@ import {
   type BuyAndSellApplication 
 } from "../api/buyAndSell";
 import { fetchBuySellThreadByListingAndApplication } from "../api/buySellMessages";
-import { toast } from "sonner";
+import { toast, swalConfirm } from '../lib/swal';
 import { storage, STORAGE_KEYS } from "../lib/storage";
 import { API_BASE_URL } from "../lib/api";
 
@@ -53,9 +53,12 @@ export default function MyBuyAndSellTab() {
   }, []);
 
   const handleDelete = async (listingId: number) => {
-    if (!window.confirm("Delete this listing? This cannot be undone.")) {
-      return;
-    }
+    const confirmed = await swalConfirm({
+      title: 'Delete Listing',
+      text: 'Delete this listing? This cannot be undone.',
+      confirmText: 'Yes, delete',
+    });
+    if (!confirmed) return;
     try {
       await deleteBuyAndSellListing(listingId);
       toast.success("Listing deleted");

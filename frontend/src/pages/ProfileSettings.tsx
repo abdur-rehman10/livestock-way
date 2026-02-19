@@ -20,7 +20,7 @@ import {
   Camera,
   ArrowLeft
 } from 'lucide-react';
-import { toast } from 'sonner';
+import { toast, swalConfirm } from '../lib/swal';
 import { AddressSearch, type MappedAddress } from '../components/AddressSearch';
 import { fetchHaulerProfile, updateHaulerProfile, type HaulerProfile } from '../api/marketplace';
 import { fetchShipperProfile, updateShipperProfile, type ShipperProfile } from '../api/marketplace';
@@ -199,8 +199,13 @@ export function ProfileSettings({ role = 'driver', onBack }: ProfileSettingsProp
     setSecurity({ ...security, currentPassword: '', newPassword: '', confirmPassword: '' });
   };
 
-  const handleDeleteAccount = () => {
-    if (confirm('Are you sure you want to delete your account? This action cannot be undone.')) {
+  const handleDeleteAccount = async () => {
+    const confirmed = await swalConfirm({
+      title: 'Delete Account',
+      text: 'Are you sure you want to delete your account? This action cannot be undone.',
+      confirmText: 'Yes, delete my account',
+    });
+    if (confirmed) {
       toast.error('Account deletion requested. You will receive a confirmation email.');
     }
   };

@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import { toast } from '../lib/swal';
 import { Button } from './ui/button';
 import { Input } from './ui/input';
 import { Label } from './ui/label';
@@ -126,6 +127,9 @@ export default function OnboardingWizard({ role, onComplete, onSkip }: Onboardin
       setKycRequest(request);
       setKycUploaded(true);
       setKycSkipped(false);
+      toast.success("Documents submitted for verification.", {
+        description: "Our team will review them shortly.",
+      });
     } catch (err: any) {
       setKycError(err?.message || "Failed to upload documents");
     } finally {

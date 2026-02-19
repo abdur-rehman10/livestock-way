@@ -10,6 +10,7 @@ import { Switch } from '../components/ui/switch';
 import { Truck, Home, Wrench, Eye, EyeOff, Check, X, User, Shield, ArrowLeft } from 'lucide-react';
 import { Progress } from '../components/ui/progress';
 import { storage, STORAGE_KEYS } from '../lib/storage';
+import { toast } from '../lib/swal';
 import { AddressSearch, type MappedAddress } from '../components/AddressSearch';
 import IndividualPlanChooseView from '../components/IndividualPlanChooseView';
 
@@ -167,11 +168,11 @@ export default function SignupLogin({ preselectedRole, onAuth, onForgotPassword,
     e.preventDefault();
     if (signupStep === 'info') {
       if (password !== confirmPassword) {
-        alert('Passwords do not match');
+        toast.error('Passwords do not match');
         return;
       }
       if (passwordStrength < 50) {
-        alert('Please use a stronger password');
+        toast.error('Please use a stronger password');
         return;
       }
       const requiresPlan = role === 'hauler' && !isCompany;

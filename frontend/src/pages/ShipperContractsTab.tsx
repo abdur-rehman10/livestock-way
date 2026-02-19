@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { toast } from "sonner";
+import { toast } from '../lib/swal';
 import { MessageSquare, FileText, CheckCircle, Clock, TruckIcon, MapPin, Plus, AlertCircle, Flag, Users, DollarSign, FileCheck, Activity } from 'lucide-react';
 import { Button } from "../components/ui/button";
 import { Badge } from "../components/ui/badge";
@@ -352,7 +352,11 @@ export default function ShipperContractsTab() {
       if (sendNow) {
         await sendContract(selectedContract.id);
       }
-      toast.success(sendNow ? "Contract sent." : "Contract updated.");
+      toast.success(sendNow ? "Contract sent to hauler." : "Contract draft saved.", {
+        description: sendNow
+          ? "The hauler will be notified and can accept or negotiate."
+          : "You can review and send it when ready.",
+      });
       setModalOpen(false);
       await refresh();
     } catch (err: any) {
@@ -1164,7 +1168,9 @@ export default function ShipperContractsTab() {
                 });
               }
 
-              toast.success("Contract sent to hauler.");
+              toast.success("Contract sent to hauler.", {
+                description: "The hauler will be notified and can accept or negotiate.",
+              });
               setShowConversationContractDialog(false);
               setSelectedConversation(null);
               await refresh();
@@ -1226,7 +1232,9 @@ export default function ShipperContractsTab() {
                 });
               }
 
-              toast.success("Contract draft saved.");
+              toast.success("Contract draft saved.", {
+                description: "You can review and send it when ready.",
+              });
               setShowConversationContractDialog(false);
               setSelectedConversation(null);
               await refresh();

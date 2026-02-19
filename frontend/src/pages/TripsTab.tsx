@@ -26,7 +26,7 @@ import {
 } from 'lucide-react';
 import { SubscriptionCTA } from '../components/SubscriptionCTA';
 import { useHaulerSubscription } from '../hooks/useHaulerSubscription';
-import { toast } from 'sonner';
+import { toast } from '../lib/swal';
 import {
   fetchHaulerTrips,
   fetchShipperTrips,
@@ -612,7 +612,9 @@ export function TripsTab({ onViewTrip, role = 'hauler' }: TripsTabProps) {
     try {
       setStartTripLoadingId(tripId);
       await startMarketplaceTrip(tripId);
-      toast.success('Trip started.');
+      toast.success('Trip is now in progress.', {
+        description: 'Live tracking is active. Safe travels!',
+      });
       const response = await fetchHaulerTrips();
       setHaulerTripSummaries(response.items ?? []);
     } catch (err: any) {
@@ -708,7 +710,9 @@ export function TripsTab({ onViewTrip, role = 'hauler' }: TripsTabProps) {
     try {
       setConfirmDeliveryLoadingId(tripId);
       await confirmMarketplaceTripDelivery(tripId);
-      toast.success('Delivery confirmed.');
+      toast.success('Delivery confirmed.', {
+        description: 'Payment will be processed and released shortly.',
+      });
       const response = await fetchShipperTrips();
       setShipperTripSummaries(response.items ?? []);
     } catch (err: any) {

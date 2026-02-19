@@ -3,7 +3,7 @@ import {
   fetchHaulerSubscription,
   type HaulerSubscriptionState,
 } from "../api/marketplace";
-import { toast } from "sonner";
+import { toast } from '../lib/swal';
 import { storage, STORAGE_KEYS } from "../lib/storage";
 
 export function useHaulerSubscription() {

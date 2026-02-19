@@ -5,7 +5,7 @@ import { Label } from '../components/ui/label';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../components/ui/card';
 import { InputOTP, InputOTPGroup, InputOTPSlot } from '../components/ui/input-otp';
 import logo from '../assets/livestockway-logo.svg';
-import { toast } from 'sonner';
+import { toast } from '../lib/swal';
 import { ArrowLeft, CheckCircle2 } from 'lucide-react';
 
 interface ForgotPasswordProps {

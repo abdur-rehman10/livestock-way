@@ -6,6 +6,7 @@
  */
 
 import React, { useState } from 'react';
+import { toast } from '../lib/swal';
 import { Button } from './ui/button';
 import { Card } from './ui/card';
 import { Camera, Download, Check, Loader2 } from 'lucide-react';
@@ -67,7 +68,7 @@ export function ScreenshotCapture({ enabled = false }: ScreenshotCaptureProps) {
 
     } catch (error) {
       console.error('Screenshot failed:', error);
-      alert('Screenshot capture failed. Make sure html2canvas is installed.');
+      toast.error('Screenshot capture failed. Make sure html2canvas is installed.');
     } finally {
       setCapturing(false);
     }

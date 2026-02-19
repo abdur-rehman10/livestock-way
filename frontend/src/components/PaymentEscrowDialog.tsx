@@ -17,7 +17,7 @@ import {
   Download,
   Eye
 } from 'lucide-react';
-import { toast } from 'sonner';
+import { toast } from '../lib/swal';
 
 interface PaymentEscrowDialogProps {
   isOpen: boolean;

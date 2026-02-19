@@ -22,7 +22,7 @@ import { PostTruckDialog } from "./PostTruckDialog";
 import MyJobsTab from "./MyJobsTab";
 import MyBuyAndSellTab from "./MyBuyAndSellTab";
 import MyResourcesTab from "./MyResourcesTab";
-import { toast } from "sonner";
+import { toast, swalConfirm } from '../lib/swal';
 
 function extractErrorMessage(error: unknown): string {
   if (!error) return "";
@@ -385,6 +385,12 @@ export default function HaulerTruckListings() {
                       size="sm"
                       variant="destructive"
                       onClick={async () => {
+                        const confirmed = await swalConfirm({
+                          title: 'Delete Listing',
+                          text: 'Delete this truck listing? This cannot be undone.',
+                          confirmText: 'Yes, delete',
+                        });
+                        if (!confirmed) return;
                         try {
                           await deleteTruckAvailabilityEntry(listing.id);
                           toast.success("Listing removed");

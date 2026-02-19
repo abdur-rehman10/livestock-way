@@ -37,7 +37,7 @@ import {
   type HaulerVehicleOption,
 } from "../api/marketplace";
 import { PaymentCard } from "../components/PaymentCard";
-import { toast } from "sonner";
+import { toast, swalConfirm } from '../lib/swal';
 import { SubscriptionCTA } from "../components/SubscriptionCTA";
 import { useHaulerSubscription } from "../hooks/useHaulerSubscription";
 import {
@@ -286,7 +286,9 @@ export function HaulerTripView() {
     try {
       const saved = await generateTripRoutePlan(tripId);
       setRoutePlan(saved);
-      toast.success("Route plan generated");
+      toast.success("Route plan generated.", {
+        description: "Optimised waypoints and stops have been added to your trip.",
+      });
     } catch (err: any) {
       setRoutePlanError(err?.message || "Failed to generate route plan");
       toast.error(err?.message || "Failed to generate route plan");
@@ -648,7 +650,11 @@ export function HaulerTripView() {
   const handleDeleteExpense = async (expenseId: number) => {
     if (!tripId) return;
     const safeTripId: number = tripId;
-    const confirmed = window.confirm("Remove this expense?");
+    const confirmed = await swalConfirm({
+      title: 'Remove Expense',
+      text: 'Remove this expense?',
+      confirmText: 'Yes, remove',
+    });
     if (!confirmed) return;
 
     try {
@@ -682,7 +688,9 @@ export function HaulerTripView() {
       if (intentId) {
         await triggerPaymentWebhook(intentId, "payment_succeeded");
       }
-      toast.success("Escrow funded successfully.");
+      toast.success("Escrow funded successfully.", {
+        description: "Funds are secured and will be released upon delivery confirmation.",
+      });
       await loadMarketplaceContext();
       try {
         const refreshed = await getPaymentByTrip(marketplaceTripId);
@@ -755,7 +763,9 @@ export function HaulerTripView() {
     try {
       setTripActionLoading(true);
       await startMarketplaceTrip(marketplaceContext.trip.id);
-      toast.success("Trip started.");
+      toast.success("Trip is now in progress.", {
+        description: "Live tracking is active. Safe travels!",
+      });
       await loadMarketplaceContext();
     } catch (err: any) {
       toast.error(err?.message ?? "Failed to start trip.");
@@ -787,7 +797,9 @@ export function HaulerTripView() {
     try {
       setTripActionLoading(true);
       await markMarketplaceTripDelivered(marketplaceContext.trip.id, receipt);
-      toast.success("Trip marked delivered.");
+      toast.success("Delivery recorded.", {
+        description: "Awaiting shipper confirmation to release payment.",
+      });
       await loadMarketplaceContext();
     } catch (err: any) {
       toast.error(err?.message ?? "Failed to mark delivered.");
@@ -801,7 +813,9 @@ export function HaulerTripView() {
     try {
       setTripActionLoading(true);
       await confirmMarketplaceTripDelivery(marketplaceContext.trip.id);
-      toast.success("Delivery confirmed.");
+      toast.success("Delivery confirmed.", {
+        description: "Payment will be processed and released shortly.",
+      });
       await loadMarketplaceContext();
     } catch (err: any) {
       toast.error(err?.message ?? "Failed to confirm delivery.");
@@ -816,14 +830,11 @@ export function HaulerTripView() {
       return;
     }
     
-    const confirmed = window.confirm(
-      "⚠️ WARNING: This will permanently delete this trip.\n\n" +
-      "• This action cannot be undone\n" +
-      "• The truck/route listing will be reactivated\n" +
-      "• You can create a new trip after deletion\n\n" +
-      "Are you sure you want to proceed?"
-    );
-    
+    const confirmed = await swalConfirm({
+      title: 'Delete Trip',
+      text: 'This will permanently delete this trip. The truck/route listing will be reactivated. This action cannot be undone.',
+      confirmText: 'Yes, delete trip',
+    });
     if (!confirmed) return;
 
     try {

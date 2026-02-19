@@ -19,7 +19,7 @@ import {
   type ResourcesApplication 
 } from "../api/resources";
 import { fetchResourcesThreadByListingAndApplication } from "../api/resourcesMessages";
-import { toast } from "sonner";
+import { toast, swalConfirm } from '../lib/swal';
 import { storage, STORAGE_KEYS } from "../lib/storage";
 
 const resourceTypeLabels: Record<string, string> = {
@@ -74,9 +74,12 @@ export default function MyResourcesTab() {
   }, []);
 
   const handleDelete = async (listingId: number) => {
-    if (!window.confirm("Delete this listing? This cannot be undone.")) {
-      return;
-    }
+    const confirmed = await swalConfirm({
+      title: 'Delete Listing',
+      text: 'Delete this listing? This cannot be undone.',
+      confirmText: 'Yes, delete',
+    });
+    if (!confirmed) return;
     try {
       await deleteResourcesListing(listingId);
       toast.success("Listing deleted");

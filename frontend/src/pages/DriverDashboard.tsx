@@ -33,7 +33,7 @@ import {
   Search,
   Filter
 } from 'lucide-react';
-import { toast } from 'sonner';
+import { toast } from '../lib/swal';
 import logo from '../assets/livestockway-logo.svg';
 import { storage, STORAGE_KEYS } from '../lib/storage';
 import { searchFilter } from '../lib/filter-utils';

@@ -22,7 +22,7 @@ import {
   Trash2,
   Users
 } from 'lucide-react';
-import { toast } from 'sonner';
+import { toast, swalConfirm } from '../lib/swal';
 
 interface MarketplaceItem {
   id: string;
@@ -145,7 +145,13 @@ export function MarketplaceTab({ userRole = 'hauler' }: MarketplaceTabProps) {
     toast.success(`${selectedType === 'job' ? 'Job' : selectedType === 'service' ? 'Service' : 'Equipment'} posted successfully!`);
   };
 
-  const handleDelete = (id: string) => {
+  const handleDelete = async (id: string) => {
+    const confirmed = await swalConfirm({
+      title: 'Remove Item',
+      text: 'Remove this item from the marketplace?',
+      confirmText: 'Yes, remove',
+    });
+    if (!confirmed) return;
     setItems(items.filter(item => item.id !== id));
     toast.success('Item removed from marketplace');
   };

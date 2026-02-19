@@ -48,7 +48,7 @@ import {
   Play,
   Upload,
 } from "lucide-react";
-import { toast } from "sonner";
+import { toast } from '../lib/swal';
 import {
   SOCKET_EVENTS,
   subscribeToSocketEvent,
@@ -346,7 +346,9 @@ useEffect(() => {
       } else {
         await startLoad(loadId);
       }
-      toast.success("Trip started");
+      toast.success("Trip is now in progress.", {
+        description: "Live tracking is active. Safe travels!",
+      });
       await refresh();
     } catch (err: any) {
       toast.error(err?.message ?? "Failed to start trip");
@@ -379,7 +381,9 @@ useEffect(() => {
         }
         await completeLoad(loadId, epodUrl);
       }
-      toast.success("Load marked as delivered");
+      toast.success("Delivery recorded.", {
+        description: "Awaiting shipper confirmation to complete the trip.",
+      });
       await refresh();
     } catch (err: any) {
       toast.error(err?.message ?? "Failed to mark as delivered");
@@ -442,7 +446,9 @@ useEffect(() => {
         received_reference: directReference.trim() || null,
         received_at: directReceivedAt ? new Date(directReceivedAt).toISOString() : null,
       });
-      toast.success("Load marked as delivered");
+      toast.success("Delivery recorded.", {
+        description: "Awaiting shipper confirmation to complete the trip.",
+      });
       if (directDialog.loadId) {
         tripContextCache.current[directDialog.loadId] = await fetchMarketplaceTripByLoad(
           directDialog.loadId

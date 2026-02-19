@@ -1,32 +1,32 @@
-import { toast } from 'sonner';
-import { Button } from './ui/button';
-import { Undo2 } from 'lucide-react';
+import Swal from 'sweetalert2';
+import { toast } from '../lib/swal';
 
-/**
- * Show a toast notification with an undo button
- */
 export const showUndoToast = (
   message: string,
   onUndo: () => void,
   duration: number = 5000
 ) => {
-  toast(message, {
-    duration,
-    action: {
-      label: (
-        <div className="flex items-center gap-1">
-          <Undo2 className="w-3 h-3" />
-          <span>Undo</span>
-        </div>
-      ) as any,
-      onClick: onUndo,
+  Swal.fire({
+    toast: true,
+    position: 'top-end',
+    icon: 'info',
+    title: message,
+    showConfirmButton: true,
+    confirmButtonText: 'Undo',
+    confirmButtonColor: '#6366f1',
+    timer: duration,
+    timerProgressBar: true,
+    didOpen: (t) => {
+      t.onmouseenter = Swal.stopTimer;
+      t.onmouseleave = Swal.resumeTimer;
     },
+  }).then((result) => {
+    if (result.isConfirmed) {
+      onUndo();
+    }
   });
 };
 
-/**
- * Show a success toast with optional undo
- */
 export const showSuccessWithUndo = (
   message: string,
   onUndo?: () => void

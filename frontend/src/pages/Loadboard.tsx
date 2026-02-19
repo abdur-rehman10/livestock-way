@@ -48,7 +48,7 @@ import {
   Info,
   MessageCircle,
 } from "lucide-react";
-import { toast } from "sonner";
+import { toast, swalConfirm } from '../lib/swal';
 import { filterLoads, searchFilter } from "../lib/filter-utils";
 import {
   storage as appStorage,
@@ -620,7 +620,9 @@ const submitOffer = async () => {
           currency: "USD",
           message: offerMessage || undefined,
         });
-        toast.success("Offer updated.");
+        toast.success("Offer updated.", {
+          description: "The shipper will see your revised terms.",
+        });
       } else {
         // Get truck_id from selected truck availability entry
         const selectedAvailability = haulerTruckAvailability.find(
@@ -636,7 +638,9 @@ const submitOffer = async () => {
           message: offerMessage || undefined,
           truck_id: selectedAvailability.truck_id,
         });
-        toast.success("Offer submitted to shipper.");
+        toast.success("Offer sent to shipper.", {
+          description: "You'll be notified when they respond.",
+        });
         // Open message thread for the new offer
         if (result?.offer?.id) {
           window.dispatchEvent(new CustomEvent("open-load-offer-thread", {
@@ -1485,8 +1489,14 @@ const loadUserOffer = async (load: Load, options: { silent?: boolean } = {}) => 
                         {name}
                         <X
                           className="ml-1 h-3 w-3"
-                          onClick={(e) => {
+                          onClick={async (e) => {
                             e.stopPropagation();
+                            const confirmed = await swalConfirm({
+                              title: 'Delete Preset',
+                              text: `Delete the "${name}" filter preset?`,
+                              confirmText: 'Yes, delete',
+                            });
+                            if (!confirmed) return;
                             deleteFilterPreset(name);
                             toast.success(`Preset "${name}" deleted`);
                           }}

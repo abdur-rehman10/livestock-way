@@ -1,4 +1,5 @@
 import { useEffect, useState, useCallback, useMemo, Fragment } from 'react';
+import { toast, Swal } from '../lib/swal';
 import { Button } from '../components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/card';
 import { Badge } from '../components/ui/badge';
@@ -323,6 +324,7 @@ export function SuperAdminDashboard({ onLogout }: SuperAdminDashboardProps) {
         recipientRole: disputeChatTarget,
       });
       setMessageInput("");
+      toast.success(`Message sent to ${disputeChatTarget}.`);
       await loadDisputeMessages(activeDispute.id);
     } catch (err: any) {
       setMessageError(err?.message || 'Failed to send message');
@@ -337,6 +339,7 @@ export function SuperAdminDashboard({ onLogout }: SuperAdminDashboardProps) {
       setActionLoading(true);
       await postSupportTicketMessage(activeSupportTicket.id, { message: supportMessageInput.trim() });
       setSupportMessageInput("");
+      toast.success("Reply sent to user.");
       await loadSupportMessages(activeSupportTicket.id);
     } catch (err: any) {
       setSupportMessageError(err?.message || 'Failed to send message');
@@ -350,6 +353,7 @@ export function SuperAdminDashboard({ onLogout }: SuperAdminDashboardProps) {
     try {
       setActionLoading(true);
       await startDisputeReview(activeDispute.id);
+      toast.success("Dispute is now under review.");
       await loadDisputes();
       setActiveDispute((prev) => (prev ? { ...prev, status: "under_review" } : prev));
     } catch (err: any) {
@@ -365,8 +369,10 @@ export function SuperAdminDashboard({ onLogout }: SuperAdminDashboardProps) {
       setActionLoading(true);
       if (mode === "release") {
         await resolveDisputeReleaseToHauler(activeDispute.id);
+        toast.success("Dispute resolved — funds released to hauler.");
       } else {
         await resolveDisputeRefundToShipper(activeDispute.id);
+        toast.success("Dispute resolved — refund issued to shipper.");
       }
       await loadDisputes();
       setDisputeDialogOpen(false);
@@ -388,6 +394,9 @@ export function SuperAdminDashboard({ onLogout }: SuperAdminDashboardProps) {
     try {
       setActionLoading(true);
       await resolveDisputeSplit(activeDispute.id, hauler, shipper);
+      toast.success("Dispute resolved with split payment.", {
+        description: `Hauler: $${hauler} · Shipper: $${shipper}`,
+      });
       await loadDisputes();
       setDisputeDialogOpen(false);
     } catch (err: any) {
@@ -398,10 +407,18 @@ export function SuperAdminDashboard({ onLogout }: SuperAdminDashboardProps) {
   };
 
   const handleReview = async (id: number, status: 'approved' | 'rejected') => {
-    const notes =
-      status === 'rejected'
-        ? window.prompt('Add a note for this rejection (optional)') ?? undefined
-        : undefined;
+    let notes: string | undefined;
+    if (status === 'rejected') {
+      const { value } = await Swal.fire({
+        title: 'Rejection Note',
+        input: 'textarea',
+        inputLabel: 'Add a note for this rejection (optional)',
+        showCancelButton: true,
+        confirmButtonColor: '#ef4444',
+        cancelButtonColor: '#6b7280',
+      });
+      notes = value || undefined;
+    }
     setReviewingId(id);
     setReviewError(null);
     try {
@@ -423,7 +440,7 @@ export function SuperAdminDashboard({ onLogout }: SuperAdminDashboardProps) {
         )
       );
     } catch (err: any) {
-      alert(err?.message || 'Failed to update user status');
+      toast.error(err?.message || 'Failed to update user status');
     }
   };
 
@@ -431,10 +448,18 @@ export function SuperAdminDashboard({ onLogout }: SuperAdminDashboardProps) {
     ticketId: number,
     status: 'open' | 'closed'
   ) => {
-    const notes =
-      status === 'closed'
-        ? window.prompt('Add a resolution note (optional)') ?? undefined
-        : undefined;
+    let notes: string | undefined;
+    if (status === 'closed') {
+      const { value } = await Swal.fire({
+        title: 'Resolution Note',
+        input: 'textarea',
+        inputLabel: 'Add a resolution note (optional)',
+        showCancelButton: true,
+        confirmButtonColor: '#29CA8D',
+        cancelButtonColor: '#6b7280',
+      });
+      notes = value || undefined;
+    }
     try {
       const resp = await updateSupportTicketStatus(ticketId, status, notes);
       const updated = resp.ticket as SupportTicketRecord;
@@ -443,7 +468,7 @@ export function SuperAdminDashboard({ onLogout }: SuperAdminDashboardProps) {
       );
       setActiveSupportTicket((prev) => (prev && prev.id === ticketId ? updated : prev));
     } catch (err: any) {
-      alert(err?.message || 'Failed to update ticket');
+      toast.error(err?.message || 'Failed to update ticket');
     }
   };
 

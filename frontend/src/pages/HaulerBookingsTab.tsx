@@ -32,7 +32,7 @@ import {
   DialogTitle,
 } from "../components/ui/dialog";
 import { Textarea } from "../components/ui/textarea";
-import { toast } from "sonner";
+import { toast } from '../lib/swal';
 import {
   fetchBookings,
   respondToBooking,
@@ -234,7 +234,9 @@ export default function HaulerBookingsTab() {
       } else {
         await startLoad(loadId);
       }
-      toast.success("Trip started");
+      toast.success("Trip is now in progress.", {
+        description: "Live tracking is active. Safe travels!",
+      });
       await refresh();
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : "Failed to start trip";
@@ -268,7 +270,9 @@ export default function HaulerBookingsTab() {
         }
         await completeLoad(loadId, epodUrl);
       }
-      toast.success("Load marked as delivered");
+      toast.success("Delivery recorded.", {
+        description: "Awaiting shipper confirmation to complete the trip.",
+      });
       await refresh();
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : "Failed to mark as delivered";
@@ -332,7 +336,9 @@ export default function HaulerBookingsTab() {
         received_reference: directReference.trim() || null,
         received_at: directReceivedAt ? new Date(directReceivedAt).toISOString() : null,
       });
-      toast.success("Load marked as delivered");
+      toast.success("Delivery recorded.", {
+        description: "Awaiting shipper confirmation to complete the trip.",
+      });
       if (directDialog.loadId) {
         tripContextCache.current[directDialog.loadId] = await fetchMarketplaceTripByLoad(
           directDialog.loadId
@@ -460,7 +466,11 @@ export default function HaulerBookingsTab() {
     try {
       setBusyId(bookingId);
       await respondToBooking(bookingId, action);
-      toast.success(action === "accept" ? "Booking accepted" : "Booking rejected");
+      toast.success(
+        action === "accept"
+          ? "Booking accepted — the shipper has been notified."
+          : "Booking declined.",
+      );
       refresh();
     } catch (err: unknown) {
       const rawMessage: string = err instanceof Error ? err.message : "Failed to update booking";
@@ -493,10 +503,10 @@ export default function HaulerBookingsTab() {
       setContractBusyId(contractId);
       if (action === "accept") {
         await acceptContract(contractId);
-        toast.success("Contract accepted.");
+        toast.success("Contract accepted — you can now plan your trip.");
       } else {
         await rejectContract(contractId);
-        toast.success("Contract rejected.");
+        toast.success("Contract declined. The shipper has been notified.");
       }
       await refresh();
     } catch (err: unknown) {

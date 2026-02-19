@@ -37,9 +37,8 @@ import { KeyboardShortcutsDialog } from '../pages/KeyboardShortcutsDialog';
 import { OfflineIndicator } from './OfflineIndicator';
 import PostService from '../pages/PostService';
 import TripRoutePlan from '../pages/TripRoutePlan';
-import { Toaster } from './ui/sonner';
 import { storage, STORAGE_KEYS, getPreferences, updatePreferences } from '../lib/storage';
-import { toast } from 'sonner';
+import { toast } from '../lib/swal';
 import { NotFound } from '../pages/ErrorPages';
 import MarketplaceDevLab from '../pages/MarketplaceDevLab';
 import AdminPricing from '../pages/AdminPricing';
@@ -138,15 +137,9 @@ export function AppRouter({ showKeyboardShortcuts, onKeyboardShortcutsToggle }: 
     setIsAuthenticated(false);
     setUserRole(null);
     setNeedsOnboarding(false);
-    storage.remove(STORAGE_KEYS.USER_ROLE);
-    storage.remove(STORAGE_KEYS.USER_EMAIL);
-    storage.remove(STORAGE_KEYS.USER_ID);
-    storage.remove(STORAGE_KEYS.ACCOUNT_MODE);
-    storage.remove(STORAGE_KEYS.INDIVIDUAL_PLAN_CODE);
-    storage.remove('pendingRole');
+    localStorage.clear();
+    sessionStorage.clear();
     toast.success('Logged out successfully');
-    
-    // Navigate to landing page
     navigate(nextPath);
   };
 
@@ -207,7 +200,6 @@ export function AppRouter({ showKeyboardShortcuts, onKeyboardShortcutsToggle }: 
   return (
     <>
       <OfflineIndicator />
-      <Toaster position="top-right" />
       <KeyboardShortcutsDialog 
         open={showKeyboardShortcuts}
         onOpenChange={onKeyboardShortcutsToggle}

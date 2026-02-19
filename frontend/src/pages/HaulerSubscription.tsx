@@ -2,7 +2,7 @@ import { useMemo } from "react";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "../components/ui/card";
 import { Badge } from "../components/ui/badge";
 import { Separator } from "../components/ui/separator";
-import { toast } from "sonner";
+import { toast } from '../lib/swal';
 import { useHaulerSubscription } from "../hooks/useHaulerSubscription";
 import { useNavigate } from "react-router-dom";
 import IndividualPlanChooseView from "../components/IndividualPlanChooseView";

@@ -17,7 +17,7 @@ import { Button } from "../components/ui/button";
 import { Input } from "../components/ui/input";
 import { Label } from "../components/ui/label";
 import { Textarea } from "../components/ui/textarea";
-import { toast } from "sonner";
+import { toast } from '../lib/swal';
 import { storage, STORAGE_KEYS } from "../lib/storage";
 import { Badge } from "../components/ui/badge";
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "../components/ui/dialog";
@@ -375,7 +375,9 @@ export default function TruckBoard() {
         load_id: interest.loadId || undefined,
         message: interest.message || undefined,
       });
-      toast.success("Chat started with hauler.");
+      toast.success("Chat started with hauler.", {
+        description: "You can now discuss availability and pricing.",
+      });
       updateInterest(availabilityId, "message", "");
       setTruckChats((prev) => {
         const exists = prev.some((item) => item.chat.id === resp.chat.id);
@@ -488,7 +490,9 @@ export default function TruckBoard() {
       }));
       navigate("/shipper/messages");
       updateInterest(requestDialog.listing.id, "message", "");
-      toast.success("Request submitted. Opening messages...");
+      toast.success("Booking request sent to hauler.", {
+        description: "Opening messages so you can discuss the details.",
+      });
       setRequestDialog({
         open: false,
         listing: null,

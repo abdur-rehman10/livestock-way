@@ -9,6 +9,7 @@ import {
 import type { SupportTicket, SupportTicketMessage } from "../lib/types";
 import { Button } from "../components/ui/button";
 import { storage, STORAGE_KEYS } from "../lib/storage";
+import { toast } from '../lib/swal';
 
 type UserRole = "shipper" | "hauler" | "driver" | "stakeholder";
 
@@ -127,6 +128,7 @@ export default function SupportTab() {
         message: messageDraft.trim(),
       });
       setMessageDraft("");
+      toast.success("Message sent successfully.");
       await loadTicketMessages(activeTicketId);
     } catch (err: any) {
       setMessageError(err?.message || "Failed to send message.");
@@ -166,6 +168,9 @@ export default function SupportTab() {
       setSubject("");
       setMessage("");
       setPriority("normal");
+      toast.success("Support ticket submitted.", {
+        description: "Our team will review and respond as soon as possible.",
+      });
     } catch (err: any) {
       console.error("Error creating support ticket", err);
       setSubmitError(

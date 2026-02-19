@@ -1,11 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogHeader,
-  DialogTitle,
-} from "../components/ui/dialog";
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "../components/ui/dialog";
 import { Button } from "../components/ui/button";
 import { Input } from "../components/ui/input";
 import { Label } from "../components/ui/label";
@@ -15,13 +9,10 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from ".
 import { Calendar } from "../components/ui/calendar";
 import { Popover, PopoverContent, PopoverTrigger } from "../components/ui/popover";
 import { CalendarIcon } from "lucide-react";
-import { toast } from "sonner";
+import { toast } from '../lib/swal';
 import { AddressSearch, type MappedAddress } from "../components/AddressSearch";
-import {
-  createTruckAvailabilityEntry,
-  fetchHaulerVehicles,
-  type HaulerVehicleOption,
-} from "../api/marketplace";
+import { createTruckAvailabilityEntry, fetchHaulerVehicles, type HaulerVehicleOption } from "../api/marketplace";
+import { FormStepper, FormStepperNav } from "../components/ui/form-stepper";
 
 export type PostTruckInitialValues = {
   capacity_headcount?: string;
@@ -37,6 +28,13 @@ type PostTruckDialogProps = {
   initialValues?: PostTruckInitialValues;
 };
 
+const formatDateRangeDisplay = (range: { from: Date | undefined; to: Date | undefined }): string => {
+  if (!range.from && !range.to) return "Select date range";
+  if (range.from && !range.to) return `${range.from.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })} - Select end`;
+  if (range.from && range.to) return `${range.from.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })} - ${range.to.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}`;
+  return "Select date range";
+};
+
 const formatDateTimeLocal = (date: Date): string => {
   const year = date.getFullYear();
   const month = String(date.getMonth() + 1).padStart(2, '0');
@@ -46,20 +44,8 @@ const formatDateTimeLocal = (date: Date): string => {
   return `${year}-${month}-${day}T${hours}:${minutes}`;
 };
 
-const formatDateRangeDisplay = (range: { from: Date | undefined; to: Date | undefined }): string => {
-  if (!range.from && !range.to) return "Select date range";
-  if (range.from && !range.to) {
-    return `${range.from.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })} - Select end`;
-  }
-  if (range.from && range.to) {
-    return `${range.from.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })} - ${range.to.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}`;
-  }
-  return "Select date range";
-};
-
 const combineDateAndTime = (date: Date | undefined): string | null => {
   if (!date) return null;
-  // Always use 00:00 (midnight) for time
   const combined = new Date(date);
   combined.setHours(0, 0, 0, 0);
   return formatDateTimeLocal(combined);
@@ -79,29 +65,25 @@ function parseCoordinate(value: string, label: string): number | null {
   return num;
 }
 
+const STEPS = [
+  { label: "Vehicle & Route" },
+  { label: "Capacity & Schedule" },
+  { label: "Options" },
+];
+
 export function PostTruckDialog({ open, onOpenChange, onPosted, initialValues }: PostTruckDialogProps) {
+  const [step, setStep] = useState(0);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [trucks, setTrucks] = useState<HaulerVehicleOption[]>([]);
   const [trucksLoading, setTrucksLoading] = useState(false);
-
-  const [dateRange, setDateRange] = useState<{ from: Date | undefined; to: Date | undefined }>({
-    from: undefined,
-    to: undefined,
-  });
+  const [dateRange, setDateRange] = useState<{ from: Date | undefined; to: Date | undefined }>({ from: undefined, to: undefined });
 
   const [form, setForm] = useState({
-    truck_id: "",
-    origin: "",
-    destination: "",
-    capacity_headcount: "",
-    capacity_weight_kg: "",
-    origin_lat: "",
-    origin_lng: "",
-    destination_lat: "",
-    destination_lng: "",
-    allow_shared: true,
-    notes: "",
+    truck_id: "", origin: "", destination: "",
+    capacity_headcount: "", capacity_weight_kg: "",
+    origin_lat: "", origin_lng: "", destination_lat: "", destination_lng: "",
+    allow_shared: true, notes: "",
   });
   const [originSearch, setOriginSearch] = useState("");
   const [destinationSearch, setDestinationSearch] = useState("");
@@ -133,62 +115,45 @@ export function PostTruckDialog({ open, onOpenChange, onPosted, initialValues }:
         if (!active) return;
         const items = resp.items ?? [];
         setTrucks(items);
-        if (!form.truck_id && items[0]?.id) {
-          setForm((prev) => ({ ...prev, truck_id: String(items[0].id) }));
-        }
+        if (!form.truck_id && items[0]?.id) setForm((prev) => ({ ...prev, truck_id: String(items[0].id) }));
       })
-      .catch((err: any) => {
-        if (!active) return;
-        setError(err?.message ?? "Failed to load your trucks");
-      })
-      .finally(() => {
-        if (active) setTrucksLoading(false);
-      });
-    return () => {
-      active = false;
-    };
+      .catch((err: any) => { if (active) setError(err?.message ?? "Failed to load your trucks"); })
+      .finally(() => { if (active) setTrucksLoading(false); });
+    return () => { active = false; };
   }, [open, form.truck_id]);
 
+  const validateStep = (s: number): boolean => {
+    if (s === 0) {
+      if (!form.truck_id) { toast.error("Select one of your trucks."); return false; }
+      if (!form.origin.trim()) { toast.error("Origin is required."); return false; }
+      return true;
+    }
+    if (s === 1) {
+      if (!dateRange.from) { toast.error("Available from date is required."); return false; }
+      return true;
+    }
+    return true;
+  };
+
+  const handleNext = () => { if (validateStep(step)) setStep(step + 1); };
+  const handleBack = () => setStep(Math.max(0, step - 1));
+
   const handleSubmit = async () => {
+    if (!validateStep(0) || !validateStep(1)) return;
     setError(null);
-    if (!form.truck_id) {
-      setError("Select one of your trucks.");
-      return;
-    }
-    if (!form.origin.trim()) {
-      setError("Origin is required.");
-      return;
-    }
-    if (!dateRange.from) {
-      setError("Available from date is required.");
-      return;
-    }
-    
+
     const availableFromDateTime = combineDateAndTime(dateRange.from);
-    if (!availableFromDateTime) {
-      setError("Available from must be a valid date.");
-      return;
-    }
-    
+    if (!availableFromDateTime) { setError("Available from must be a valid date."); return; }
     const availableFromDateObj = new Date(availableFromDateTime);
-    if (Number.isNaN(availableFromDateObj.getTime())) {
-      setError("Available from must be a valid date.");
-      return;
-    }
-    
+    if (Number.isNaN(availableFromDateObj.getTime())) { setError("Available from must be a valid date."); return; }
+
     let availableUntilIso: string | null = null;
     if (dateRange.to) {
-      const availableUntilDateTime = combineDateAndTime(dateRange.to);
-      if (availableUntilDateTime) {
-        const until = new Date(availableUntilDateTime);
-        if (Number.isNaN(until.getTime())) {
-          setError("Available until must be a valid date.");
-          return;
-        }
-        if (until.getTime() < availableFromDateObj.getTime()) {
-          setError("End date must be after the start date.");
-          return;
-        }
+      const dt = combineDateAndTime(dateRange.to);
+      if (dt) {
+        const until = new Date(dt);
+        if (Number.isNaN(until.getTime())) { setError("Available until must be a valid date."); return; }
+        if (until.getTime() < availableFromDateObj.getTime()) { setError("End date must be after the start date."); return; }
         availableUntilIso = until.toISOString();
       }
     }
@@ -206,21 +171,10 @@ export function PostTruckDialog({ open, onOpenChange, onPosted, initialValues }:
       originLng = parseCoordinate(form.origin_lng, "Origin longitude");
       destinationLat = parseCoordinate(form.destination_lat, "Destination latitude");
       destinationLng = parseCoordinate(form.destination_lng, "Destination longitude");
-    } catch (err: any) {
-      setError(err?.message ?? "Invalid values.");
-      return;
-    }
-    if ((originLat !== null && originLng === null) || (originLat === null && originLng !== null)) {
-      setError("Provide both origin latitude and longitude.");
-      return;
-    }
-    if (
-      (destinationLat !== null && destinationLng === null) ||
-      (destinationLat === null && destinationLng !== null)
-    ) {
-      setError("Provide both destination latitude and longitude.");
-      return;
-    }
+    } catch (err: any) { setError(err?.message ?? "Invalid values."); return; }
+
+    if ((originLat !== null && originLng === null) || (originLat === null && originLng !== null)) { setError("Provide both origin latitude and longitude."); return; }
+    if ((destinationLat !== null && destinationLng === null) || (destinationLat === null && destinationLng !== null)) { setError("Provide both destination latitude and longitude."); return; }
 
     try {
       setSaving(true);
@@ -234,243 +188,173 @@ export function PostTruckDialog({ open, onOpenChange, onPosted, initialValues }:
         capacity_weight_kg: capacityWeight,
         allow_shared: form.allow_shared,
         notes: form.notes || null,
-        origin_lat: originLat,
-        origin_lng: originLng,
-        destination_lat: destinationLat,
-        destination_lng: destinationLng,
+        origin_lat: originLat, origin_lng: originLng,
+        destination_lat: destinationLat, destination_lng: destinationLng,
       });
-      toast.success("Truck availability posted.", {
-        description: primaryTruckLabel ? `${primaryTruckLabel} is now on the board.` : undefined,
+      toast.success("Truck listed on the Truckboard.", {
+        description: primaryTruckLabel
+          ? `${primaryTruckLabel} is now visible to shippers looking for transport.`
+          : "Shippers can now send you booking requests.",
       });
       onPosted?.();
       onOpenChange(false);
-      setDateRange({ from: undefined, to: undefined });
-      setForm({
-        truck_id: trucks[0]?.id ? String(trucks[0].id) : "",
-        origin: "",
-        destination: "",
-        capacity_headcount: "",
-        capacity_weight_kg: "",
-        origin_lat: "",
-        origin_lng: "",
-        destination_lat: "",
-        destination_lng: "",
-        allow_shared: true,
-        notes: "",
-      });
+      resetForm();
     } catch (err: any) {
       const message = err?.message ?? "Failed to post truck.";
       setError(message);
       toast.error(message);
-    } finally {
-      setSaving(false);
-    }
+    } finally { setSaving(false); }
+  };
+
+  const resetForm = () => {
+    setStep(0);
+    setError(null);
+    setDateRange({ from: undefined, to: undefined });
+    setForm({
+      truck_id: trucks[0]?.id ? String(trucks[0].id) : "",
+      origin: "", destination: "",
+      capacity_headcount: "", capacity_weight_kg: "",
+      origin_lat: "", origin_lng: "", destination_lat: "", destination_lng: "",
+      allow_shared: true, notes: "",
+    });
+    setOriginSearch(""); setDestinationSearch("");
   };
 
   const disabled = saving || (trucksLoading && !form.truck_id);
 
   const handleOriginSelect = (mapped: MappedAddress) => {
     setOriginSearch(mapped.fullText);
-    setForm((prev) => ({
-      ...prev,
-      origin: mapped.fullText,
-      origin_lat: mapped.lat,
-      origin_lng: mapped.lon,
-    }));
+    setForm((prev) => ({ ...prev, origin: mapped.fullText, origin_lat: mapped.lat, origin_lng: mapped.lon }));
   };
 
   const handleDestinationSelect = (mapped: MappedAddress) => {
     setDestinationSearch(mapped.fullText);
-    setForm((prev) => ({
-      ...prev,
-      destination: mapped.fullText,
-      destination_lat: mapped.lat,
-      destination_lng: mapped.lon,
-    }));
+    setForm((prev) => ({ ...prev, destination: mapped.fullText, destination_lat: mapped.lat, destination_lng: mapped.lon }));
   };
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-3xl">
+    <Dialog open={open} onOpenChange={(v) => { onOpenChange(v); if (!v) resetForm(); }}>
+      <DialogContent className="max-w-3xl max-h-[90vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle>Post a Truck</DialogTitle>
-          <DialogDescription>
-            Share an available truck with route and capacity so shippers can request bookings.
-          </DialogDescription>
+          <DialogDescription>Share an available truck so shippers can request bookings.</DialogDescription>
         </DialogHeader>
 
-        <div className="space-y-4">
+        <FormStepper steps={STEPS} currentStep={step} onStepClick={setStep} />
+
+        <div className="space-y-4 min-h-[260px]">
           {error && <div className="text-sm text-rose-600">{error}</div>}
 
-          <div className="grid gap-3 md:grid-cols-2">
-            <div className="space-y-2">
-              <Label>Truck *</Label>
-              {trucksLoading ? (
-                <p className="text-xs text-gray-500">Loading your trucks…</p>
-              ) : trucks.length === 0 ? (
-                <p className="text-xs text-gray-500">Add a truck to your fleet before posting.</p>
-              ) : (
-                <Select
-                  value={form.truck_id || undefined}
-                  onValueChange={(value) => setForm((prev) => ({ ...prev, truck_id: value }))}
-                >
-                  <SelectTrigger>
-                    <SelectValue placeholder="Select truck" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {trucks.map((truck) => (
-                      <SelectItem key={truck.id} value={String(truck.id)}>
-                        {(truck.truck_name || truck.plate_number || `Truck #${truck.id}`) ?? `Truck #${truck.id}`} · {truck.truck_type || "—"}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              )}
-            </div>
+          {/* Step 1: Vehicle & Route */}
+          {step === 0 && (
+            <>
+              <div className="space-y-2">
+                <Label>Truck *</Label>
+                {trucksLoading ? (
+                  <p className="text-xs text-gray-500">Loading your trucks…</p>
+                ) : trucks.length === 0 ? (
+                  <p className="text-xs text-gray-500">Add a truck to your fleet before posting.</p>
+                ) : (
+                  <Select value={form.truck_id || undefined} onValueChange={(value) => setForm((prev) => ({ ...prev, truck_id: value }))}>
+                    <SelectTrigger><SelectValue placeholder="Select truck" /></SelectTrigger>
+                    <SelectContent>
+                      {trucks.map((truck) => (
+                        <SelectItem key={truck.id} value={String(truck.id)}>
+                          {(truck.truck_name || truck.plate_number || `Truck #${truck.id}`) ?? `Truck #${truck.id}`} · {truck.truck_type || "—"}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                )}
+              </div>
 
-            <div className="space-y-2">
-              <Label>Availability window</Label>
-              <Popover>
-                <PopoverTrigger asChild>
-                  <Button
-                    variant="outline"
-                    className="w-full justify-start text-left h-10"
-                  >
-                    <CalendarIcon className="mr-2 h-4 w-4" />
-                    {formatDateRangeDisplay(dateRange)}
-                  </Button>
-                </PopoverTrigger>
-                <PopoverContent className="w-auto p-0" align="start">
-                  <Calendar
-                    mode="range"
-                    selected={dateRange}
-                    onSelect={(range) => {
-                      if (range) {
-                        setDateRange({ from: range.from, to: range.to });
-                      }
-                    }}
-                    initialFocus
-                    numberOfMonths={2}
-                  />
-                </PopoverContent>
-              </Popover>
-              <p className="text-xs text-gray-500">Times will be set to 00:00 (midnight) for both dates</p>
-            </div>
-          </div>
+              <div className="grid gap-3 md:grid-cols-2">
+                <div className="space-y-2">
+                  <Label>Origin *</Label>
+                  <AddressSearch value={originSearch} onChange={setOriginSearch} onSelect={handleOriginSelect} disabled={disabled} />
+                  <Input placeholder="City, State" value={form.origin} onChange={(e) => setForm((prev) => ({ ...prev, origin: e.target.value }))} />
+                </div>
+                <div className="space-y-2">
+                  <Label>Destination</Label>
+                  <AddressSearch value={destinationSearch} onChange={setDestinationSearch} onSelect={handleDestinationSelect} disabled={disabled} />
+                  <Input placeholder="City, State" value={form.destination} onChange={(e) => setForm((prev) => ({ ...prev, destination: e.target.value }))} />
+                </div>
+              </div>
 
-          <div className="grid gap-3 md:grid-cols-2">
-            <div className="space-y-2">
-              <Label>Origin *</Label>
-              <AddressSearch
-                value={originSearch}
-                onChange={setOriginSearch}
-                onSelect={handleOriginSelect}
-                disabled={disabled}
-              />
-              <Input
-                placeholder="City, State"
-                value={form.origin}
-                onChange={(e) => setForm((prev) => ({ ...prev, origin: e.target.value }))}
-              />
-            </div>
-            <div className="space-y-2">
-              <Label>Destination</Label>
-              <AddressSearch
-                value={destinationSearch}
-                onChange={setDestinationSearch}
-                onSelect={handleDestinationSelect}
-                disabled={disabled}
-              />
-              <Input
-                placeholder="City, State"
-                value={form.destination}
-                onChange={(e) => setForm((prev) => ({ ...prev, destination: e.target.value }))}
-              />
-            </div>
-          </div>
+              <div className="grid gap-3 md:grid-cols-2">
+                <div className="grid grid-cols-2 gap-2">
+                  <Input type="number" placeholder="Origin lat" value={form.origin_lat} onChange={(e) => setForm((prev) => ({ ...prev, origin_lat: e.target.value }))} />
+                  <Input type="number" placeholder="Origin lng" value={form.origin_lng} onChange={(e) => setForm((prev) => ({ ...prev, origin_lng: e.target.value }))} />
+                </div>
+                <div className="grid grid-cols-2 gap-2">
+                  <Input type="number" placeholder="Dest lat" value={form.destination_lat} onChange={(e) => setForm((prev) => ({ ...prev, destination_lat: e.target.value }))} />
+                  <Input type="number" placeholder="Dest lng" value={form.destination_lng} onChange={(e) => setForm((prev) => ({ ...prev, destination_lng: e.target.value }))} />
+                </div>
+              </div>
+            </>
+          )}
 
-          <div className="grid gap-3 md:grid-cols-2">
-            <div className="grid grid-cols-2 gap-2">
-              <Input
-                type="number"
-                placeholder="Origin lat"
-                value={form.origin_lat}
-                onChange={(e) => setForm((prev) => ({ ...prev, origin_lat: e.target.value }))}
-              />
-              <Input
-                type="number"
-                placeholder="Origin lng"
-                value={form.origin_lng}
-                onChange={(e) => setForm((prev) => ({ ...prev, origin_lng: e.target.value }))}
-              />
-            </div>
-            <div className="grid grid-cols-2 gap-2">
-              <Input
-                type="number"
-                placeholder="Destination lat"
-                value={form.destination_lat}
-                onChange={(e) => setForm((prev) => ({ ...prev, destination_lat: e.target.value }))}
-              />
-              <Input
-                type="number"
-                placeholder="Destination lng"
-                value={form.destination_lng}
-                onChange={(e) => setForm((prev) => ({ ...prev, destination_lng: e.target.value }))}
-              />
-            </div>
-          </div>
+          {/* Step 2: Capacity & Schedule */}
+          {step === 1 && (
+            <>
+              <div className="space-y-2">
+                <Label>Availability window</Label>
+                <Popover>
+                  <PopoverTrigger asChild>
+                    <Button variant="outline" className="w-full justify-start text-left h-10">
+                      <CalendarIcon className="mr-2 h-4 w-4" />
+                      {formatDateRangeDisplay(dateRange)}
+                    </Button>
+                  </PopoverTrigger>
+                  <PopoverContent className="w-auto p-0" align="start">
+                    <Calendar mode="range" selected={dateRange} onSelect={(range) => { if (range) setDateRange({ from: range.from, to: range.to }); }} initialFocus numberOfMonths={2} />
+                  </PopoverContent>
+                </Popover>
+                <p className="text-xs text-gray-500">Times will be set to 00:00 (midnight) for both dates</p>
+              </div>
 
-          <div className="grid gap-3 md:grid-cols-2">
-            <div className="space-y-2">
-              <Label>Capacity (headcount)</Label>
-              <Input
-                type="number"
-                placeholder="e.g. 80"
-                value={form.capacity_headcount}
-                onChange={(e) => setForm((prev) => ({ ...prev, capacity_headcount: e.target.value }))}
-              />
-            </div>
-            <div className="space-y-2">
-              <Label>Capacity (weight kg)</Label>
-              <Input
-                type="number"
-                placeholder="e.g. 12000"
-                value={form.capacity_weight_kg}
-                onChange={(e) => setForm((prev) => ({ ...prev, capacity_weight_kg: e.target.value }))}
-              />
-            </div>
-          </div>
+              <div className="grid gap-3 md:grid-cols-2">
+                <div className="space-y-2">
+                  <Label>Capacity (headcount)</Label>
+                  <Input type="number" placeholder="e.g. 80" value={form.capacity_headcount} onChange={(e) => setForm((prev) => ({ ...prev, capacity_headcount: e.target.value }))} />
+                </div>
+                <div className="space-y-2">
+                  <Label>Capacity (weight kg)</Label>
+                  <Input type="number" placeholder="e.g. 12000" value={form.capacity_weight_kg} onChange={(e) => setForm((prev) => ({ ...prev, capacity_weight_kg: e.target.value }))} />
+                </div>
+              </div>
+            </>
+          )}
 
-          <div className="flex items-center justify-between rounded-lg border px-3 py-2">
-            <div>
-              <Label className="text-xs">Allow shared loads</Label>
-              <p className="text-[11px] text-gray-500">Turn off for exclusive loads.</p>
-            </div>
-            <Switch
-              checked={form.allow_shared}
-              onCheckedChange={(checked) => setForm((prev) => ({ ...prev, allow_shared: checked }))}
-            />
-          </div>
+          {/* Step 3: Options */}
+          {step === 2 && (
+            <>
+              <div className="flex items-center justify-between rounded-lg border px-3 py-3">
+                <div>
+                  <Label className="text-sm">Allow shared loads</Label>
+                  <p className="text-xs text-gray-500">Turn off for exclusive loads.</p>
+                </div>
+                <Switch checked={form.allow_shared} onCheckedChange={(checked) => setForm((prev) => ({ ...prev, allow_shared: checked }))} />
+              </div>
 
-          <div className="space-y-2">
-            <Label>Notes</Label>
-            <Textarea
-              rows={3}
-              placeholder="Equipment, special info, or constraints"
-              value={form.notes}
-              onChange={(e) => setForm((prev) => ({ ...prev, notes: e.target.value }))}
-            />
-          </div>
-
-          <div className="flex justify-end gap-2">
-            <Button variant="outline" onClick={() => onOpenChange(false)} disabled={saving}>
-              Cancel
-            </Button>
-            <Button onClick={handleSubmit} disabled={disabled || trucks.length === 0}>
-              {saving ? "Posting…" : "Post Truck"}
-            </Button>
-          </div>
+              <div className="space-y-2">
+                <Label>Notes</Label>
+                <Textarea rows={4} placeholder="Equipment, special info, or constraints" value={form.notes} onChange={(e) => setForm((prev) => ({ ...prev, notes: e.target.value }))} />
+              </div>
+            </>
+          )}
         </div>
+
+        <FormStepperNav
+          currentStep={step}
+          totalSteps={STEPS.length}
+          onBack={handleBack}
+          onNext={handleNext}
+          onSubmit={handleSubmit}
+          submitDisabled={disabled || trucks.length === 0}
+          submitting={saving}
+          submitLabel="Post Truck"
+        />
       </DialogContent>
     </Dialog>
   );

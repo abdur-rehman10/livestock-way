@@ -7,7 +7,7 @@ import { Textarea } from '../components/ui/textarea';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../components/ui/select';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '../components/ui/dialog';
 import { Fuel, Receipt, Sandwich, Plus, Camera, FileText } from 'lucide-react';
-import { toast } from 'sonner';
+import { toast } from '../lib/swal';
 
 interface Expense {
   id: string;

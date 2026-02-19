@@ -20,7 +20,7 @@ import {
   Edit,
   Send
 } from 'lucide-react';
-import { toast } from 'sonner';
+import { toast, swalConfirm } from '../lib/swal';
 
 interface TeamMember {
   id: string;
@@ -174,8 +174,13 @@ export function TeamManagement() {
     toast.success('User suspended');
   };
 
-  const handleRemoveUser = (userId: string) => {
-    if (confirm('Are you sure you want to remove this team member?')) {
+  const handleRemoveUser = async (userId: string) => {
+    const confirmed = await swalConfirm({
+      title: 'Remove Member',
+      text: 'Are you sure you want to remove this team member?',
+      confirmText: 'Yes, remove',
+    });
+    if (confirmed) {
       setTeamMembers(teamMembers.filter(member => member.id !== userId));
       toast.success('Team member removed');
     }

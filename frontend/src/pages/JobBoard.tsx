@@ -11,7 +11,7 @@ import { Textarea } from "../components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../components/ui/select";
 import { fetchJobs, type JobListing, applyForJob, type ApplyJobPayload, fetchMyApplication, type JobApplication } from "../api/jobs";
 import { fetchThreadByJobAndApplication } from "../api/jobMessages";
-import { toast } from "sonner";
+import { toast } from '../lib/swal';
 import { storage, STORAGE_KEYS } from "../lib/storage";
 import { API_BASE_URL } from "../lib/api";
 
@@ -149,7 +149,9 @@ export default function JobBoard() {
       });
 
       await applyForJob(selectedJob.id, payload);
-      toast.success("Application submitted successfully!");
+      toast.success("Application submitted.", {
+        description: "The employer will review your application and get back to you.",
+      });
       setShowApplicationDialog(false);
       
       // Reload applications to update the UI

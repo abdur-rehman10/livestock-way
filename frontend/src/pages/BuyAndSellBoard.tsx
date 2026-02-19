@@ -18,7 +18,7 @@ import {
   type BuyAndSellApplication 
 } from "../api/buyAndSell";
 import { fetchBuySellThreadByListingAndApplication } from "../api/buySellMessages";
-import { toast } from "sonner";
+import { toast } from '../lib/swal';
 import { storage, STORAGE_KEYS } from "../lib/storage";
 import { API_BASE_URL } from "../lib/api";
 
@@ -150,7 +150,9 @@ export default function BuyAndSellBoard() {
       };
 
       await applyToBuyAndSellListing(selectedListing.id, payload);
-      toast.success("Application submitted successfully!");
+      toast.success("Interest registered.", {
+        description: "The seller will review your enquiry and respond shortly.",
+      });
       setShowApplicationDialog(false);
       
       // Reload applications to update the UI

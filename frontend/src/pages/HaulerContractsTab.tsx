@@ -1,5 +1,5 @@
 import { useEffect, useState, useMemo } from "react";
-import { toast } from "sonner";
+import { toast } from '../lib/swal';
 import { FileText, CheckCircle, Clock, TruckIcon, AlertCircle, Users, DollarSign, FileCheck, Activity, X, MapPin, MessageSquare } from 'lucide-react';
 import { Button } from '../components/ui/button';
 import { Badge } from '../components/ui/badge';
@@ -311,7 +311,9 @@ export default function HaulerContractsTab() {
     if (!selectedContract) return;
     try {
       await acceptContract(selectedContract.id);
-      toast.success("Contract accepted successfully! You can now add this load to your trips.");
+      toast.success("Contract accepted.", {
+        description: "You can now create a trip and assign this load.",
+      });
       setShowAcceptDialog(false);
       setShowViewDialog(false);
       setSelectedContract(null);
@@ -329,7 +331,7 @@ export default function HaulerContractsTab() {
     if (!selectedContract) return;
     try {
       await rejectContract(selectedContract.id);
-      toast.success("Contract rejected");
+      toast.success("Contract declined. The shipper has been notified.");
       setShowRejectDialog(false);
       setShowViewDialog(false);
       setSelectedContract(null);

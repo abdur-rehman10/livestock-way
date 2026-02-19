@@ -2,7 +2,7 @@ import { useState, useRef, useEffect } from 'react';
 import { Button } from './ui/button';
 import { InputOTP, InputOTPGroup, InputOTPSlot } from './ui/input-otp';
 import logo from '../assets/livestockway-logo.svg';
-import { toast } from 'sonner';
+import { toast } from '../lib/swal';
 
 interface VerificationProps {
   contact?: string; // Can be email or phone

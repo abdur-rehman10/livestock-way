@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { toast } from "sonner";
+import { toast } from '../lib/swal';
 import { fetchLoadsByCreator, type Load as ApiLoad } from "../lib/api";
 import {
   fetchLoadOffers,
@@ -547,7 +547,11 @@ export default function ShipperOffersTab() {
         contract_payload: payload,
       });
       }
-      toast.success(sendNow ? "Contract sent to hauler." : "Contract draft saved.");
+      toast.success(sendNow ? "Contract sent to hauler." : "Contract draft saved.", {
+        description: sendNow
+          ? "The hauler will be notified and can accept or negotiate."
+          : "You can review and send it when ready.",
+      });
       if (selectedLoadId) {
         await refreshOffers(selectedLoadId);
       }
@@ -615,7 +619,11 @@ export default function ShipperOffersTab() {
           [String(contract.booking_id)]: contract,
         }));
       }
-      toast.success(sendNow ? "Contract sent to hauler." : "Contract draft saved.");
+      toast.success(sendNow ? "Contract sent to hauler." : "Contract draft saved.", {
+        description: sendNow
+          ? "The hauler will be notified and can accept or negotiate."
+          : "You can review and send it when ready.",
+      });
       setTruckContractModal({ open: false, bookingId: null, chatId: null });
     } catch (err: any) {
       toast.error(err?.message ?? "Failed to save contract.");

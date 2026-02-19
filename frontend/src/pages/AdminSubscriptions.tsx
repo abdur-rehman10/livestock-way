@@ -11,7 +11,7 @@ import {
   SelectValue,
 } from "../components/ui/select";
 import { Separator } from "../components/ui/separator";
-import { toast } from "sonner";
+import { toast } from '../lib/swal';
 
 type PayingFilter = "ALL" | "PAID" | "UNPAID";
 type HaulerTypeFilter = "ALL" | "INDIVIDUAL" | "COMPANY";

@@ -18,7 +18,7 @@ import {
   type ResourcesApplication 
 } from "../api/resources";
 import { fetchResourcesThreadByListingAndApplication } from "../api/resourcesMessages";
-import { toast } from "sonner";
+import { toast } from '../lib/swal';
 import { storage, STORAGE_KEYS } from "../lib/storage";
 
 const resourceTypeLabels: Record<string, string> = {
@@ -166,7 +166,9 @@ export default function ResourcesBoard() {
       };
 
       await applyToResourcesListing(selectedListing.id, payload);
-      toast.success("Application submitted successfully!");
+      toast.success("Enquiry submitted.", {
+        description: "The resource provider will review and respond shortly.",
+      });
       setShowApplicationDialog(false);
       
       // Reload applications to update the UI

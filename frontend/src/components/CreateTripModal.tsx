@@ -32,7 +32,7 @@ import {
   Users,
   FileText,
 } from "lucide-react";
-import { toast } from "sonner";
+import { toast } from '../lib/swal';
 import { fetchTruckAvailability, type TruckAvailability, fetchContracts, fetchContractsByTruckAvailability, createMultiLoadTrip, createManualTrip, type ContractRecord } from "../api/marketplace";
 import { fetchLoadById } from "../lib/api";
 import { fetchTrucks } from "../api/fleet";
@@ -605,7 +605,9 @@ export function CreateTripModal({ open, onOpenChange, onTripCreated }: CreateTri
         });
       }
 
-      toast.success("Trip created successfully!");
+      toast.success("Trip created successfully.", {
+        description: "You can manage and track it from My Trips.",
+      });
       handleClose();
       onTripCreated?.();
     } catch (err: any) {

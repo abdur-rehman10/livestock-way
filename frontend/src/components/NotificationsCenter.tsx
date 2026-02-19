@@ -14,7 +14,7 @@ import {
   AlertTriangle,
   Info
 } from 'lucide-react';
-import { toast } from 'sonner';
+import { toast } from '../lib/swal';
 
 interface Notification {
   id: string;

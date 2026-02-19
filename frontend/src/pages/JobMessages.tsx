@@ -19,7 +19,7 @@ import { fetchLoadOffers, type LoadOffer, fetchBookings, fetchTruckAvailability,
 import { fetchTrucks, type TruckRecord } from "../api/fleet";
 import { createContract, sendContract, updateContract, fetchContracts, type ContractRecord } from "../api/marketplace";
 import { GenerateContractPopup } from "../components/GenerateContractPopup";
-import { toast } from "sonner";
+import { toast } from '../lib/swal';
 import { storage, STORAGE_KEYS } from "../lib/storage";
 import { API_BASE_URL } from "../lib/api";
 import { getSocket, subscribeToSocketEvent, joinSocketRoom, SOCKET_EVENTS } from "../lib/socket";
@@ -2627,7 +2627,9 @@ export default function JobMessages() {
                 contract_payload: payload,
               });
               
-              toast.success("Contract sent to hauler.");
+              toast.success("Contract sent to hauler.", {
+                description: "The hauler will be notified and can accept or negotiate.",
+              });
               setShowContractDialog(false);
               setHasContractForOffer(true);
               // Refresh threads to show updated status
@@ -2670,7 +2672,9 @@ export default function JobMessages() {
                 contract_payload: payload,
               });
               
-              toast.success("Contract draft saved.");
+              toast.success("Contract draft saved.", {
+                description: "You can review and send it when ready.",
+              });
               setShowContractDialog(false);
             } catch (err: any) {
               console.error("Error saving contract draft:", err);
@@ -2729,7 +2733,9 @@ export default function JobMessages() {
                 contract_payload: payload,
               });
               
-              toast.success("Contract sent to hauler.");
+              toast.success("Contract sent to hauler.", {
+                description: "The hauler will be notified and can accept or negotiate.",
+              });
               setShowContractDialog(false);
               setHasContractForBooking(true);
               // Refresh threads to show updated status
@@ -2772,7 +2778,9 @@ export default function JobMessages() {
                 contract_payload: payload,
               });
               
-              toast.success("Contract draft saved.");
+              toast.success("Contract draft saved.", {
+                description: "You can review and send it when ready.",
+              });
               setShowContractDialog(false);
             } catch (err: any) {
               console.error("Error saving contract draft:", err);

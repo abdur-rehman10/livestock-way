@@ -14,7 +14,7 @@ import {
   CheckCircle2,
   Shield
 } from 'lucide-react';
-import { toast } from 'sonner';
+import { toast, swalConfirm } from '../lib/swal';
 
 interface Session {
   id: string;
@@ -101,21 +101,31 @@ export function SessionManagement({ onBack }: SessionManagementProps) {
     }
   };
 
-  const handleRevokeSession = (sessionId: string, deviceName: string) => {
+  const handleRevokeSession = async (sessionId: string, deviceName: string) => {
     const session = sessions.find(s => s.id === sessionId);
     if (session?.isCurrent) {
       toast.error('Cannot revoke current session. Please use logout instead.');
       return;
     }
 
-    if (confirm(`Are you sure you want to revoke access for "${deviceName}"?`)) {
+    const confirmed = await swalConfirm({
+      title: 'Revoke Session',
+      text: `Are you sure you want to revoke access for "${deviceName}"?`,
+      confirmText: 'Yes, revoke',
+    });
+    if (confirmed) {
       setSessions(sessions.filter(s => s.id !== sessionId));
       toast.success(`Session revoked for ${deviceName}`);
     }
   };
 
-  const handleRevokeAll = () => {
-    if (confirm('This will sign you out from all other devices. Continue?')) {
+  const handleRevokeAll = async () => {
+    const confirmed = await swalConfirm({
+      title: 'Revoke All Sessions',
+      text: 'This will sign you out from all other devices. Continue?',
+      confirmText: 'Yes, revoke all',
+    });
+    if (confirmed) {
       setSessions(sessions.filter(s => s.isCurrent));
       toast.success('All other sessions have been revoked');
     }

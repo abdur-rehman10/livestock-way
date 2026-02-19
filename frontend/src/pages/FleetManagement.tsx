@@ -31,7 +31,8 @@ import {
   User,
   Edit,
 } from "lucide-react";
-import { toast } from "sonner";
+import { toast, swalConfirm } from '../lib/swal';
+import { FormStepper, FormStepperNav } from "../components/ui/form-stepper";
 import {
   fetchDrivers as fetchDriversApi,
   createDriver as createDriverApi,
@@ -156,6 +157,12 @@ export function FleetManagement() {
   const [driverForm, setDriverForm] = useState(initialDriverForm);
   const [vehicleSubmitting, setVehicleSubmitting] = useState(false);
   const [driverSubmitting, setDriverSubmitting] = useState(false);
+  const [vehicleStep, setVehicleStep] = useState(0);
+  const vehicleSteps = [
+    { label: "Basic Info" },
+    { label: "Dimensions" },
+    { label: "Additional" },
+  ];
 
   const loadVehicles = useCallback(async () => {
     try {
@@ -220,10 +227,12 @@ export function FleetManagement() {
       };
       if (editingVehicleId) {
         await updateTruck(editingVehicleId, payload);
-        toast.success("Vehicle updated");
+        toast.success("Vehicle details updated.");
       } else {
         await createTruckApi(payload);
-        toast.success("Vehicle saved");
+        toast.success("Vehicle added to your fleet.", {
+          description: "It's now available for trip assignments.",
+        });
       }
       setIsAddVehicleOpen(false);
       setEditingVehicleId(null);
@@ -236,11 +245,16 @@ export function FleetManagement() {
     }
   };
 
-  const handleDeleteVehicle = (vehicleId: number) => {
-    if (!confirm("Remove this vehicle?")) return;
+  const handleDeleteVehicle = async (vehicleId: number) => {
+    const confirmed = await swalConfirm({
+      title: 'Remove Vehicle',
+      text: 'Remove this vehicle?',
+      confirmText: 'Yes, remove',
+    });
+    if (!confirmed) return;
     deleteTruckApi(vehicleId)
       .then(() => {
-        toast.success("Vehicle removed");
+        toast.success("Vehicle removed from your fleet.");
         loadVehicles();
       })
       .catch((err) => toast.error(err?.message || "Failed to remove vehicle"));
@@ -256,7 +270,9 @@ export function FleetManagement() {
         license_number: driverForm.license_number,
         license_expiry: driverForm.license_expiry || null,
       });
-      toast.success("Driver added");
+      toast.success("Driver added to your team.", {
+        description: "They can now be assigned to trips.",
+      });
       setIsAddDriverOpen(false);
       setDriverForm(initialDriverForm);
       loadDrivers();
@@ -267,21 +283,31 @@ export function FleetManagement() {
     }
   };
 
-  const handleDeactivateDriver = (driverId: number) => {
-    if (!confirm("Deactivate this driver?")) return;
+  const handleDeactivateDriver = async (driverId: number) => {
+    const confirmed = await swalConfirm({
+      title: 'Deactivate Driver',
+      text: 'Deactivate this driver?',
+      confirmText: 'Yes, deactivate',
+    });
+    if (!confirmed) return;
     updateDriverStatus(driverId, "inactive")
       .then(() => {
-        toast.success("Driver deactivated");
+        toast.success("Driver deactivated. They can no longer be assigned to trips.");
         loadDrivers();
       })
       .catch((err) => toast.error(err?.message || "Failed to deactivate driver"));
   };
 
-  const handleDeleteDriver = (driverId: number) => {
-    if (!confirm("Remove this driver?")) return;
+  const handleDeleteDriver = async (driverId: number) => {
+    const confirmed = await swalConfirm({
+      title: 'Remove Driver',
+      text: 'Remove this driver?',
+      confirmText: 'Yes, remove',
+    });
+    if (!confirmed) return;
     deleteDriverApi(driverId)
       .then(() => {
-        toast.success("Driver removed");
+        toast.success("Driver removed from your team.");
         loadDrivers();
       })
       .catch((err) => toast.error(err?.message || "Failed to remove driver"));
@@ -638,198 +664,112 @@ export function FleetManagement() {
         </TabsContent>
       </Tabs>
 
-      <Dialog open={isAddVehicleOpen} onOpenChange={setIsAddVehicleOpen}>
-        <DialogContent>
+      <Dialog open={isAddVehicleOpen} onOpenChange={(v) => { setIsAddVehicleOpen(v); if (!v) setVehicleStep(0); }}>
+        <DialogContent className="max-h-[90vh] overflow-y-auto">
           <DialogHeader>
-            <DialogTitle>Add Vehicle</DialogTitle>
-            <DialogDescription>Create a new vehicle for your fleet</DialogDescription>
+            <DialogTitle>{editingVehicleId ? "Edit Vehicle" : "Add Vehicle"}</DialogTitle>
+            <DialogDescription>
+              {editingVehicleId ? "Update vehicle details" : "Create a new vehicle for your fleet"}
+            </DialogDescription>
           </DialogHeader>
-          <form onSubmit={handleAddVehicle} className="space-y-4">
-            <div className="space-y-2">
-              <Label>Vehicle Name</Label>
-              <Input
-                placeholder="e.g. Livestock Trailer #1"
-                value={vehicleForm.truck_name}
-                onChange={(e) => setVehicleForm((prev) => ({ ...prev, truck_name: e.target.value }))}
-                required
-              />
-            </div>
-            <div className="space-y-2">
-              <Label>Plate Number</Label>
-              <Input
-                placeholder="TX-1234"
-                value={vehicleForm.plate_number}
-                onChange={(e) =>
-                  setVehicleForm((prev) => ({ ...prev, plate_number: e.target.value }))
-                }
-                required
-              />
-            </div>
-            <div className="space-y-2">
-              <Label>Truck Type</Label>
-              <Select
-                value={vehicleForm.truck_type}
-                onValueChange={(value) =>
-                  setVehicleForm((prev) => ({ ...prev, truck_type: value }))
-                }
-              >
-                <SelectTrigger>
-                  <SelectValue placeholder="Select type" />
-                </SelectTrigger>
-                <SelectContent>
-                  {TRUCK_TYPES.map((type) => (
-                    <SelectItem key={type.value} value={type.value}>
-                      {type.label}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-            <div className="space-y-2">
-              <Label>Capacity (kg)</Label>
-              <Input
-                type="number"
-                min="0"
-                value={vehicleForm.capacity}
-                onChange={(e) =>
-                  setVehicleForm((prev) => ({ ...prev, capacity: e.target.value }))
-                }
-              />
-            </div>
-            <div className="grid grid-cols-2 gap-3">
-              <div className="space-y-2">
-                <Label>Height (m)</Label>
-                <Input
-                  type="number"
-                  min="0"
-                  step="0.01"
-                  value={vehicleForm.height_m}
-                  onChange={(e) =>
-                    setVehicleForm((prev) => ({ ...prev, height_m: e.target.value }))
-                  }
-                />
-              </div>
-              <div className="space-y-2">
-                <Label>Width (m)</Label>
-                <Input
-                  type="number"
-                  min="0"
-                  step="0.01"
-                  value={vehicleForm.width_m}
-                  onChange={(e) =>
-                    setVehicleForm((prev) => ({ ...prev, width_m: e.target.value }))
-                  }
-                />
-              </div>
-            </div>
-            <div className="grid grid-cols-2 gap-3">
-              <div className="space-y-2">
-                <Label>Length (m)</Label>
-                <Input
-                  type="number"
-                  min="0"
-                  step="0.01"
-                  value={vehicleForm.length_m}
-                  onChange={(e) =>
-                    setVehicleForm((prev) => ({ ...prev, length_m: e.target.value }))
-                  }
-                />
-              </div>
-              <div className="space-y-2">
-                <Label>Axle Count</Label>
-                <Input
-                  type="number"
-                  min="0"
-                  step="1"
-                  value={vehicleForm.axle_count}
-                  onChange={(e) =>
-                    setVehicleForm((prev) => ({ ...prev, axle_count: e.target.value }))
-                  }
-                />
-              </div>
-            </div>
-            <div className="grid grid-cols-2 gap-3">
-              <div className="space-y-2">
-                <Label>Max Gross Weight (kg)</Label>
-                <Input
-                  type="number"
-                  min="0"
-                  step="1"
-                  value={vehicleForm.max_gross_weight_kg}
-                  onChange={(e) =>
-                    setVehicleForm((prev) => ({
-                      ...prev,
-                      max_gross_weight_kg: e.target.value,
-                    }))
-                  }
-                />
-              </div>
-              <div className="space-y-2">
-                <Label>Max Axle Weight (kg)</Label>
-                <Input
-                  type="number"
-                  min="0"
-                  step="1"
-                  value={vehicleForm.max_axle_weight_kg}
-                  onChange={(e) =>
-                    setVehicleForm((prev) => ({
-                      ...prev,
-                      max_axle_weight_kg: e.target.value,
-                    }))
-                  }
-                />
-              </div>
-            </div>
-            <div className="flex items-center gap-2">
-              <Checkbox
-                checked={vehicleForm.hazmat_permitted}
-                onCheckedChange={(checked) =>
-                  setVehicleForm((prev) => ({ ...prev, hazmat_permitted: !!checked }))
-                }
-              />
-              <Label>Hazmat Permitted</Label>
-            </div>
-            <div className="space-y-2">
-              <Label>Supported Species</Label>
-              <Input
-                placeholder="Cattle, horses"
-                value={vehicleForm.species_supported}
-                onChange={(e) =>
-                  setVehicleForm((prev) => ({
-                    ...prev,
-                    species_supported: e.target.value,
-                  }))
-                }
-              />
-            </div>
-            <div className="space-y-2">
-              <Label>Notes</Label>
-              <Input
-                placeholder="Additional details"
-                value={vehicleForm.notes}
-                onChange={(e) =>
-                  setVehicleForm((prev) => ({ ...prev, notes: e.target.value }))
-                }
-              />
-            </div>
-            <div className="flex gap-3">
-              <Button
-                type="button"
-                variant="outline"
-                onClick={() => setIsAddVehicleOpen(false)}
-                className="flex-1"
-              >
-                Cancel
-              </Button>
-              <Button
-                type="submit"
-                className="flex-1 bg-[#29CA8D] hover:bg-[#24b67d]"
-                disabled={vehicleSubmitting}
-              >
-                {vehicleSubmitting ? "Saving…" : "Save Vehicle"}
-              </Button>
-            </div>
-          </form>
+
+          <FormStepper steps={vehicleSteps} currentStep={vehicleStep} onStepClick={setVehicleStep} />
+
+          <div className="space-y-4 min-h-[200px]">
+            {vehicleStep === 0 && (
+              <>
+                <div className="space-y-2">
+                  <Label>Vehicle Name *</Label>
+                  <Input placeholder="e.g. Livestock Trailer #1" value={vehicleForm.truck_name} onChange={(e) => setVehicleForm((prev) => ({ ...prev, truck_name: e.target.value }))} />
+                </div>
+                <div className="space-y-2">
+                  <Label>Plate Number *</Label>
+                  <Input placeholder="TX-1234" value={vehicleForm.plate_number} onChange={(e) => setVehicleForm((prev) => ({ ...prev, plate_number: e.target.value }))} />
+                </div>
+                <div className="space-y-2">
+                  <Label>Truck Type</Label>
+                  <Select value={vehicleForm.truck_type} onValueChange={(value) => setVehicleForm((prev) => ({ ...prev, truck_type: value }))}>
+                    <SelectTrigger><SelectValue placeholder="Select type" /></SelectTrigger>
+                    <SelectContent>
+                      {TRUCK_TYPES.map((type) => (
+                        <SelectItem key={type.value} value={type.value}>{type.label}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="space-y-2">
+                  <Label>Capacity (kg)</Label>
+                  <Input type="number" min="0" value={vehicleForm.capacity} onChange={(e) => setVehicleForm((prev) => ({ ...prev, capacity: e.target.value }))} />
+                </div>
+              </>
+            )}
+
+            {vehicleStep === 1 && (
+              <>
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="space-y-2">
+                    <Label>Height (m)</Label>
+                    <Input type="number" min="0" step="0.01" value={vehicleForm.height_m} onChange={(e) => setVehicleForm((prev) => ({ ...prev, height_m: e.target.value }))} />
+                  </div>
+                  <div className="space-y-2">
+                    <Label>Width (m)</Label>
+                    <Input type="number" min="0" step="0.01" value={vehicleForm.width_m} onChange={(e) => setVehicleForm((prev) => ({ ...prev, width_m: e.target.value }))} />
+                  </div>
+                </div>
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="space-y-2">
+                    <Label>Length (m)</Label>
+                    <Input type="number" min="0" step="0.01" value={vehicleForm.length_m} onChange={(e) => setVehicleForm((prev) => ({ ...prev, length_m: e.target.value }))} />
+                  </div>
+                  <div className="space-y-2">
+                    <Label>Axle Count</Label>
+                    <Input type="number" min="0" step="1" value={vehicleForm.axle_count} onChange={(e) => setVehicleForm((prev) => ({ ...prev, axle_count: e.target.value }))} />
+                  </div>
+                </div>
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="space-y-2">
+                    <Label>Max Gross Weight (kg)</Label>
+                    <Input type="number" min="0" step="1" value={vehicleForm.max_gross_weight_kg} onChange={(e) => setVehicleForm((prev) => ({ ...prev, max_gross_weight_kg: e.target.value }))} />
+                  </div>
+                  <div className="space-y-2">
+                    <Label>Max Axle Weight (kg)</Label>
+                    <Input type="number" min="0" step="1" value={vehicleForm.max_axle_weight_kg} onChange={(e) => setVehicleForm((prev) => ({ ...prev, max_axle_weight_kg: e.target.value }))} />
+                  </div>
+                </div>
+              </>
+            )}
+
+            {vehicleStep === 2 && (
+              <>
+                <div className="flex items-center gap-2">
+                  <Checkbox checked={vehicleForm.hazmat_permitted} onCheckedChange={(checked) => setVehicleForm((prev) => ({ ...prev, hazmat_permitted: !!checked }))} />
+                  <Label>Hazmat Permitted</Label>
+                </div>
+                <div className="space-y-2">
+                  <Label>Supported Species</Label>
+                  <Input placeholder="Cattle, horses" value={vehicleForm.species_supported} onChange={(e) => setVehicleForm((prev) => ({ ...prev, species_supported: e.target.value }))} />
+                </div>
+                <div className="space-y-2">
+                  <Label>Notes</Label>
+                  <Input placeholder="Additional details" value={vehicleForm.notes} onChange={(e) => setVehicleForm((prev) => ({ ...prev, notes: e.target.value }))} />
+                </div>
+              </>
+            )}
+          </div>
+
+          <FormStepperNav
+            currentStep={vehicleStep}
+            totalSteps={vehicleSteps.length}
+            onBack={() => setVehicleStep(Math.max(0, vehicleStep - 1))}
+            onNext={() => {
+              if (vehicleStep === 0 && !vehicleForm.truck_name.trim()) { toast.error("Vehicle name is required"); return; }
+              if (vehicleStep === 0 && !vehicleForm.plate_number.trim()) { toast.error("Plate number is required"); return; }
+              setVehicleStep(vehicleStep + 1);
+            }}
+            onSubmit={() => handleAddVehicle({ preventDefault: () => {} } as React.FormEvent)}
+            submitting={vehicleSubmitting}
+            submitLabel="Save Vehicle"
+          />
         </DialogContent>
       </Dialog>
 

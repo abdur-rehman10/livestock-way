@@ -20,7 +20,7 @@ import {
 import { Card } from "../components/ui/card";
 import { Button } from "../components/ui/button";
 import { Badge } from "../components/ui/badge";
-import { toast } from "sonner";
+import { toast } from '../lib/swal';
 import {
   fetchProviderDashboard,
   fetchProviderServiceBookings,
@@ -142,7 +142,13 @@ export default function StakeholderDashboard() {
       setRespondingId(bookingId);
       await respondToServiceBooking(bookingId, action);
       await loadDashboard();
-      toast.success(`Booking ${action === "accept" ? "accepted" : action === "reject" ? "declined" : "completed"}`);
+      toast.success(
+        action === "accept"
+          ? "Booking accepted — the client has been notified."
+          : action === "reject"
+            ? "Booking declined."
+            : "Service marked as completed.",
+      );
     } catch (err: unknown) {
       toast.error(err instanceof Error ? err.message : `Failed to ${action} booking`);
     } finally {
@@ -155,7 +161,9 @@ export default function StakeholderDashboard() {
       setRespondingId(bookingId);
       await confirmServiceBookingPayment(bookingId);
       await loadDashboard();
-      toast.success("Payment confirmed");
+      toast.success("Payment confirmed.", {
+        description: "The booking is now marked as paid.",
+      });
     } catch (err: unknown) {
       toast.error(err instanceof Error ? err.message : "Failed to confirm payment");
     } finally {

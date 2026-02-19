@@ -4,7 +4,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/card'
 import { Badge } from '../components/ui/badge';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '../components/ui/dialog';
 import { FileText, Upload, Eye, Trash2, AlertCircle, CheckCircle2 } from 'lucide-react';
-import { toast } from 'sonner';
+import { toast, swalConfirm } from '../lib/swal';
 
 interface Document {
   id: string;
@@ -57,8 +57,13 @@ export function DocumentsTab() {
     }
   };
 
-  const handleDelete = (id: string) => {
-    if (confirm('Are you sure you want to delete this document?')) {
+  const handleDelete = async (id: string) => {
+    const confirmed = await swalConfirm({
+      title: 'Delete Document',
+      text: 'Are you sure you want to delete this document?',
+      confirmText: 'Yes, delete',
+    });
+    if (confirmed) {
       setDocuments(docs => docs.filter(d => d.id !== id));
       toast.success('Document deleted');
     }

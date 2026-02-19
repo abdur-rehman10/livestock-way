@@ -6,7 +6,7 @@ import { Label } from "../components/ui/label";
 import { Textarea } from "../components/ui/textarea";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "../components/ui/card";
 import { createResourcesListing, type CreateResourcesPayload } from "../api/resources";
-import { toast } from "sonner";
+import { toast } from '../lib/swal';
 import { storage, STORAGE_KEYS } from "../lib/storage";
 import { Building, Shield, Droplet, Scale, Wheat, Heart, Calendar, FileText, X, Upload, MapPin, Phone, Mail, User } from "lucide-react";
 import { API_BASE_URL } from "../lib/api";
@@ -135,7 +135,9 @@ export default function PostResource() {
       };
 
       await createResourcesListing(payload);
-      toast.success("Resource posted successfully!");
+      toast.success("Resource listing is now live.", {
+        description: "Your resource is visible to all users on the Resources board.",
+      });
       
       // Reset form
       setFormData({});

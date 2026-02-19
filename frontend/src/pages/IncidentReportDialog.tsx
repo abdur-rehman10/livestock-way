@@ -1,4 +1,4 @@
-import { useState, useRef } from 'react';
+import { useState, useRef, useEffect } from 'react';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '../components/ui/dialog';
 import { Button } from '../components/ui/button';
 import { Input } from '../components/ui/input';
@@ -20,8 +20,9 @@ import {
   FileText,
   Send
 } from 'lucide-react';
-import { toast } from 'sonner';
+import { toast } from '../lib/swal';
 import { AddressSearch, type MappedAddress } from '../components/AddressSearch';
+import { FormStepper, FormStepperNav } from "../components/ui/form-stepper";
 
 interface IncidentReportDialogProps {
   open: boolean;
@@ -41,12 +42,18 @@ const incidentTypes: Array<{ value: IncidentType; label: string; icon: any; seve
   { value: 'other', label: 'Other Issue', icon: FileText, severity: 'medium' },
 ];
 
+const STEPS = [
+  { label: "Type & Details" },
+  { label: "Evidence & Emergency" },
+];
+
 export function IncidentReportDialog({ 
   open, 
   onOpenChange, 
   tripId,
   currentLocation 
 }: IncidentReportDialogProps) {
+  const [step, setStep] = useState(0);
   const [incidentType, setIncidentType] = useState<IncidentType | ''>('');
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
@@ -59,6 +66,10 @@ export function IncidentReportDialog({
   const [locationCoords, setLocationCoords] = useState<{ lat: string; lon: string } | null>(null);
   
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    if (open) setStep(0);
+  }, [open]);
 
   const handlePhotoUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = Array.from(e.target.files || []);
@@ -81,9 +92,22 @@ export function IncidentReportDialog({
     setPhotos(photos.filter((_, i) => i !== index));
   };
 
-  const handleSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    
+  const validateStep = (s: number): boolean => {
+    if (s === 0) {
+      if (!incidentType) {
+        toast.error('Please select an incident type');
+        return false;
+      }
+      if (!title.trim()) {
+        toast.error('Please enter an incident title');
+        return false;
+      }
+      return true;
+    }
+    return true;
+  };
+
+  const handleSubmit = () => {
     if (!incidentType) {
       toast.error('Please select an incident type');
       return;
@@ -106,7 +130,6 @@ export function IncidentReportDialog({
 
     setIsSubmitting(true);
 
-    // Simulate submission
     setTimeout(() => {
       const selectedType = incidentTypes.find(t => t.value === incidentType);
       
@@ -118,7 +141,6 @@ export function IncidentReportDialog({
         });
       }
 
-      // Reset form
       setIncidentType('');
       setTitle('');
       setDescription('');
@@ -147,8 +169,7 @@ export function IncidentReportDialog({
           </DialogDescription>
         </DialogHeader>
 
-        <form onSubmit={handleSubmit} className="space-y-4">
-          {/* Trip ID Display */}
+        <form onSubmit={(e) => e.preventDefault()} className="space-y-4">
           {tripId && (
             <div className="p-3 bg-gray-50 rounded-lg">
               <p className="text-sm text-gray-600">
@@ -157,51 +178,12 @@ export function IncidentReportDialog({
             </div>
           )}
 
-          {/* Incident Type Selection */}
-          <div className="space-y-2">
-            <Label>Incident Type *</Label>
-            <div className="grid grid-cols-2 gap-3">
-              {incidentTypes.map((type) => {
-                const Icon = type.icon;
-                const isSelected = incidentType === type.value;
-                const severityColor = 
-                  type.severity === 'critical' ? 'border-red-500 bg-red-50' :
-                  type.severity === 'high' ? 'border-orange-500 bg-orange-50' :
-                  'border-yellow-500 bg-yellow-50';
+          <FormStepper
+            steps={STEPS}
+            currentStep={step}
+            onStepClick={(s) => setStep(s)}
+          />
 
-                return (
-                  <button
-                    key={type.value}
-                    type="button"
-                    onClick={() => setIncidentType(type.value)}
-                    className={`p-3 rounded-lg border-2 transition-all text-left ${
-                      isSelected
-                        ? severityColor
-                        : 'border-gray-200 hover:border-gray-300'
-                    }`}
-                  >
-                    <div className="flex items-center gap-2 mb-1">
-                      <Icon className="w-5 h-5" />
-                      <span className="text-sm">{type.label}</span>
-                    </div>
-                    {isSelected && (
-                      <Badge 
-                        className={`text-xs ${
-                          type.severity === 'critical' ? 'bg-red-500' :
-                          type.severity === 'high' ? 'bg-orange-500' :
-                          'bg-yellow-500'
-                        }`}
-                      >
-                        {type.severity}
-                      </Badge>
-                    )}
-                  </button>
-                );
-              })}
-            </div>
-          </div>
-
-          {/* Critical Alert */}
           {isCritical && (
             <div className="p-4 bg-red-50 border-2 border-red-200 rounded-lg">
               <div className="flex items-start gap-3">
@@ -216,182 +198,218 @@ export function IncidentReportDialog({
             </div>
           )}
 
-          {/* Title */}
-          <div className="space-y-2">
-            <Label htmlFor="title">Incident Title *</Label>
-            <Input
-              id="title"
-              placeholder="Brief summary of the incident"
-              value={title}
-              onChange={(e) => setTitle(e.target.value)}
-              required
-            />
-          </div>
+          <div className="min-h-[320px]">
+            {step === 0 && (
+              <div className="space-y-4">
+                {/* Incident Type Selection */}
+                <div className="space-y-2">
+                  <Label>Incident Type *</Label>
+                  <div className="grid grid-cols-2 gap-3">
+                    {incidentTypes.map((type) => {
+                      const Icon = type.icon;
+                      const isSelected = incidentType === type.value;
+                      const severityColor = 
+                        type.severity === 'critical' ? 'border-red-500 bg-red-50' :
+                        type.severity === 'high' ? 'border-orange-500 bg-orange-50' :
+                        'border-yellow-500 bg-yellow-50';
 
-          {/* Location */}
-          <div className="space-y-2">
-            <Label htmlFor="location">Current Location *</Label>
-            <AddressSearch
-              value={locationSearch}
-              onChange={setLocationSearch}
-              onSelect={(mapped: MappedAddress) => {
-                setLocationSearch(mapped.fullText);
-                setLocation(mapped.fullText);
-                setLocationCoords({ lat: mapped.lat, lon: mapped.lon });
-              }}
-            />
-            <div className="relative">
-              <MapPin className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
-              <Input
-                id="location"
-                className="pl-10"
-                placeholder="Address or nearest landmark"
-                value={location}
-                onChange={(e) => setLocation(e.target.value)}
-                required
-              />
-            </div>
-          </div>
-
-          {/* Description */}
-          <div className="space-y-2">
-            <Label htmlFor="description">Detailed Description *</Label>
-            <Textarea
-              id="description"
-              className="min-h-[120px] resize-none"
-              placeholder="Describe what happened, when it occurred, current situation, any immediate dangers, and actions taken so far..."
-              value={description}
-              onChange={(e) => setDescription(e.target.value)}
-              required
-            />
-            <p className="text-xs text-gray-500">
-              {description.length}/500 characters (minimum 20)
-            </p>
-          </div>
-
-          {/* Photo Evidence */}
-          <div className="space-y-2">
-            <Label>Photo Evidence * (Required)</Label>
-            <div className="border-2 border-dashed border-gray-300 rounded-lg p-4">
-              <input
-                ref={fileInputRef}
-                type="file"
-                accept="image/*"
-                multiple
-                onChange={handlePhotoUpload}
-                className="hidden"
-              />
-              
-              {photos.length === 0 ? (
-                <button
-                  type="button"
-                  onClick={() => fileInputRef.current?.click()}
-                  className="w-full py-8 flex flex-col items-center justify-center gap-2 text-gray-600 hover:text-gray-900"
-                >
-                  <Camera className="w-8 h-8" />
-                  <p className="text-sm">Tap to upload photos</p>
-                  <p className="text-xs text-gray-500">At least 1 photo required (max 5)</p>
-                </button>
-              ) : (
-                <div className="space-y-3">
-                  <div className="grid grid-cols-3 gap-3">
-                    {photos.map((photo, index) => (
-                      <div key={index} className="relative group">
-                        <img
-                          src={photo}
-                          alt={`Evidence ${index + 1}`}
-                          className="w-full h-24 object-cover rounded-lg"
-                        />
+                      return (
                         <button
+                          key={type.value}
                           type="button"
-                          onClick={() => handleRemovePhoto(index)}
-                          className="absolute top-1 right-1 w-6 h-6 bg-red-500 text-white rounded-full flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity"
+                          onClick={() => setIncidentType(type.value)}
+                          className={`p-3 rounded-lg border-2 transition-all text-left ${
+                            isSelected
+                              ? severityColor
+                              : 'border-gray-200 hover:border-gray-300'
+                          }`}
                         >
-                          <X className="w-4 h-4" />
+                          <div className="flex items-center gap-2 mb-1">
+                            <Icon className="w-5 h-5" />
+                            <span className="text-sm">{type.label}</span>
+                          </div>
+                          {isSelected && (
+                            <Badge 
+                              className={`text-xs ${
+                                type.severity === 'critical' ? 'bg-red-500' :
+                                type.severity === 'high' ? 'bg-orange-500' :
+                                'bg-yellow-500'
+                              }`}
+                            >
+                              {type.severity}
+                            </Badge>
+                          )}
                         </button>
-                      </div>
-                    ))}
+                      );
+                    })}
                   </div>
-                  {photos.length < 5 && (
-                    <Button
-                      type="button"
-                      variant="outline"
-                      onClick={() => fileInputRef.current?.click()}
-                      className="w-full"
-                    >
-                      <Upload className="w-4 h-4 mr-2" />
-                      Add More Photos ({photos.length}/5)
-                    </Button>
-                  )}
                 </div>
-              )}
-            </div>
-          </div>
 
-          {/* Emergency Response */}
-          <div className="space-y-3">
-            <div className="flex items-center gap-2">
-              <input
-                type="checkbox"
-                id="emergency"
-                checked={requiresEmergency}
-                onChange={(e) => setRequiresEmergency(e.target.checked)}
-                className="w-4 h-4"
-              />
-              <Label htmlFor="emergency" className="cursor-pointer">
-                This requires immediate emergency response
-              </Label>
-            </div>
-
-            {requiresEmergency && (
-              <div className="space-y-2 pl-6">
-                <Label htmlFor="contact">Emergency Contact Number *</Label>
-                <div className="relative">
-                  <Phone className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
+                {/* Title */}
+                <div className="space-y-2">
+                  <Label htmlFor="title">Incident Title *</Label>
                   <Input
-                    id="contact"
-                    type="tel"
-                    className="pl-10"
-                    placeholder="+1 (555) 000-0000"
-                    value={contactNumber}
-                    onChange={(e) => setContactNumber(e.target.value)}
-                    required={requiresEmergency}
+                    id="title"
+                    placeholder="Brief summary of the incident"
+                    value={title}
+                    onChange={(e) => setTitle(e.target.value)}
+                    required
                   />
+                </div>
+
+                {/* Location */}
+                <div className="space-y-2">
+                  <Label htmlFor="location">Current Location *</Label>
+                  <AddressSearch
+                    value={locationSearch}
+                    onChange={setLocationSearch}
+                    onSelect={(mapped: MappedAddress) => {
+                      setLocationSearch(mapped.fullText);
+                      setLocation(mapped.fullText);
+                      setLocationCoords({ lat: mapped.lat, lon: mapped.lon });
+                    }}
+                  />
+                  <div className="relative">
+                    <MapPin className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
+                    <Input
+                      id="location"
+                      className="pl-10"
+                      placeholder="Address or nearest landmark"
+                      value={location}
+                      onChange={(e) => setLocation(e.target.value)}
+                      required
+                    />
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {step === 1 && (
+              <div className="space-y-4">
+                {/* Description */}
+                <div className="space-y-2">
+                  <Label htmlFor="description">Detailed Description *</Label>
+                  <Textarea
+                    id="description"
+                    className="min-h-[120px] resize-none"
+                    placeholder="Describe what happened, when it occurred, current situation, any immediate dangers, and actions taken so far..."
+                    value={description}
+                    onChange={(e) => setDescription(e.target.value)}
+                    required
+                  />
+                  <p className="text-xs text-gray-500">
+                    {description.length}/500 characters (minimum 20)
+                  </p>
+                </div>
+
+                {/* Photo Evidence */}
+                <div className="space-y-2">
+                  <Label>Photo Evidence * (Required)</Label>
+                  <div className="border-2 border-dashed border-gray-300 rounded-lg p-4">
+                    <input
+                      ref={fileInputRef}
+                      type="file"
+                      accept="image/*"
+                      multiple
+                      onChange={handlePhotoUpload}
+                      className="hidden"
+                    />
+                    
+                    {photos.length === 0 ? (
+                      <button
+                        type="button"
+                        onClick={() => fileInputRef.current?.click()}
+                        className="w-full py-8 flex flex-col items-center justify-center gap-2 text-gray-600 hover:text-gray-900"
+                      >
+                        <Camera className="w-8 h-8" />
+                        <p className="text-sm">Tap to upload photos</p>
+                        <p className="text-xs text-gray-500">At least 1 photo required (max 5)</p>
+                      </button>
+                    ) : (
+                      <div className="space-y-3">
+                        <div className="grid grid-cols-3 gap-3">
+                          {photos.map((photo, index) => (
+                            <div key={index} className="relative group">
+                              <img
+                                src={photo}
+                                alt={`Evidence ${index + 1}`}
+                                className="w-full h-24 object-cover rounded-lg"
+                              />
+                              <button
+                                type="button"
+                                onClick={() => handleRemovePhoto(index)}
+                                className="absolute top-1 right-1 w-6 h-6 bg-red-500 text-white rounded-full flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity"
+                              >
+                                <X className="w-4 h-4" />
+                              </button>
+                            </div>
+                          ))}
+                        </div>
+                        {photos.length < 5 && (
+                          <Button
+                            type="button"
+                            variant="outline"
+                            onClick={() => fileInputRef.current?.click()}
+                            className="w-full"
+                          >
+                            <Upload className="w-4 h-4 mr-2" />
+                            Add More Photos ({photos.length}/5)
+                          </Button>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+                {/* Emergency Response */}
+                <div className="space-y-3">
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="checkbox"
+                      id="emergency"
+                      checked={requiresEmergency}
+                      onChange={(e) => setRequiresEmergency(e.target.checked)}
+                      className="w-4 h-4"
+                    />
+                    <Label htmlFor="emergency" className="cursor-pointer">
+                      This requires immediate emergency response
+                    </Label>
+                  </div>
+
+                  {requiresEmergency && (
+                    <div className="space-y-2 pl-6">
+                      <Label htmlFor="contact">Emergency Contact Number *</Label>
+                      <div className="relative">
+                        <Phone className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
+                        <Input
+                          id="contact"
+                          type="tel"
+                          className="pl-10"
+                          placeholder="+1 (555) 000-0000"
+                          value={contactNumber}
+                          onChange={(e) => setContactNumber(e.target.value)}
+                          required={requiresEmergency}
+                        />
+                      </div>
+                    </div>
+                  )}
                 </div>
               </div>
             )}
           </div>
 
-          {/* Submit Buttons */}
-          <div className="flex gap-3 pt-4">
-            <Button
-              type="button"
-              variant="outline"
-              className="flex-1"
-              onClick={() => onOpenChange(false)}
-              disabled={isSubmitting}
-            >
-              Cancel
-            </Button>
-            <Button
-              type="submit"
-              className={`flex-1 ${
-                isCritical 
-                  ? 'bg-red-600 hover:bg-red-700' 
-                  : 'bg-[#29CA8D] hover:bg-[#24b67d]'
-              }`}
-              disabled={isSubmitting}
-            >
-              {isSubmitting ? (
-                'Submitting...'
-              ) : (
-                <>
-                  <Send className="w-4 h-4 mr-2" />
-                  {isCritical ? 'Submit & Alert Emergency' : 'Submit Report'}
-                </>
-              )}
-            </Button>
-          </div>
+          <FormStepperNav
+            currentStep={step}
+            totalSteps={STEPS.length}
+            onBack={() => setStep((s) => Math.max(0, s - 1))}
+            onNext={() => {
+              if (validateStep(step)) setStep((s) => s + 1);
+            }}
+            onSubmit={handleSubmit}
+            submitting={isSubmitting}
+            submitLabel={isCritical ? 'Submit & Alert Emergency' : 'Submit Report'}
+            submitDisabled={isSubmitting}
+          />
         </form>
       </DialogContent>
     </Dialog>

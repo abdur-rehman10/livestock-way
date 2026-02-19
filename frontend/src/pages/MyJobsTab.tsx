@@ -12,7 +12,7 @@ import { Checkbox } from "../components/ui/checkbox";
 import { Eye, Edit, Trash2, Users, Clock, MapPin, DollarSign, Briefcase, MessageSquare } from "lucide-react";
 import { fetchMyJobs, deleteJob, updateJob, fetchJobApplications, updateApplicationStatus, type JobListing, type JobApplication } from "../api/jobs";
 import { fetchThreadByJobAndApplication } from "../api/jobMessages";
-import { toast } from "sonner";
+import { toast, swalConfirm } from '../lib/swal';
 import { storage, STORAGE_KEYS } from "../lib/storage";
 import { API_BASE_URL } from "../lib/api";
 
@@ -46,9 +46,12 @@ export default function MyJobsTab() {
   }, []);
 
   const handleDelete = async (jobId: number) => {
-    if (!window.confirm("Delete this job? This cannot be undone.")) {
-      return;
-    }
+    const confirmed = await swalConfirm({
+      title: 'Delete Job',
+      text: 'Delete this job? This cannot be undone.',
+      confirmText: 'Yes, delete',
+    });
+    if (!confirmed) return;
     try {
       await deleteJob(jobId);
       toast.success("Job deleted");

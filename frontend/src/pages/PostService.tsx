@@ -2,7 +2,7 @@ import { useNavigate } from 'react-router-dom';
 import { PostServiceForm } from '../components/service/PostServiceForm';
 import type { PostServiceFormValues } from '../components/service/PostServiceForm';
 import { createService, uploadServiceImage } from '../api/services';
-import { toast } from 'sonner';
+import { toast } from '../lib/swal';
 
 export default function PostService() {
   const navigate = useNavigate();
@@ -26,7 +26,9 @@ export default function PostService() {
         insured: values.insured,
         images: values.images,
       });
-      toast.success('Service posted');
+      toast.success('Service published successfully.', {
+        description: 'Clients can now discover and book your service.',
+      });
       navigate('/stakeholder/dashboard');
     } catch (err: any) {
       console.error(err);
