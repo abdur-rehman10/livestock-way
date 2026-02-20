@@ -3373,9 +3373,19 @@ router.get(
             u.country,
             u.timezone,
             u.preferred_language,
+            u.profile_photo_url,
             s.id AS shipper_id,
             s.farm_name,
-            s.registration_id
+            s.registration_id,
+            s.shipper_role,
+            s.livestock_types,
+            s.shipping_frequency,
+            s.average_head_count,
+            s.loading_facilities,
+            s.common_routes,
+            s.require_tracking,
+            s.use_escrow,
+            s.monitor_cameras
           FROM app_users u
           JOIN shippers s ON s.user_id = u.id
           WHERE u.id = $1
@@ -3399,8 +3409,18 @@ router.get(
         country: row.country ?? "",
         timezone: row.timezone ?? "",
         preferred_language: row.preferred_language ?? "",
+        profile_photo_url: row.profile_photo_url ?? null,
         farm_name: row.farm_name ?? "",
         registration_id: row.registration_id ?? "",
+        shipper_role: row.shipper_role ?? "",
+        livestock_types: row.livestock_types ?? [],
+        shipping_frequency: row.shipping_frequency ?? "",
+        average_head_count: row.average_head_count ?? "",
+        loading_facilities: row.loading_facilities ?? [],
+        common_routes: row.common_routes ?? "",
+        require_tracking: Boolean(row.require_tracking),
+        use_escrow: Boolean(row.use_escrow),
+        monitor_cameras: Boolean(row.monitor_cameras),
       });
     } catch (err: any) {
       console.error("Error in GET /api/marketplace/shipper/profile:", err);
@@ -3437,8 +3457,18 @@ router.patch(
         country,
         timezone,
         preferred_language,
+        profile_photo_url,
         farm_name,
         registration_id,
+        shipper_role,
+        livestock_types,
+        shipping_frequency,
+        average_head_count,
+        loading_facilities,
+        common_routes,
+        require_tracking,
+        use_escrow,
+        monitor_cameras,
       } = req.body;
 
       const client = await pool.connect();
@@ -3478,6 +3508,10 @@ router.patch(
           userUpdates.push(`preferred_language = $${paramCount++}`);
           userValues.push(preferred_language);
         }
+        if (profile_photo_url !== undefined) {
+          userUpdates.push(`profile_photo_url = $${paramCount++}`);
+          userValues.push(profile_photo_url);
+        }
 
         if (userUpdates.length > 0) {
           userValues.push(userId);
@@ -3504,6 +3538,42 @@ router.patch(
           shipperUpdates.push(`registration_id = $${shipperParamCount++}`);
           shipperValues.push(registration_id);
         }
+        if (shipper_role !== undefined) {
+          shipperUpdates.push(`shipper_role = $${shipperParamCount++}`);
+          shipperValues.push(shipper_role);
+        }
+        if (livestock_types !== undefined) {
+          shipperUpdates.push(`livestock_types = $${shipperParamCount++}`);
+          shipperValues.push(livestock_types);
+        }
+        if (shipping_frequency !== undefined) {
+          shipperUpdates.push(`shipping_frequency = $${shipperParamCount++}`);
+          shipperValues.push(shipping_frequency);
+        }
+        if (average_head_count !== undefined) {
+          shipperUpdates.push(`average_head_count = $${shipperParamCount++}`);
+          shipperValues.push(average_head_count);
+        }
+        if (loading_facilities !== undefined) {
+          shipperUpdates.push(`loading_facilities = $${shipperParamCount++}`);
+          shipperValues.push(loading_facilities);
+        }
+        if (common_routes !== undefined) {
+          shipperUpdates.push(`common_routes = $${shipperParamCount++}`);
+          shipperValues.push(common_routes);
+        }
+        if (require_tracking !== undefined) {
+          shipperUpdates.push(`require_tracking = $${shipperParamCount++}`);
+          shipperValues.push(require_tracking);
+        }
+        if (use_escrow !== undefined) {
+          shipperUpdates.push(`use_escrow = $${shipperParamCount++}`);
+          shipperValues.push(use_escrow);
+        }
+        if (monitor_cameras !== undefined) {
+          shipperUpdates.push(`monitor_cameras = $${shipperParamCount++}`);
+          shipperValues.push(monitor_cameras);
+        }
 
         if (shipperUpdates.length > 0) {
           shipperValues.push(shipperId);
@@ -3527,6 +3597,166 @@ router.patch(
       }
     } catch (err: any) {
       console.error("Error in PATCH /api/marketplace/shipper/profile:", err);
+      return res.status(500).json({ error: "Failed to update profile" });
+    }
+  }
+);
+
+// ---------- STAKEHOLDER PROFILE ----------
+
+function isStakeholderUser(user?: { user_type?: string | null }) {
+  const role = normalizeRole(user?.user_type);
+  return role.startsWith("STAKEHOLDER");
+}
+
+async function resolveStakeholderId(authUser: AuthUser): Promise<string | null> {
+  const userId = String(authUser.id ?? "");
+  if (!userId) return null;
+  let result = await pool.query("SELECT id FROM stakeholders WHERE user_id = $1 LIMIT 1", [userId]);
+  if (result.rowCount && result.rowCount > 0) return String(result.rows[0].id);
+  const ins = await pool.query("INSERT INTO stakeholders (user_id) VALUES ($1) RETURNING id", [userId]);
+  return ins.rowCount && ins.rowCount > 0 ? String(ins.rows[0].id) : null;
+}
+
+// GET /api/marketplace/stakeholder/profile
+router.get(
+  "/stakeholder/profile",
+  authRequired,
+  async (req, res) => {
+    try {
+      const authUser = getAuthUser(req);
+      if (!isStakeholderUser(authUser)) {
+        return res.status(403).json({ error: "Only stakeholders can access this endpoint" });
+      }
+      const userId = String(authUser.id ?? "");
+      if (!userId) return res.status(401).json({ error: "Unauthorized" });
+
+      const stakeholderId = await resolveStakeholderId(authUser);
+      if (!stakeholderId) return res.status(400).json({ error: "Stakeholder profile not found" });
+
+      const result = await pool.query(
+        `
+          SELECT
+            u.id AS user_id,
+            u.full_name,
+            u.email,
+            u.phone_number,
+            u.company_name,
+            u.country,
+            u.timezone,
+            u.preferred_language,
+            u.profile_photo_url,
+            st.id AS stakeholder_id,
+            st.service_type,
+            st.role_in_business,
+            st.provider_type,
+            st.business_address,
+            st.years_in_business
+          FROM app_users u
+          JOIN stakeholders st ON st.user_id = u.id
+          WHERE u.id = $1
+          LIMIT 1
+        `,
+        [userId]
+      );
+
+      if (!result.rowCount) return res.status(404).json({ error: "Profile not found" });
+
+      const row = result.rows[0];
+      return res.json({
+        user_id: String(row.user_id),
+        stakeholder_id: String(row.stakeholder_id),
+        full_name: row.full_name ?? "",
+        email: row.email ?? "",
+        phone_number: row.phone_number ?? "",
+        company_name: row.company_name ?? "",
+        country: row.country ?? "",
+        timezone: row.timezone ?? "",
+        preferred_language: row.preferred_language ?? "",
+        profile_photo_url: row.profile_photo_url ?? null,
+        service_type: row.service_type ?? "",
+        role_in_business: row.role_in_business ?? "",
+        provider_type: row.provider_type ?? "",
+        business_address: row.business_address ?? "",
+        years_in_business: row.years_in_business ?? "",
+      });
+    } catch (err: any) {
+      console.error("Error in GET /api/marketplace/stakeholder/profile:", err);
+      return res.status(500).json({ error: "Failed to load profile" });
+    }
+  }
+);
+
+// PATCH /api/marketplace/stakeholder/profile
+router.patch(
+  "/stakeholder/profile",
+  authRequired,
+  async (req, res) => {
+    try {
+      const authUser = getAuthUser(req);
+      if (!isStakeholderUser(authUser)) {
+        return res.status(403).json({ error: "Only stakeholders can access this endpoint" });
+      }
+      const userId = String(authUser.id ?? "");
+      if (!userId) return res.status(401).json({ error: "Unauthorized" });
+
+      const stakeholderId = await resolveStakeholderId(authUser);
+      if (!stakeholderId) return res.status(400).json({ error: "Stakeholder profile not found" });
+
+      const {
+        full_name, email, phone_number, company_name, country,
+        timezone, preferred_language, profile_photo_url,
+        service_type, role_in_business, provider_type, business_address, years_in_business,
+      } = req.body;
+
+      const client = await pool.connect();
+      try {
+        await client.query("BEGIN");
+
+        const userUpdates: string[] = [];
+        const userValues: any[] = [];
+        let p = 1;
+
+        if (full_name !== undefined) { userUpdates.push(`full_name = $${p++}`); userValues.push(full_name); }
+        if (email !== undefined) { userUpdates.push(`email = $${p++}`); userValues.push(email); }
+        if (phone_number !== undefined) { userUpdates.push(`phone_number = $${p++}`); userValues.push(phone_number); }
+        if (company_name !== undefined) { userUpdates.push(`company_name = $${p++}`); userValues.push(company_name); }
+        if (country !== undefined) { userUpdates.push(`country = $${p++}`); userValues.push(country); }
+        if (timezone !== undefined) { userUpdates.push(`timezone = $${p++}`); userValues.push(timezone); }
+        if (preferred_language !== undefined) { userUpdates.push(`preferred_language = $${p++}`); userValues.push(preferred_language); }
+        if (profile_photo_url !== undefined) { userUpdates.push(`profile_photo_url = $${p++}`); userValues.push(profile_photo_url); }
+
+        if (userUpdates.length > 0) {
+          userValues.push(userId);
+          await client.query(`UPDATE app_users SET ${userUpdates.join(", ")}, updated_at = NOW() WHERE id = $${p}`, userValues);
+        }
+
+        const stUpdates: string[] = [];
+        const stValues: any[] = [];
+        let sp = 1;
+
+        if (service_type !== undefined) { stUpdates.push(`service_type = $${sp++}`); stValues.push(service_type); }
+        if (company_name !== undefined) { stUpdates.push(`company_name = $${sp++}`); stValues.push(company_name); }
+        if (role_in_business !== undefined) { stUpdates.push(`role_in_business = $${sp++}`); stValues.push(role_in_business); }
+        if (provider_type !== undefined) { stUpdates.push(`provider_type = $${sp++}`); stValues.push(provider_type); }
+        if (business_address !== undefined) { stUpdates.push(`business_address = $${sp++}`); stValues.push(business_address); }
+        if (years_in_business !== undefined) { stUpdates.push(`years_in_business = $${sp++}`); stValues.push(years_in_business); }
+
+        if (stUpdates.length > 0) {
+          stValues.push(stakeholderId);
+          await client.query(`UPDATE stakeholders SET ${stUpdates.join(", ")}, updated_at = NOW() WHERE id = $${sp}`, stValues);
+        }
+
+        await client.query("COMMIT");
+        return res.json({ message: "Profile updated successfully" });
+      } catch (err: any) {
+        await client.query("ROLLBACK");
+        throw err;
+      } finally {
+        client.release();
+      }
+    } catch (err: any) {
+      console.error("Error in PATCH /api/marketplace/stakeholder/profile:", err);
       return res.status(500).json({ error: "Failed to update profile" });
     }
   }

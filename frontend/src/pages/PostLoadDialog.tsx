@@ -15,7 +15,6 @@ import { toast } from '../lib/swal';
 import { createLoad } from "../lib/api";
 import type { CreateLoadPayload } from "../lib/api";
 import { AddressSearch, type MappedAddress } from "../components/AddressSearch";
-import { Dialog as AlertDialog, DialogContent as AlertDialogContent } from "../components/ui/dialog";
 import { FormStepper, FormStepperNav } from "../components/ui/form-stepper";
 
 interface PostLoadDialogProps {
@@ -57,9 +56,6 @@ export function PostLoadDialog({ open = false, onOpenChange, initialData }: Post
     offerPrice: initialData?.offerPrice || '',
     currency: initialData?.currency || 'USD',
   });
-  const [paymentMode, setPaymentMode] = useState<"ESCROW" | "DIRECT">("ESCROW");
-  const [directWarningOpen, setDirectWarningOpen] = useState(false);
-  const [directDisclaimerAccepted, setDirectDisclaimerAccepted] = useState(false);
   const [invitedCarriers, setInvitedCarriers] = useState<string[]>([]);
   const [carrierSearch, setCarrierSearch] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -104,12 +100,6 @@ export function PostLoadDialog({ open = false, onOpenChange, initialData }: Post
       toast.error('Please invite at least one carrier for private loads');
       return;
     }
-    if (paymentMode === "DIRECT" && !directDisclaimerAccepted) {
-      toast.error("Please acknowledge the direct payment warning.");
-      setDirectWarningOpen(true);
-      return;
-    }
-
     const payload: CreateLoadPayload = {
       title: `${formData.species || 'Livestock'} load`,
       species: formData.species,
@@ -117,11 +107,6 @@ export function PostLoadDialog({ open = false, onOpenChange, initialData }: Post
       pickup_location: formData.pickup,
       dropoff_location: formData.dropoff,
       pickup_date: date!.toISOString(),
-      payment_mode: paymentMode,
-      direct_payment_disclaimer_accepted:
-        paymentMode === "DIRECT" ? directDisclaimerAccepted : undefined,
-      direct_payment_disclaimer_version:
-        paymentMode === "DIRECT" && directDisclaimerAccepted ? "v1" : undefined,
     };
 
     if (formData.offerPrice !== '') {
@@ -192,18 +177,6 @@ export function PostLoadDialog({ open = false, onOpenChange, initialData }: Post
     setFormData(prev => ({ ...prev, dropoff: mapped.fullText }));
   };
 
-  const handleSelectPaymentMode = (mode: "ESCROW" | "DIRECT") => {
-    if (mode === "DIRECT") { setDirectWarningOpen(true); return; }
-    setPaymentMode("ESCROW");
-    setDirectDisclaimerAccepted(false);
-  };
-
-  const confirmDirectPayment = () => {
-    if (!directDisclaimerAccepted) return;
-    setPaymentMode("DIRECT");
-    setDirectWarningOpen(false);
-  };
-
   return (
     <Dialog open={open} onOpenChange={(value) => { onOpenChange?.(value); if (!value) resetForm(); }}>
       <DialogContent className="!max-w-[50vw] max-h-[90vh] overflow-y-auto" style={{ maxWidth: '60vw' }}>
@@ -220,24 +193,6 @@ export function PostLoadDialog({ open = false, onOpenChange, initialData }: Post
           {/* Step 1: Load Details */}
           {step === 0 && (
             <>
-              <div className="space-y-3">
-                <Label className="text-base font-semibold">Payment Mode</Label>
-                <div className="grid grid-cols-2 gap-4">
-                  <Button type="button" variant={paymentMode === "ESCROW" ? "default" : "outline"} className="h-auto py-4 justify-start" onClick={() => handleSelectPaymentMode("ESCROW")}>
-                    <div className="text-left">
-                      <div className="font-semibold text-base mb-1">Escrow (Recommended)</div>
-                      <div className="text-xs opacity-90 leading-relaxed">Funds held until delivery, disputes supported.</div>
-                    </div>
-                  </Button>
-                  <Button type="button" variant={paymentMode === "DIRECT" ? "default" : "outline"} className="h-auto py-4 justify-start" onClick={() => handleSelectPaymentMode("DIRECT")}>
-                    <div className="text-left">
-                      <div className="font-semibold text-base mb-1">Direct Payment</div>
-                      <div className="text-xs opacity-90 leading-relaxed">Pay hauler directly; no escrow protections.</div>
-                    </div>
-                  </Button>
-                </div>
-              </div>
-
               <div className="space-y-3">
                 <Label htmlFor="species" className="text-base font-semibold">Livestock Type</Label>
                 <Select value={formData.species} onValueChange={(value) => setFormData({ ...formData, species: value })}>
@@ -410,29 +365,6 @@ export function PostLoadDialog({ open = false, onOpenChange, initialData }: Post
         />
       </DialogContent>
 
-      <Dialog open={directWarningOpen} onOpenChange={setDirectWarningOpen}>
-        <DialogContent className="max-w-lg">
-          <div className="space-y-5">
-            <div className="space-y-2">
-              <h3 className="text-xl font-semibold text-gray-900">Direct payment is at your own risk</h3>
-              <p className="text-sm text-gray-600 leading-relaxed">Paying the hauler directly means Livestock Way will not hold funds or mediate issues.</p>
-            </div>
-            <ul className="list-disc pl-5 text-sm text-gray-700 space-y-2 leading-relaxed">
-              <li>Livestock Way is not responsible for fraud, non-delivery, or payment issues.</li>
-              <li>Disputes and escrow protections are disabled.</li>
-              <li>Coordinate payment directly with the hauler.</li>
-            </ul>
-            <label className="flex items-start gap-3 text-sm text-gray-800 cursor-pointer p-3 bg-gray-50 rounded-lg border">
-              <Checkbox checked={directDisclaimerAccepted} onCheckedChange={(checked) => setDirectDisclaimerAccepted(!!checked)} />
-              <span className="leading-relaxed">I understand and accept the risks of direct payment</span>
-            </label>
-            <div className="flex justify-end gap-3 pt-2">
-              <Button type="button" variant="outline" className="h-11" onClick={() => { setDirectWarningOpen(false); setDirectDisclaimerAccepted(false); setPaymentMode("ESCROW"); }}>Cancel</Button>
-              <Button type="button" className="bg-red-600 hover:bg-red-700 h-11 font-semibold" disabled={!directDisclaimerAccepted} onClick={confirmDirectPayment}>Proceed with Direct Payment</Button>
-            </div>
-          </div>
-        </DialogContent>
-      </Dialog>
     </Dialog>
   );
 }

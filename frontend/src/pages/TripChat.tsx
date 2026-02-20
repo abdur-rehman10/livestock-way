@@ -8,6 +8,8 @@ import {
   type TripEnvelope,
 } from "../api/marketplace";
 import { ArrowLeft, Send, Lock, MessageSquare, Loader2, Truck, Package, Circle } from "lucide-react";
+import { storage, STORAGE_KEYS } from "../lib/storage";
+import { API_BASE_URL } from "../lib/api";
 
 const TripChat: React.FC = () => {
   const { id } = useParams<{ id: string }>();
@@ -138,7 +140,13 @@ const TripChat: React.FC = () => {
     }
   };
 
-  const getRoleIcon = (role: string, isMine: boolean) => {
+  const myPhoto = (() => {
+    const raw = storage.get<string | null>(STORAGE_KEYS.USER_PHOTO, null);
+    if (!raw) return null;
+    return raw.startsWith('http') ? raw : `${API_BASE_URL}${raw}`;
+  })();
+
+  const getRoleIcon = (role: string) => {
     if (role.toLowerCase().includes('hauler')) {
       return <Truck className="w-4 h-4 text-white" />;
     }
@@ -279,8 +287,8 @@ const TripChat: React.FC = () => {
                   )}
                   <div className={`flex items-end gap-2 ${isMine ? "justify-end" : "justify-start"}`}>
                     {!isMine && (
-                      <div className={`flex-none w-8 h-8 rounded-full bg-gradient-to-br shadow-md flex items-center justify-center ${getAvatarColor(normalizedRole)}`}>
-                        {getRoleIcon(normalizedRole, isMine)}
+                      <div className={`flex-none w-8 h-8 rounded-full bg-gradient-to-br shadow-md flex items-center justify-center overflow-hidden ${getAvatarColor(normalizedRole)}`}>
+                        {getRoleIcon(normalizedRole)}
                       </div>
                     )}
                     
@@ -297,8 +305,12 @@ const TripChat: React.FC = () => {
                     </div>
 
                     {isMine && (
-                      <div className={`flex-none w-8 h-8 rounded-full bg-gradient-to-br shadow-md flex items-center justify-center ${getAvatarColor(senderRole)}`}>
-                        {getRoleIcon(senderRole, isMine)}
+                      <div className={`flex-none w-8 h-8 rounded-full bg-gradient-to-br shadow-md flex items-center justify-center overflow-hidden ${myPhoto ? '' : getAvatarColor(senderRole)}`}>
+                        {myPhoto ? (
+                          <img src={myPhoto} alt="" className="w-full h-full object-cover" />
+                        ) : (
+                          getRoleIcon(senderRole)
+                        )}
                       </div>
                     )}
                   </div>

@@ -403,12 +403,20 @@ router.get(
             u.country,
             u.timezone,
             u.preferred_language,
+            u.profile_photo_url,
             h.id AS hauler_id,
             h.legal_name,
             h.dot_number,
             h.tax_id,
             h.website_url,
-            h.hauler_type
+            h.hauler_type,
+            h.years_in_business,
+            h.truck_count,
+            h.livestock_types,
+            h.route_preferences,
+            h.availability_status,
+            h.accept_escrow,
+            h.digital_compliance
           FROM app_users u
           JOIN haulers h ON h.user_id = u.id
           WHERE u.id = $1
@@ -432,11 +440,19 @@ router.get(
         country: row.country ?? "",
         timezone: row.timezone ?? "",
         preferred_language: row.preferred_language ?? "",
+        profile_photo_url: row.profile_photo_url ?? null,
         legal_name: row.legal_name ?? "",
         dot_number: row.dot_number ?? "",
         tax_id: row.tax_id ?? "",
         website_url: row.website_url ?? "",
         hauler_type: row.hauler_type ?? "company",
+        years_in_business: row.years_in_business ?? "",
+        truck_count: row.truck_count ?? "",
+        livestock_types: row.livestock_types ?? [],
+        route_preferences: row.route_preferences ?? "",
+        availability_status: row.availability_status ?? "",
+        accept_escrow: Boolean(row.accept_escrow),
+        digital_compliance: Boolean(row.digital_compliance),
       });
     } catch (err: any) {
       console.error("Error in GET /api/hauler/profile:", err);
@@ -466,10 +482,19 @@ router.patch(
         country,
         timezone,
         preferred_language,
+        profile_photo_url,
         legal_name,
         dot_number,
         tax_id,
         website_url,
+        hauler_type,
+        years_in_business,
+        truck_count,
+        livestock_types,
+        route_preferences,
+        availability_status,
+        accept_escrow,
+        digital_compliance,
       } = req.body;
 
       await pool.query("BEGIN");
@@ -507,6 +532,10 @@ router.patch(
         userUpdates.push(`preferred_language = $${paramCount++}`);
         userValues.push(preferred_language);
       }
+      if (profile_photo_url !== undefined) {
+        userUpdates.push(`profile_photo_url = $${paramCount++}`);
+        userValues.push(profile_photo_url);
+      }
 
       if (userUpdates.length > 0) {
         userValues.push(userId);
@@ -540,6 +569,38 @@ router.patch(
       if (website_url !== undefined) {
         haulerUpdates.push(`website_url = $${haulerParamCount++}`);
         haulerValues.push(website_url);
+      }
+      if (hauler_type !== undefined) {
+        haulerUpdates.push(`hauler_type = $${haulerParamCount++}`);
+        haulerValues.push(hauler_type);
+      }
+      if (years_in_business !== undefined) {
+        haulerUpdates.push(`years_in_business = $${haulerParamCount++}`);
+        haulerValues.push(years_in_business);
+      }
+      if (truck_count !== undefined) {
+        haulerUpdates.push(`truck_count = $${haulerParamCount++}`);
+        haulerValues.push(truck_count);
+      }
+      if (livestock_types !== undefined) {
+        haulerUpdates.push(`livestock_types = $${haulerParamCount++}`);
+        haulerValues.push(livestock_types);
+      }
+      if (route_preferences !== undefined) {
+        haulerUpdates.push(`route_preferences = $${haulerParamCount++}`);
+        haulerValues.push(route_preferences);
+      }
+      if (availability_status !== undefined) {
+        haulerUpdates.push(`availability_status = $${haulerParamCount++}`);
+        haulerValues.push(availability_status);
+      }
+      if (accept_escrow !== undefined) {
+        haulerUpdates.push(`accept_escrow = $${haulerParamCount++}`);
+        haulerValues.push(accept_escrow);
+      }
+      if (digital_compliance !== undefined) {
+        haulerUpdates.push(`digital_compliance = $${haulerParamCount++}`);
+        haulerValues.push(digital_compliance);
       }
 
       if (haulerUpdates.length > 0) {

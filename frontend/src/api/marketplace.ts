@@ -1041,11 +1041,19 @@ export interface HaulerProfile {
   country: string;
   timezone: string;
   preferred_language: string;
+  profile_photo_url: string | null;
   legal_name: string;
   dot_number: string;
   tax_id: string;
   website_url: string;
   hauler_type: string;
+  years_in_business: string;
+  truck_count: string;
+  livestock_types: string[];
+  route_preferences: string;
+  availability_status: string;
+  accept_escrow: boolean;
+  digital_compliance: boolean;
 }
 
 export async function fetchHaulerProfile() {
@@ -1069,8 +1077,18 @@ export interface ShipperProfile {
   country: string;
   timezone: string;
   preferred_language: string;
+  profile_photo_url: string | null;
   farm_name: string;
   registration_id: string;
+  shipper_role: string;
+  livestock_types: string[];
+  shipping_frequency: string;
+  average_head_count: string;
+  loading_facilities: string[];
+  common_routes: string;
+  require_tracking: boolean;
+  use_escrow: boolean;
+  monitor_cameras: boolean;
 }
 
 export async function fetchShipperProfile() {
@@ -1079,6 +1097,35 @@ export async function fetchShipperProfile() {
 
 export async function updateShipperProfile(payload: Partial<ShipperProfile>) {
   return marketplaceRequest<{ message: string }>(`/shipper/profile`, {
+    method: "PATCH",
+    body: JSON.stringify(payload),
+  });
+}
+
+export interface StakeholderProfile {
+  user_id: string;
+  stakeholder_id: string;
+  full_name: string;
+  email: string;
+  phone_number: string;
+  company_name: string;
+  country: string;
+  timezone: string;
+  preferred_language: string;
+  profile_photo_url: string | null;
+  service_type: string;
+  role_in_business: string;
+  provider_type: string;
+  business_address: string;
+  years_in_business: string;
+}
+
+export async function fetchStakeholderProfile() {
+  return marketplaceRequest<StakeholderProfile>(`/stakeholder/profile`);
+}
+
+export async function updateStakeholderProfile(payload: Partial<StakeholderProfile>) {
+  return marketplaceRequest<{ message: string }>(`/stakeholder/profile`, {
     method: "PATCH",
     body: JSON.stringify(payload),
   });

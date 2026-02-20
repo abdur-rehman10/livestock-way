@@ -92,6 +92,7 @@ export const STORAGE_KEYS = {
   SAVED_FILTERS: 'livestockway_saved_filters',
   WELCOME_DISMISSED: 'livestockway_welcome_dismissed',
   SHIPPER_OFFERS_UNREAD: 'livestockway_shipper_offers_unread',
+  USER_PHOTO: 'livestockway_user_photo',
 } as const;
 
 /**

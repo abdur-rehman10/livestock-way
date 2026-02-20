@@ -266,6 +266,15 @@ export default function TruckBoard() {
 
   const canSendChat = activeChat?.chat.chat_enabled_by_shipper === true;
 
+  const [currentPage, setCurrentPage] = useState(1);
+  const TRUCK_PAGE_SIZE = 10;
+  const totalTruckPages = Math.max(1, Math.ceil(listings.length / TRUCK_PAGE_SIZE));
+  const safeTruckPage = Math.min(currentPage, totalTruckPages);
+  const paginatedListings = listings.slice(
+    (safeTruckPage - 1) * TRUCK_PAGE_SIZE,
+    safeTruckPage * TRUCK_PAGE_SIZE
+  );
+
   const getRequestKey = (listingId: string, loadId: string) =>
     `${listingId}-${loadId}`;
 
@@ -318,6 +327,7 @@ export default function TruckBoard() {
         query.nearLng = lng ?? undefined;
         query.radiusKm = radiusValue;
       }
+      setCurrentPage(1);
       refresh(query);
     } catch (err: any) {
       toast.error(err?.message ?? "Invalid filter values");
@@ -326,6 +336,7 @@ export default function TruckBoard() {
 
   const handleClearFilters = () => {
     setFilters({ origin: "", nearLat: "", nearLng: "", radiusKm: "200" });
+    setCurrentPage(1);
     refresh({});
   };
 
@@ -604,7 +615,7 @@ export default function TruckBoard() {
         </Card>
       ) : (
         <div className="space-y-4">
-          {listings.map((listing) => {
+          {paginatedListings.map((listing) => {
             const listingChat = chatByListingId[listing.id];
             const chatEnabled = listingChat?.chat.chat_enabled_by_shipper ?? false;
             const selectedLoadId = interestForm[listing.id]?.loadId ?? "";
@@ -837,6 +848,37 @@ export default function TruckBoard() {
               </Card>
             );
           })}
+
+          <div className="flex items-center justify-between pt-4 border-t mt-2">
+            <p className="text-sm text-gray-500">
+              {listings.length <= TRUCK_PAGE_SIZE
+                ? `${listings.length} truck${listings.length !== 1 ? "s" : ""}`
+                : `Showing ${(safeTruckPage - 1) * TRUCK_PAGE_SIZE + 1}–${Math.min(safeTruckPage * TRUCK_PAGE_SIZE, listings.length)} of ${listings.length} trucks`}
+            </p>
+            {totalTruckPages > 1 && (
+              <div className="flex items-center gap-2">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  disabled={safeTruckPage <= 1}
+                  onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
+                >
+                  Previous
+                </Button>
+                <span className="text-sm text-gray-700 px-2">
+                  Page {safeTruckPage} of {totalTruckPages}
+                </span>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  disabled={safeTruckPage >= totalTruckPages}
+                  onClick={() => setCurrentPage((p) => Math.min(totalTruckPages, p + 1))}
+                >
+                  Next
+                </Button>
+              </div>
+            )}
+          </div>
         </div>
       )}
 

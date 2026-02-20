@@ -1,6 +1,7 @@
 import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
-import { MapPin, Clock, Building, Shield, Droplet, Scale, Wheat, Heart, Calendar, FileText, MessageSquare, Bookmark } from "lucide-react";
+import { MapPin, Clock, Building, Shield, Droplet, Scale, Wheat, Heart, Calendar, FileText, MessageSquare, Bookmark, ImageOff, ChevronLeft, ChevronRight, X } from "lucide-react";
+import { API_BASE_URL } from "../lib/api";
 import { Button } from "../components/ui/button";
 import { Badge } from "../components/ui/badge";
 import { Card } from "../components/ui/card";
@@ -48,6 +49,8 @@ export default function ResourcesBoard() {
   const [listings, setListings] = useState<ResourcesListing[]>([]);
   const [loading, setLoading] = useState(true);
   const [selectedListing, setSelectedListing] = useState<ResourcesListing | null>(null);
+  const [photoIndex, setPhotoIndex] = useState(0);
+  const [showLightbox, setShowLightbox] = useState(false);
   const [showApplicationDialog, setShowApplicationDialog] = useState(false);
   const [savedListings, setSavedListings] = useState<string[]>([]);
   const [filterResourceType, setFilterResourceType] = useState<string | undefined>(undefined);
@@ -283,21 +286,45 @@ export default function ResourcesBoard() {
         ) : (
           listings.map((listing) => {
             const Icon = resourceTypeIcons[listing.resource_type] || Building;
+            const hasPhotos = listing.photos && listing.photos.length > 0;
+            const firstPhoto = hasPhotos ? listing.photos[0] : null;
+            const photoUrl = firstPhoto
+              ? (firstPhoto.startsWith('http') ? firstPhoto : `${API_BASE_URL}${firstPhoto}`)
+              : null;
+
             return (
               <Card key={listing.id} className="overflow-hidden hover:shadow-lg transition-all relative">
-                {/* Saved Indicator */}
                 {savedListings.includes(String(listing.id)) && (
                   <div className="absolute top-2 right-2 z-10">
                     <Bookmark className="w-5 h-5 fill-red-500 text-red-500" />
                   </div>
                 )}
 
-                {/* Image Placeholder */}
-                <div 
-                  className="h-40 flex items-center justify-center text-white"
-                  style={{ backgroundColor: "#53ca97" }}
-                >
-                  {getResourceIcon(listing.resource_type)}
+                <div className="h-40 relative overflow-hidden bg-gray-100">
+                  {photoUrl ? (
+                    <>
+                      <img
+                        src={photoUrl}
+                        alt={getResourceTitle(listing)}
+                        className="w-full h-full object-cover"
+                        onError={(e) => {
+                          (e.target as HTMLImageElement).style.display = 'none';
+                        }}
+                      />
+                      {hasPhotos && listing.photos.length > 1 && (
+                        <div className="absolute bottom-2 right-2 bg-black/60 text-white text-xs px-2 py-0.5 rounded-full">
+                          +{listing.photos.length - 1}
+                        </div>
+                      )}
+                    </>
+                  ) : (
+                    <div
+                      className="w-full h-full flex items-center justify-center text-white"
+                      style={{ backgroundColor: "#53ca97" }}
+                    >
+                      <Icon className="w-12 h-12 opacity-50" />
+                    </div>
+                  )}
                 </div>
 
                 {/* Content */}
@@ -364,13 +391,51 @@ export default function ResourcesBoard() {
             </DialogHeader>
 
             <div className="space-y-4">
-              {/* Image Placeholder */}
-              <div 
-                className="h-64 rounded-lg flex items-center justify-center text-white"
-                style={{ backgroundColor: "#53ca97" }}
-              >
-                {getResourceIcon(selectedListing.resource_type)}
-              </div>
+              {selectedListing.photos && selectedListing.photos.length > 0 ? (
+                <div>
+                  <div
+                    className="relative rounded-lg overflow-hidden h-56 bg-gray-100 cursor-pointer group"
+                    onClick={() => { setPhotoIndex(0); setShowLightbox(true); }}
+                  >
+                    <img
+                      src={selectedListing.photos[0].startsWith('http') ? selectedListing.photos[0] : `${API_BASE_URL}${selectedListing.photos[0]}`}
+                      alt="Main photo"
+                      className="w-full h-full object-cover"
+                      onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }}
+                    />
+                    <div className="absolute inset-0 bg-black/0 group-hover:bg-black/10 transition-colors" />
+                    {selectedListing.photos.length > 1 && (
+                      <div className="absolute bottom-2 right-2 bg-black/70 text-white text-xs px-2.5 py-1 rounded-full font-medium">
+                        View all {selectedListing.photos.length} photos
+                      </div>
+                    )}
+                  </div>
+                  {selectedListing.photos.length > 1 && (
+                    <div className="flex gap-2 mt-2 overflow-x-auto pb-1">
+                      {selectedListing.photos.map((photo, idx) => {
+                        const url = photo.startsWith('http') ? photo : `${API_BASE_URL}${photo}`;
+                        return (
+                          <button
+                            key={idx}
+                            type="button"
+                            onClick={() => { setPhotoIndex(idx); setShowLightbox(true); }}
+                            className="w-16 h-16 rounded-lg overflow-hidden flex-shrink-0 border-2 border-transparent hover:border-[#53ca97] transition-colors"
+                          >
+                            <img src={url} alt={`Thumb ${idx + 1}`} className="w-full h-full object-cover" />
+                          </button>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+              ) : (
+                <div 
+                  className="h-48 rounded-lg flex items-center justify-center text-white"
+                  style={{ backgroundColor: "#53ca97" }}
+                >
+                  {getResourceIcon(selectedListing.resource_type)}
+                </div>
+              )}
 
               {/* Details Grid */}
               <div className="grid grid-cols-2 gap-4 py-4 border-y">
@@ -567,6 +632,69 @@ export default function ResourcesBoard() {
           </div>
         </DialogContent>
       </Dialog>
+      {showLightbox && selectedListing?.photos && selectedListing.photos.length > 0 && (
+        <div
+          className="fixed inset-0 bg-black/90 z-[100] flex items-center justify-center"
+          onClick={() => setShowLightbox(false)}
+        >
+          <button
+            className="absolute top-4 right-4 text-white/80 hover:text-white p-2 z-10"
+            onClick={() => setShowLightbox(false)}
+          >
+            <X className="w-6 h-6" />
+          </button>
+
+          <div className="absolute top-4 left-1/2 -translate-x-1/2 text-white/70 text-sm font-medium">
+            {photoIndex + 1} / {selectedListing.photos.length}
+          </div>
+
+          {selectedListing.photos.length > 1 && (
+            <>
+              <button
+                className="absolute left-4 top-1/2 -translate-y-1/2 w-10 h-10 rounded-full bg-white/10 hover:bg-white/20 flex items-center justify-center text-white transition-colors"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setPhotoIndex((prev) => (prev - 1 + selectedListing.photos.length) % selectedListing.photos.length);
+                }}
+              >
+                <ChevronLeft className="w-5 h-5" />
+              </button>
+              <button
+                className="absolute right-4 top-1/2 -translate-y-1/2 w-10 h-10 rounded-full bg-white/10 hover:bg-white/20 flex items-center justify-center text-white transition-colors"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setPhotoIndex((prev) => (prev + 1) % selectedListing.photos.length);
+                }}
+              >
+                <ChevronRight className="w-5 h-5" />
+              </button>
+            </>
+          )}
+
+          <img
+            src={
+              selectedListing.photos[photoIndex].startsWith('http')
+                ? selectedListing.photos[photoIndex]
+                : `${API_BASE_URL}${selectedListing.photos[photoIndex]}`
+            }
+            alt={`Photo ${photoIndex + 1}`}
+            className="max-h-[85vh] max-w-[90vw] object-contain rounded-lg"
+            onClick={(e) => e.stopPropagation()}
+          />
+
+          {selectedListing.photos.length > 1 && (
+            <div className="absolute bottom-4 left-1/2 -translate-x-1/2 flex gap-1.5">
+              {selectedListing.photos.map((_, idx) => (
+                <button
+                  key={idx}
+                  className={`w-2 h-2 rounded-full transition-colors ${idx === photoIndex ? 'bg-white' : 'bg-white/30 hover:bg-white/50'}`}
+                  onClick={(e) => { e.stopPropagation(); setPhotoIndex(idx); }}
+                />
+              ))}
+            </div>
+          )}
+        </div>
+      )}
     </div>
   );
 }

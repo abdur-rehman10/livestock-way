@@ -4,9 +4,9 @@ import { Button } from '../ui/button';
 import { X, Camera, Upload, CheckCircle, Loader2 } from 'lucide-react';
 import { Switch } from '../ui/switch';
 import { toast } from '../../lib/swal';
-import { updateHaulerProfile } from '../../api/marketplace';
-import { updateShipperProfile } from '../../api/marketplace';
+import { updateHaulerProfile, updateShipperProfile, updateStakeholderProfile } from '../../api/marketplace';
 import { API_BASE_URL } from '../../lib/api';
+import { storage, STORAGE_KEYS } from '../../lib/storage';
 import type { AuthUserRole } from './AuthWrapper';
 
 interface ProfileSetupModalProps {
@@ -72,6 +72,7 @@ export function ProfileSetupModal({
 
       const data = await res.json();
       setProfilePhoto(data.url);
+      storage.set(STORAGE_KEYS.USER_PHOTO, data.url);
       toast.success('Photo uploaded!');
     } catch (err: any) {
       console.error('Photo upload error:', err);
@@ -188,6 +189,14 @@ export function ProfileSetupModal({
           company_name: businessName || companyName || undefined,
           country: primaryLocation || hqLocation || undefined,
           hauler_type: driverType || undefined,
+          profile_photo_url: profilePhoto || undefined,
+          years_in_business: yearsInBusiness || undefined,
+          truck_count: truckCount || undefined,
+          livestock_types: livestockTypes.length > 0 ? livestockTypes : undefined,
+          route_preferences: routePreferences || undefined,
+          availability_status: availabilityStatus || undefined,
+          accept_escrow: acceptEscrow,
+          digital_compliance: digitalCompliance,
         });
       } else if (userRole === 'shipper') {
         await updateShipperProfile({
@@ -197,8 +206,35 @@ export function ProfileSetupModal({
           farm_name: farmName || undefined,
           company_name: farmName || undefined,
           country: primaryLocation || undefined,
+          profile_photo_url: profilePhoto || undefined,
+          shipper_role: shipperRole || undefined,
+          livestock_types: livestockTypes.length > 0 ? livestockTypes : undefined,
+          shipping_frequency: shippingFrequency || undefined,
+          average_head_count: averageHeadCount || undefined,
+          loading_facilities: loadingFacilities.length > 0 ? loadingFacilities : undefined,
+          common_routes: commonRoutes || undefined,
+          require_tracking: requireTracking,
+          use_escrow: useEscrow,
+          monitor_cameras: monitorCameras,
+        });
+      } else if (userRole === 'resource-provider') {
+        await updateStakeholderProfile({
+          full_name: fullName || undefined,
+          email: email || undefined,
+          phone_number: phone || undefined,
+          company_name: businessName || undefined,
+          country: undefined,
+          profile_photo_url: profilePhoto || undefined,
+          role_in_business: roleInBusiness || undefined,
+          provider_type: providerType || undefined,
+          business_address: businessAddress || undefined,
+          years_in_business: yearsInBusiness || undefined,
         });
       }
+
+      if (fullName) storage.set(STORAGE_KEYS.USER_NAME, fullName);
+      if (email) storage.set(STORAGE_KEYS.USER_EMAIL, email);
+      if (phone) storage.set(STORAGE_KEYS.USER_PHONE, phone);
 
       toast.success('Profile saved successfully!');
     } catch (err: any) {

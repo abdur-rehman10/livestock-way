@@ -236,6 +236,7 @@ router.post("/login", async (req, res) => {
         individual_plan_code: user.individual_plan_code ?? null,
         signup_plan_selected_at: user.signup_plan_selected_at ?? null,
         onboarding_completed: Boolean(user.onboarding_completed),
+        profile_photo_url: user.profile_photo_url ?? null,
       },
     });
   } catch (err: any) {
@@ -464,6 +465,60 @@ router.post("/reset-password", async (req, res) => {
   } catch (err: any) {
     console.error("reset-password error:", err);
     res.status(500).json({ message: err?.message || "Failed to reset password" });
+  }
+});
+
+// ------------------ CHANGE PASSWORD (authenticated) ------------------
+router.post("/change-password", authRequired, async (req, res) => {
+  const userId = (req as any).user?.id;
+  if (!userId) return res.status(401).json({ message: "Unauthorized" });
+
+  const { current_password, new_password } = req.body as {
+    current_password: string;
+    new_password: string;
+  };
+
+  if (!current_password || !new_password) {
+    return res.status(400).json({ message: "Current password and new password are required" });
+  }
+  if (new_password.length < 8) {
+    return res.status(400).json({ message: "New password must be at least 8 characters" });
+  }
+
+  try {
+    const result = await pool.query(
+      "SELECT id, password_hash FROM app_users WHERE id = $1",
+      [userId]
+    );
+    if ((result.rowCount ?? 0) === 0) {
+      return res.status(404).json({ message: "User not found" });
+    }
+
+    const user = result.rows[0];
+    const match = await bcrypt.compare(current_password, user.password_hash);
+    if (!match) {
+      return res.status(401).json({ message: "Current password is incorrect" });
+    }
+
+    const hashed = await bcrypt.hash(new_password, 10);
+    await pool.query(
+      "UPDATE app_users SET password_hash = $1, updated_at = NOW() WHERE id = $2",
+      [hashed, userId]
+    );
+
+    await logAuditEvent({
+      action: "password_changed",
+      eventType: "auth:password_change",
+      userId: user.id,
+      resource: "app_users",
+      metadata: { method: "settings" },
+      ipAddress: req.ip || null,
+    });
+
+    res.json({ message: "Password changed successfully" });
+  } catch (err: any) {
+    console.error("change-password error:", err);
+    res.status(500).json({ message: err?.message || "Failed to change password" });
   }
 });
 

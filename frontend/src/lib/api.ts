@@ -37,6 +37,10 @@ export interface Load {
   direct_payment_disclaimer_version?: string | null;
   is_external?: boolean;
   offer_count?: number;
+  pickup_lat?: number | null;
+  pickup_lng?: number | null;
+  dropoff_lat?: number | null;
+  dropoff_lng?: number | null;
 }
 
 export interface CreateLoadPayload {

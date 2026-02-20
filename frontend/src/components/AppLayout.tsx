@@ -2,7 +2,8 @@ import { useEffect, useState } from "react";
 import { Link, NavLink, useNavigate, useLocation } from "react-router-dom";
 import { Button } from "./ui/button";
 import { swalConfirm } from "../lib/swal";
-import { Avatar, AvatarFallback } from "./ui/avatar";
+import { API_BASE_URL } from "../lib/api";
+import { Avatar, AvatarImage, AvatarFallback } from "./ui/avatar";
 import { Separator } from "./ui/separator";
 import {
   Menu,
@@ -342,6 +343,10 @@ export function AppLayout({ children, userRole, onLogout }: AppLayoutProps) {
   const userName = storage.get(STORAGE_KEYS.USER_NAME, 'User');
   const userEmail =
     storage.get(STORAGE_KEYS.USER_EMAIL, storage.get(STORAGE_KEYS.USER_PHONE, ''));
+  const userPhoto = storage.get<string | null>(STORAGE_KEYS.USER_PHOTO, null);
+  const userPhotoSrc = userPhoto
+    ? (userPhoto.startsWith('http') ? userPhoto : `${API_BASE_URL}${userPhoto}`)
+    : null;
 
   const getInitials = (name: string) => {
     return name
@@ -686,6 +691,7 @@ export function AppLayout({ children, userRole, onLogout }: AppLayoutProps) {
               <div className="p-4">
                 <div className="flex items-center gap-3">
                   <Avatar>
+                    {userPhotoSrc && <AvatarImage src={userPhotoSrc} alt={userName} />}
                     <AvatarFallback style={{ backgroundColor: config.color, color: 'white' }}>
                       {getInitials(userName)}
                     </AvatarFallback>
@@ -785,6 +791,10 @@ export function AppLayout({ children, userRole, onLogout }: AppLayoutProps) {
                     )}
                     {userRole === 'shipper' && (
                       <>
+                        <DropdownMenuItem onClick={() => navigate('/shipper/loadboard')}>
+                          <Package className="w-4 h-4 mr-2" />
+                          Load Board
+                        </DropdownMenuItem>
                         <DropdownMenuItem onClick={() => navigate('/shipper/truck-board')}>
                           <Truck className="w-4 h-4 mr-2" />
                           Truck Board
@@ -793,10 +803,6 @@ export function AppLayout({ children, userRole, onLogout }: AppLayoutProps) {
                           <Briefcase className="w-4 h-4 mr-2" />
                           Job Board
                         </DropdownMenuItem>
-                        <DropdownMenuItem onClick={() => navigate('/shipper/resources-board')}>
-                          <Wrench className="w-4 h-4 mr-2" />
-                          Resources Board
-                        </DropdownMenuItem>
                       </>
                     )}
                     {userRole === 'stakeholder' && (
@@ -804,10 +810,6 @@ export function AppLayout({ children, userRole, onLogout }: AppLayoutProps) {
                         <DropdownMenuItem onClick={() => navigate('/stakeholder/job-board')}>
                           <Briefcase className="w-4 h-4 mr-2" />
                           Job Board
-                        </DropdownMenuItem>
-                        <DropdownMenuItem onClick={() => navigate('/stakeholder/resources-board')}>
-                          <Wrench className="w-4 h-4 mr-2" />
-                          Resources Board
                         </DropdownMenuItem>
                       </>
                     )}
@@ -889,6 +891,7 @@ export function AppLayout({ children, userRole, onLogout }: AppLayoutProps) {
                   </div>
                 </div>
                 <Avatar className="w-8 h-8 md:w-10 md:h-10">
+                  {userPhotoSrc && <AvatarImage src={userPhotoSrc} alt={userName} />}
                   <AvatarFallback style={{ backgroundColor: config.color, color: 'white' }}>
                     {getInitials(userName)}
                   </AvatarFallback>

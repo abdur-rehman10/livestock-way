@@ -102,6 +102,10 @@ interface Load {
   comments?: string | null;
   contactEmail?: string | null;
   contactPhone?: string | null;
+  pickupLat?: number | null;
+  pickupLng?: number | null;
+  dropoffLat?: number | null;
+  dropoffLng?: number | null;
 }
 
 // const mockLoads: Load[] = [ ... ];
@@ -138,6 +142,198 @@ const recommendedCarriers = [
     completedTrips: 650,
   },
 ];
+
+/* ---------- Leaflet CDN loader (shared with RouteMap) ---------- */
+const LEAFLET_CSS = "https://unpkg.com/leaflet@1.9.4/dist/leaflet.css";
+const LEAFLET_JS = "https://unpkg.com/leaflet@1.9.4/dist/leaflet.js";
+declare global { interface Window { L?: any } }
+const loadLeaflet = (): Promise<void> =>
+  new Promise((resolve, reject) => {
+    if (window.L) { resolve(); return; }
+    const existing = document.querySelector<HTMLScriptElement>(`script[src="${LEAFLET_JS}"]`);
+    if (existing) { existing.addEventListener("load", () => resolve()); existing.addEventListener("error", () => reject()); return; }
+    const link = document.createElement("link"); link.rel = "stylesheet"; link.href = LEAFLET_CSS; document.head.appendChild(link);
+    const script = document.createElement("script"); script.src = LEAFLET_JS; script.async = true;
+    script.onload = () => resolve(); script.onerror = () => reject(); document.body.appendChild(script);
+  });
+
+/* ---------- Geocode cache (Nominatim) ---------- */
+const geocodeCache: Record<string, { lat: number; lng: number } | null> = {};
+async function geocodeLocation(text: string): Promise<{ lat: number; lng: number } | null> {
+  const key = text.trim().toLowerCase();
+  if (!key) return null;
+  if (key in geocodeCache) return geocodeCache[key];
+  try {
+    const resp = await fetch(
+      `https://nominatim.openstreetmap.org/search?format=json&limit=1&q=${encodeURIComponent(key)}`,
+      { headers: { "Accept-Language": "en" } }
+    );
+    const data = await resp.json();
+    if (data?.[0]?.lat && data?.[0]?.lon) {
+      const result = { lat: parseFloat(data[0].lat), lng: parseFloat(data[0].lon) };
+      geocodeCache[key] = result;
+      return result;
+    }
+    geocodeCache[key] = null;
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+/* ---------- Loadboard Map View ---------- */
+type GeocodedLoad = Load & { _lat: number; _lng: number };
+
+function LoadboardMapView({ loads }: { loads: Load[] }) {
+  const containerRef = useRef<HTMLDivElement | null>(null);
+  const mapRef = useRef<any>(null);
+  const markersRef = useRef<any[]>([]);
+  const [geocodedLoads, setGeocodedLoads] = useState<GeocodedLoad[]>([]);
+  const [geocoding, setGeocoding] = useState(false);
+  const geocodedCountRef = useRef(0);
+
+  // Geocode loads that don't already have coordinates
+  useEffect(() => {
+    let active = true;
+    setGeocoding(true);
+    geocodedCountRef.current = 0;
+
+    const run = async () => {
+      const results: GeocodedLoad[] = [];
+      // Process in batches to respect Nominatim rate limits (1 req/s)
+      for (const load of loads) {
+        if (!active) break;
+        // Use DB coords if available
+        if (load.pickupLat != null && load.pickupLng != null && Number.isFinite(load.pickupLat) && Number.isFinite(load.pickupLng)) {
+          results.push({ ...load, _lat: load.pickupLat!, _lng: load.pickupLng! });
+          continue;
+        }
+        // Geocode from origin text
+        if (load.origin) {
+          const coords = await geocodeLocation(load.origin);
+          if (coords && active) {
+            results.push({ ...load, _lat: coords.lat, _lng: coords.lng });
+          }
+          // Small delay to respect Nominatim rate limit
+          await new Promise((r) => setTimeout(r, 300));
+        }
+        if (active) {
+          geocodedCountRef.current = results.length;
+          setGeocodedLoads([...results]);
+        }
+      }
+      if (active) {
+        setGeocodedLoads(results);
+        setGeocoding(false);
+      }
+    };
+    run();
+    return () => { active = false; };
+  }, [loads]);
+
+  // Render markers on map whenever geocodedLoads changes
+  useEffect(() => {
+    if (!containerRef.current) return;
+    let active = true;
+
+    loadLeaflet().then(() => {
+      if (!active || !containerRef.current || !window.L) return;
+      const L = window.L;
+
+      if (!mapRef.current) {
+        mapRef.current = L.map(containerRef.current, { zoomControl: true }).setView([39.8, -98.5], 4);
+        L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+          maxZoom: 18,
+          attribution: "© OpenStreetMap contributors",
+        }).addTo(mapRef.current);
+      }
+
+      markersRef.current.forEach((m: any) => m.remove());
+      markersRef.current = [];
+
+      if (geocodedLoads.length === 0) return;
+
+      const bounds: Array<[number, number]> = [];
+
+      geocodedLoads.forEach((load) => {
+        bounds.push([load._lat, load._lng]);
+
+        const statusColors: Record<string, string> = {
+          open: "#22c55e",
+          assigned: "#3b82f6",
+          "in-transit": "#f59e0b",
+          delivered: "#6b7280",
+        };
+        const color = statusColors[load.status] ?? "#6b7280";
+
+        const icon = L.divIcon({
+          className: "loadboard-marker",
+          html: `<div style="
+            background:${color};width:32px;height:32px;border-radius:50%;
+            border:3px solid white;box-shadow:0 2px 8px rgba(0,0,0,0.3);
+            display:flex;align-items:center;justify-content:center;
+            font-size:16px;cursor:pointer;
+          ">🐄</div>`,
+          iconSize: [32, 32],
+          iconAnchor: [16, 16],
+          popupAnchor: [0, -18],
+        });
+
+        const popupHtml = `
+          <div style="min-width:200px;font-family:system-ui,sans-serif;">
+            <div style="font-weight:700;font-size:14px;margin-bottom:4px;">Load #${load.id}</div>
+            <div style="font-size:12px;color:#555;margin-bottom:2px;">${load.species} · ${load.quantity}</div>
+            <div style="font-size:12px;color:#333;margin-bottom:2px;">
+              📦 ${load.origin}<br/>➡️ ${load.destination}
+            </div>
+            <div style="font-size:12px;color:#555;margin-bottom:4px;">Pickup: ${load.pickupDate}</div>
+            ${load.price ? `<div style="font-size:14px;font-weight:600;color:#F97316;">${load.price}</div>` : ""}
+          </div>
+        `;
+
+        const marker = L.marker([load._lat, load._lng], { icon }).bindPopup(popupHtml).addTo(mapRef.current);
+        markersRef.current.push(marker);
+      });
+
+      if (bounds.length > 0) {
+        mapRef.current.fitBounds(bounds, { padding: [40, 40], maxZoom: 12 });
+      }
+    }).catch(() => {});
+
+    return () => { active = false; };
+  }, [geocodedLoads]);
+
+  return (
+    <Card>
+      <CardContent className="p-0 relative">
+        <div ref={containerRef} className="h-[600px] w-full rounded-lg" />
+        {geocoding && geocodedLoads.length === 0 && (
+          <div className="absolute inset-0 flex items-center justify-center bg-gray-50/80 rounded-lg pointer-events-none">
+            <div className="text-center text-gray-500">
+              <div className="w-8 h-8 border-4 border-gray-300 border-t-[#172039] rounded-full animate-spin mx-auto mb-3" />
+              <p className="text-sm font-medium">Locating loads on map…</p>
+              <p className="text-xs mt-1">Resolving addresses to coordinates</p>
+            </div>
+          </div>
+        )}
+        {!geocoding && geocodedLoads.length === 0 && (
+          <div className="absolute inset-0 flex items-center justify-center bg-gray-50/80 rounded-lg pointer-events-none">
+            <div className="text-center text-gray-500">
+              <MapIcon className="w-12 h-12 mx-auto mb-2 text-gray-300" />
+              <p className="text-sm font-medium">No loads could be placed on the map</p>
+              <p className="text-xs mt-1">Location addresses could not be resolved to coordinates</p>
+            </div>
+          </div>
+        )}
+        <div className="absolute top-3 right-3 z-[1000] bg-white rounded-lg shadow-md px-3 py-2 text-xs text-gray-600">
+          {geocoding
+            ? `Placing loads… ${geocodedLoads.length} of ${loads.length}`
+            : `${geocodedLoads.length} of ${loads.length} loads on map`}
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
 
 export function Loadboard() {
   const [viewMode, setViewMode] = useState<'list' | 'map'>('list');
@@ -180,6 +376,8 @@ export function Loadboard() {
   } = useHaulerSubscription();
   const [searchQuery, setSearchQuery] = useState('');
   const [saveFilterName, setSaveFilterName] = useState('');
+  const [currentPage, setCurrentPage] = useState(1);
+  const PAGE_SIZE = 10;
   const currentHaulerId = appStorage.get<string | null>(STORAGE_KEYS.USER_ID, null);
   const HAULER_OFFER_LAST_SEEN_KEY = "haulerOfferLastSeen";
   const [offerLastSeen, setOfferLastSeen] = useState<Record<string, string>>(() => {
@@ -194,6 +392,8 @@ export function Loadboard() {
     }
   });
   const navigate = useNavigate();
+  const userRole = appStorage.get<string | null>(STORAGE_KEYS.USER_ROLE, null);
+  const isShipper = userRole === "shipper";
   const isEditingOffer = !!offerDialogExistingOffer;
   const activeOfferIdRef = useRef<string | null>(null);
   const haulerChatAllowedRef = useRef(false);
@@ -911,6 +1111,10 @@ const loadUserOffer = async (load: Load, options: { silent?: boolean } = {}) => 
       comments: (load as any)?.description ?? null,
       contactEmail: (load as any)?.external_contact_email ?? null,
       contactPhone: (load as any)?.external_contact_phone ?? null,
+      pickupLat: load.pickup_lat ?? null,
+      pickupLng: load.pickup_lng ?? null,
+      dropoffLat: load.dropoff_lat ?? null,
+      dropoffLng: load.dropoff_lng ?? null,
     };
   });
 
@@ -929,6 +1133,12 @@ const loadUserOffer = async (load: Load, options: { silent?: boolean } = {}) => 
   });
 
   const loadsToDisplay = filteredLoads;
+  const totalPages = Math.max(1, Math.ceil(loadsToDisplay.length / PAGE_SIZE));
+  const safePage = Math.min(currentPage, totalPages);
+  const paginatedLoads = loadsToDisplay.slice(
+    (safePage - 1) * PAGE_SIZE,
+    safePage * PAGE_SIZE
+  );
 
   const hasUnreadForLoad = (loadId: string) => {
     const summary = haulerOffers[loadId];
@@ -957,6 +1167,7 @@ const loadUserOffer = async (load: Load, options: { silent?: boolean } = {}) => 
     };
     setFilters(newFilters);
     setSearchQuery('');
+    setCurrentPage(1);
     
     // Add undo action
     undoManager.add({
@@ -996,16 +1207,22 @@ const loadUserOffer = async (load: Load, options: { silent?: boolean } = {}) => 
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-2xl text-[#172039]">Loadboard</h1>
-          <p className="text-gray-600">Find loads and carriers for your fleet</p>
+          <p className="text-gray-600">
+            {isShipper
+              ? "Browse available loads on the marketplace"
+              : "Find loads and carriers for your fleet"}
+          </p>
         </div>
         <div className="flex items-center gap-3">
-          <Button
-            onClick={handleAutoMatch}
-            className="bg-[#29CA8D] hover:bg-[#24b67d]"
-          >
-            <TrendingUp className="w-4 h-4 mr-2" />
-            Auto Match
-          </Button>
+          {!isShipper && (
+            <Button
+              onClick={handleAutoMatch}
+              className="bg-[#29CA8D] hover:bg-[#24b67d]"
+            >
+              <TrendingUp className="w-4 h-4 mr-2" />
+              Auto Match
+            </Button>
+          )}
           <Tabs value={viewMode} onValueChange={(v) => setViewMode(v as any)}>
             <TabsList>
               <TabsTrigger value="list">
@@ -1091,7 +1308,7 @@ const loadUserOffer = async (load: Load, options: { silent?: boolean } = {}) => 
         </Card>
       </div>
 
-      {offerBlocked && (
+      {offerBlocked && !isShipper && (
         <Card className="border-amber-200 bg-amber-50">
           <CardContent className="py-3 flex items-center justify-between">
             <div className="text-sm text-amber-900 font-medium">
@@ -1114,7 +1331,7 @@ const loadUserOffer = async (load: Load, options: { silent?: boolean } = {}) => 
       </Card>
     )}
 
-      {subscriptionState?.hauler_type === "INDIVIDUAL" &&
+      {!isShipper && subscriptionState?.hauler_type === "INDIVIDUAL" &&
         subscriptionState.subscription_status !== "ACTIVE" && (
           <div className="sticky bottom-4 z-20">
             <SubscriptionCTA
@@ -1163,7 +1380,7 @@ const loadUserOffer = async (load: Load, options: { silent?: boolean } = {}) => 
                     Clear Filters
                   </Button>
                 )}
-                {subscriptionState?.hauler_type === "INDIVIDUAL" &&
+                {!isShipper && subscriptionState?.hauler_type === "INDIVIDUAL" &&
                   subscriptionState.subscription_status !== "ACTIVE" && (
                     <div className="mt-4">
                       <SubscriptionCTA
@@ -1193,8 +1410,8 @@ const loadUserOffer = async (load: Load, options: { silent?: boolean } = {}) => 
           )}
           {!isLoading && !error && loadsToDisplay.length > 0 && (
             <>
-              {loadsToDisplay.map((load) => (
-                <Card key={load.id} className="hover:shadow-md transition-shadow">
+              {paginatedLoads.map((load: Load) => (
+                <Card key={load.id} className="hover:shadow-md transition-shadow cursor-pointer">
                   <CardContent className="p-4 space-y-3">
                     <div className="flex items-center justify-between">
                       <div>
@@ -1215,7 +1432,7 @@ const loadUserOffer = async (load: Load, options: { silent?: boolean } = {}) => 
                             </Badge>
                           </div>
                         )}
-                        {haulerOffers[String(load.rawId)] && !load.isExternal && (
+                        {!isShipper && haulerOffers[String(load.rawId)] && !load.isExternal && (
                           <div className="mt-1 text-xs text-blue-700">
                             Your offer: ${haulerOffers[String(load.rawId)].offered_amount}{" "}
                             {haulerOffers[String(load.rawId)].currency} ·{" "}
@@ -1235,7 +1452,7 @@ const loadUserOffer = async (load: Load, options: { silent?: boolean } = {}) => 
                       </div>
                     )}
                     <div className="flex flex-col gap-2">
-                      {!load.isExternal && (
+                      {!isShipper && !load.isExternal && (
                         <>
                           <div className="relative flex flex-col gap-2">
                            
@@ -1352,20 +1569,41 @@ const loadUserOffer = async (load: Load, options: { silent?: boolean } = {}) => 
                   </CardContent>
                 </Card>
               ))}
+
+              {/* Pagination */}
+              {totalPages > 1 && (
+                <div className="flex items-center justify-between pt-2">
+                  <p className="text-sm text-gray-500">
+                    Showing {(safePage - 1) * PAGE_SIZE + 1}–{Math.min(safePage * PAGE_SIZE, loadsToDisplay.length)} of {loadsToDisplay.length} loads
+                  </p>
+                  <div className="flex items-center gap-2">
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      disabled={safePage <= 1}
+                      onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
+                    >
+                      Previous
+                    </Button>
+                    <span className="text-sm text-gray-700 px-2">
+                      Page {safePage} of {totalPages}
+                    </span>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      disabled={safePage >= totalPages}
+                      onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
+                    >
+                      Next
+                    </Button>
+                  </div>
+                </div>
+              )}
             </>
           )}
         </div>
       ) : (
-        <Card>
-          <CardContent className="p-0 h-[600px] bg-gray-100 flex items-center justify-center">
-            <div className="text-center text-gray-500">
-              <MapIcon className="w-16 h-16 mx-auto mb-3 text-gray-400" />
-              <p className="text-lg">Map View</p>
-              <p className="text-sm">Loads displayed on interactive map</p>
-              <p className="text-xs mt-2">(Google Maps/Mapbox integration)</p>
-            </div>
-          </CardContent>
-        </Card>
+        <LoadboardMapView loads={loadsToDisplay} />
       )}
 
       <Dialog open={isFilterOpen} onOpenChange={setIsFilterOpen}>

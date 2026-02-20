@@ -118,7 +118,16 @@ export function AppRouter({ showKeyboardShortcuts, onKeyboardShortcutsToggle }: 
     toast.success(`Logged in as ${role}`);
   };
 
-  const handleAuthComplete = (backendRole: BackendRole, _token: string, _userData: any) => {
+  const handleAuthComplete = (backendRole: BackendRole, _token: string, userData: any) => {
+    if (userData?.full_name) {
+      storage.set(STORAGE_KEYS.USER_NAME, userData.full_name);
+    }
+    if (userData?.email) {
+      storage.set(STORAGE_KEYS.USER_EMAIL, userData.email);
+    }
+    if (userData?.profile_photo_url) {
+      storage.set(STORAGE_KEYS.USER_PHOTO, userData.profile_photo_url);
+    }
     handleLogin(backendRole as UserRole);
   };
 
@@ -325,7 +334,7 @@ export function AppRouter({ showKeyboardShortcuts, onKeyboardShortcutsToggle }: 
                   <Route path="resources-board" element={<ResourcesBoard />} />
                   <Route path="offers" element={<ShipperOffersTab />} />
                   <Route path="contracts" element={<ShipperContractsTab />} />
-                  <Route path="loadboard" element={<Navigate to="/shipper/dashboard" replace />} />
+                  <Route path="loadboard" element={<Loadboard />} />
                   <Route path="truck-board" element={<TruckBoard />} />
                   <Route path="trips" element={<TripsTab role="shipper" onViewTrip={() => toast.info('Trip view coming soon')} />} />
                   <Route path="trips/:id/route-plan" element={<TripRoutePlan />} />
@@ -393,7 +402,7 @@ export function AppRouter({ showKeyboardShortcuts, onKeyboardShortcutsToggle }: 
                   <Route path="services/new" element={<PostService />} />
                   <Route path="earnings" element={<WalletTab />} />
                   <Route path="documents" element={<DocumentsTab />} />
-                  <Route path="settings" element={<div>Service provider settings coming soon</div>} />
+                  <Route path="settings" element={<ProfileSettings role="stakeholder" onBack={() => navigate(-1)} />} />
                   <Route path="support" element={<SupportTab />} />
                   <Route path="*" element={<Navigate to="/stakeholder/dashboard" replace />} />
                 </Routes>

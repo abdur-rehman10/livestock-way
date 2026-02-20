@@ -1890,11 +1890,19 @@ export default function JobMessages() {
                     }
                   }
                   
+                  const myPhotoRaw = isCurrentUser ? storage.get<string | null>(STORAGE_KEYS.USER_PHOTO, null) : null;
+                  const myPhotoUrl = myPhotoRaw ? (myPhotoRaw.startsWith('http') ? myPhotoRaw : `${API_BASE_URL}${myPhotoRaw}`) : null;
+
                   return (
                     <div
                       key={message.id}
-                      className={`flex ${isCurrentUser ? "justify-end" : "justify-start"}`}
+                      className={`flex items-end gap-2 ${isCurrentUser ? "justify-end" : "justify-start"}`}
                     >
+                      {!isCurrentUser && (
+                        <div className="flex-none w-7 h-7 rounded-full bg-gray-300 dark:bg-gray-600 flex items-center justify-center overflow-hidden">
+                          <User className="w-3.5 h-3.5 text-gray-500 dark:text-gray-300" />
+                        </div>
+                      )}
                       <div
                         className={`max-w-md px-4 py-3 rounded-lg ${
                           isCurrentUser
@@ -1912,6 +1920,15 @@ export default function JobMessages() {
                           {formattedTime}
                         </p>
                       </div>
+                      {isCurrentUser && (
+                        <div className="flex-none w-7 h-7 rounded-full bg-[#53ca97] flex items-center justify-center overflow-hidden">
+                          {myPhotoUrl ? (
+                            <img src={myPhotoUrl} alt="" className="w-full h-full object-cover" />
+                          ) : (
+                            <User className="w-3.5 h-3.5 text-white" />
+                          )}
+                        </div>
+                      )}
                     </div>
                   );
                 })

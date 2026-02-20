@@ -8,19 +8,19 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "../co
 import { createResourcesListing, type CreateResourcesPayload } from "../api/resources";
 import { toast } from '../lib/swal';
 import { storage, STORAGE_KEYS } from "../lib/storage";
-import { Building, Shield, Droplet, Scale, Wheat, Heart, Calendar, FileText, X, Upload, MapPin, Phone, Mail, User } from "lucide-react";
+import { Building2, ShieldCheck, Droplets, Weight, Wheat, HeartHandshake, Store, Newspaper, X, Upload, MapPin, Phone, Mail, User, ArrowLeft, ImagePlus, FileText, ChevronRight } from "lucide-react";
 import { API_BASE_URL } from "../lib/api";
 import { AddressSearch, type MappedAddress } from "../components/AddressSearch";
 
 const resourceTypes = [
-  { id: 'logistics', label: 'Logistics Agents & Companies', icon: Building },
-  { id: 'insurance', label: 'Insurance Companies', icon: Shield },
-  { id: 'washout', label: 'Washouts', icon: Droplet },
-  { id: 'scale', label: 'Weight Stations & Scales', icon: Scale },
-  { id: 'hay', label: 'Hay Providers', icon: Wheat },
-  { id: 'stud', label: 'Stud Farms', icon: Heart },
-  { id: 'salesyard', label: 'Sales Yards & Schedule', icon: Calendar },
-  { id: 'beefspotter', label: 'Beef Spotters & Transport', icon: FileText },
+  { id: 'logistics', label: 'Logistics Agents & Companies', desc: 'Brokers, freight agents & 3PL', icon: Building2, color: '#3b82f6', bg: '#eff6ff' },
+  { id: 'insurance', label: 'Insurance Companies', desc: 'Cargo, liability & livestock coverage', icon: ShieldCheck, color: '#8b5cf6', bg: '#f5f3ff' },
+  { id: 'washout', label: 'Washouts', desc: 'Trailer cleaning & sanitation', icon: Droplets, color: '#06b6d4', bg: '#ecfeff' },
+  { id: 'scale', label: 'Weight Stations & Scales', desc: 'Certified weighing services', icon: Weight, color: '#f59e0b', bg: '#fffbeb' },
+  { id: 'hay', label: 'Hay Providers', desc: 'Feed & hay suppliers', icon: Wheat, color: '#22c55e', bg: '#f0fdf4' },
+  { id: 'stud', label: 'Stud Farms', desc: 'Breeding services & genetics', icon: HeartHandshake, color: '#ec4899', bg: '#fdf2f8' },
+  { id: 'salesyard', label: 'Sales Yards & Schedule', desc: 'Livestock auctions & yards', icon: Store, color: '#f97316', bg: '#fff7ed' },
+  { id: 'beefspotter', label: 'Beef Spotters & Transport', desc: 'Market reports & directories', icon: Newspaper, color: '#64748b', bg: '#f8fafc' },
 ];
 
 export default function PostResource() {
@@ -224,35 +224,45 @@ export default function PostResource() {
   // Selection Step
   if (step === 'selection') {
     return (
-      <div className="min-h-screen bg-gradient-to-br from-gray-50 to-gray-100 dark:from-gray-900 dark:to-gray-800 p-4 md:p-6 lg:p-8">
-        <div className="max-w-5xl mx-auto">
-          <div className="mb-8">
-            <div className="flex items-center gap-3 mb-2">
-              <div className="p-2 rounded-lg bg-primary/10">
-                <FileText className="w-6 h-6" style={{ color: "#53ca97" }} />
-              </div>
-              <div>
-                <h1 className="text-3xl font-bold text-gray-900 dark:text-white">Post a Resource</h1>
-                <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
-                  Select the type of resource you want to post
-                </p>
-              </div>
-            </div>
+      <div className="min-h-screen bg-gray-50 dark:bg-gray-900 p-4 md:p-6 lg:p-8">
+        <div className="max-w-4xl mx-auto">
+          <div className="mb-10">
+            <Button
+              variant="ghost"
+              size="sm"
+              className="mb-4 text-gray-500 hover:text-gray-700 gap-1.5 -ml-2"
+              onClick={() => navigate(-1)}
+            >
+              <ArrowLeft className="w-4 h-4" />
+              Back
+            </Button>
+            <h1 className="text-2xl md:text-3xl font-bold text-gray-900 dark:text-white">Post a Resource</h1>
+            <p className="text-gray-500 dark:text-gray-400 mt-2">
+              Choose what type of resource or service you'd like to list
+            </p>
           </div>
 
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-2 gap-4">
             {resourceTypes.map((type) => {
               const Icon = type.icon;
               return (
-                <Button
+                <button
                   key={type.id}
                   onClick={() => handleTypeSelect(type.id)}
-                  className="h-24 flex flex-col gap-2"
-                  variant="outline"
+                  className="group flex items-center gap-4 p-5 rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 hover:border-[#53ca97] hover:shadow-md transition-all duration-200 text-left"
                 >
-                  <Icon className="w-5 h-5" />
-                  <span className="text-sm text-center">{type.label}</span>
-                </Button>
+                  <div
+                    className="w-12 h-12 rounded-xl flex items-center justify-center flex-shrink-0 transition-transform group-hover:scale-110"
+                    style={{ backgroundColor: type.bg }}
+                  >
+                    <Icon className="w-6 h-6" style={{ color: type.color }} />
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <h3 className="font-semibold text-gray-900 dark:text-white text-sm">{type.label}</h3>
+                    <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">{type.desc}</p>
+                  </div>
+                  <ChevronRight className="w-4 h-4 text-gray-300 group-hover:text-[#53ca97] transition-colors flex-shrink-0" />
+                </button>
               );
             })}
           </div>
@@ -261,33 +271,52 @@ export default function PostResource() {
     );
   }
 
+  const selectedTypeInfo = resourceTypes.find(t => t.id === selectedType);
+  const TypeIcon = selectedTypeInfo?.icon || FileText;
+
   // Form Step - Render form based on selected type
   return (
-    <div className="min-h-screen bg-gradient-to-br from-gray-50 to-gray-100 dark:from-gray-900 dark:to-gray-800 p-4 md:p-6 lg:p-8">
-      <div className="max-w-5xl mx-auto">
+    <div className="min-h-screen bg-gray-50 dark:bg-gray-900 p-4 md:p-6 lg:p-8">
+      <div className="max-w-3xl mx-auto">
         <div className="mb-8">
-          <div className="flex items-center gap-3 mb-2">
-            <div className="p-2 rounded-lg bg-primary/10">
-              <FileText className="w-6 h-6" style={{ color: "#53ca97" }} />
+          <button
+            type="button"
+            onClick={() => { setStep('selection'); setSelectedType(''); setFormData({}); }}
+            className="flex items-center gap-1.5 text-sm text-gray-500 hover:text-gray-700 mb-4 transition-colors"
+          >
+            <ArrowLeft className="w-4 h-4" />
+            Back to resource types
+          </button>
+
+          <div className="flex items-center gap-4">
+            <div
+              className="w-12 h-12 rounded-xl flex items-center justify-center flex-shrink-0"
+              style={{ backgroundColor: selectedTypeInfo?.bg || '#f0fdf4' }}
+            >
+              <TypeIcon className="w-6 h-6" style={{ color: selectedTypeInfo?.color || '#53ca97' }} />
             </div>
             <div>
-              <h1 className="text-3xl font-bold text-gray-900 dark:text-white">
-                {resourceTypes.find(t => t.id === selectedType)?.label || 'Post a Resource'}
+              <h1 className="text-xl md:text-2xl font-bold text-gray-900 dark:text-white">
+                {selectedTypeInfo?.label || 'Post a Resource'}
               </h1>
-              <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
-                Enter your resource details
+              <p className="text-sm text-gray-500 dark:text-gray-400 mt-0.5">
+                Fill in the details below to create your listing
               </p>
             </div>
           </div>
         </div>
 
-        <form onSubmit={handleSubmit} className="space-y-6">
-          {/* Render type-specific form fields */}
+        <form onSubmit={handleSubmit} className="space-y-5">
           {selectedType === 'logistics' && (
             <>
-              <Card className="border-2 shadow-lg">
-                <CardHeader>
-                  <CardTitle>Company Information</CardTitle>
+              <Card className="border shadow-sm">
+                <CardHeader className="pb-4">
+                  <div className="flex items-center gap-2.5">
+                    <div className="w-8 h-8 rounded-lg flex items-center justify-center" style={{ backgroundColor: selectedTypeInfo?.bg }}>
+                      <TypeIcon className="w-4 h-4" style={{ color: selectedTypeInfo?.color }} />
+                    </div>
+                    <CardTitle className="text-base">Company Information</CardTitle>
+                  </div>
                 </CardHeader>
                 <CardContent className="space-y-4">
                   <div className="space-y-2">
@@ -330,9 +359,14 @@ export default function PostResource() {
 
           {selectedType === 'insurance' && (
             <>
-              <Card className="border-2 shadow-lg">
-                <CardHeader>
-                  <CardTitle>Insurance Company Information</CardTitle>
+              <Card className="border shadow-sm">
+                <CardHeader className="pb-4">
+                  <div className="flex items-center gap-2.5">
+                    <div className="w-8 h-8 rounded-lg flex items-center justify-center" style={{ backgroundColor: selectedTypeInfo?.bg }}>
+                      <TypeIcon className="w-4 h-4" style={{ color: selectedTypeInfo?.color }} />
+                    </div>
+                    <CardTitle className="text-base">Insurance Company Information</CardTitle>
+                  </div>
                 </CardHeader>
                 <CardContent className="space-y-4">
                   <div className="space-y-2">
@@ -377,9 +411,14 @@ export default function PostResource() {
 
           {selectedType === 'washout' && (
             <>
-              <Card className="border-2 shadow-lg">
-                <CardHeader>
-                  <CardTitle>Washout Facility Information</CardTitle>
+              <Card className="border shadow-sm">
+                <CardHeader className="pb-4">
+                  <div className="flex items-center gap-2.5">
+                    <div className="w-8 h-8 rounded-lg flex items-center justify-center" style={{ backgroundColor: selectedTypeInfo?.bg }}>
+                      <TypeIcon className="w-4 h-4" style={{ color: selectedTypeInfo?.color }} />
+                    </div>
+                    <CardTitle className="text-base">Washout Facility Information</CardTitle>
+                  </div>
                 </CardHeader>
                 <CardContent className="space-y-4">
                   <div className="space-y-2">
@@ -422,9 +461,14 @@ export default function PostResource() {
 
           {selectedType === 'scale' && (
             <>
-              <Card className="border-2 shadow-lg">
-                <CardHeader>
-                  <CardTitle>Weight Station Information</CardTitle>
+              <Card className="border shadow-sm">
+                <CardHeader className="pb-4">
+                  <div className="flex items-center gap-2.5">
+                    <div className="w-8 h-8 rounded-lg flex items-center justify-center" style={{ backgroundColor: selectedTypeInfo?.bg }}>
+                      <TypeIcon className="w-4 h-4" style={{ color: selectedTypeInfo?.color }} />
+                    </div>
+                    <CardTitle className="text-base">Weight Station Information</CardTitle>
+                  </div>
                 </CardHeader>
                 <CardContent className="space-y-4">
                   <div className="space-y-2">
@@ -466,9 +510,14 @@ export default function PostResource() {
 
           {selectedType === 'hay' && (
             <>
-              <Card className="border-2 shadow-lg">
-                <CardHeader>
-                  <CardTitle>Hay Provider Information</CardTitle>
+              <Card className="border shadow-sm">
+                <CardHeader className="pb-4">
+                  <div className="flex items-center gap-2.5">
+                    <div className="w-8 h-8 rounded-lg flex items-center justify-center" style={{ backgroundColor: selectedTypeInfo?.bg }}>
+                      <TypeIcon className="w-4 h-4" style={{ color: selectedTypeInfo?.color }} />
+                    </div>
+                    <CardTitle className="text-base">Hay Provider Information</CardTitle>
+                  </div>
                 </CardHeader>
                 <CardContent className="space-y-4">
                   <div className="space-y-2">
@@ -505,9 +554,14 @@ export default function PostResource() {
 
           {selectedType === 'stud' && (
             <>
-              <Card className="border-2 shadow-lg">
-                <CardHeader>
-                  <CardTitle>Stud Farm Information</CardTitle>
+              <Card className="border shadow-sm">
+                <CardHeader className="pb-4">
+                  <div className="flex items-center gap-2.5">
+                    <div className="w-8 h-8 rounded-lg flex items-center justify-center" style={{ backgroundColor: selectedTypeInfo?.bg }}>
+                      <TypeIcon className="w-4 h-4" style={{ color: selectedTypeInfo?.color }} />
+                    </div>
+                    <CardTitle className="text-base">Stud Farm Information</CardTitle>
+                  </div>
                 </CardHeader>
                 <CardContent className="space-y-4">
                   <div className="space-y-2">
@@ -544,9 +598,14 @@ export default function PostResource() {
 
           {selectedType === 'salesyard' && (
             <>
-              <Card className="border-2 shadow-lg">
-                <CardHeader>
-                  <CardTitle>Sales Yard Information</CardTitle>
+              <Card className="border shadow-sm">
+                <CardHeader className="pb-4">
+                  <div className="flex items-center gap-2.5">
+                    <div className="w-8 h-8 rounded-lg flex items-center justify-center" style={{ backgroundColor: selectedTypeInfo?.bg }}>
+                      <TypeIcon className="w-4 h-4" style={{ color: selectedTypeInfo?.color }} />
+                    </div>
+                    <CardTitle className="text-base">Sales Yard Information</CardTitle>
+                  </div>
                 </CardHeader>
                 <CardContent className="space-y-4">
                   <div className="space-y-2">
@@ -589,9 +648,14 @@ export default function PostResource() {
 
           {selectedType === 'beefspotter' && (
             <>
-              <Card className="border-2 shadow-lg">
-                <CardHeader>
-                  <CardTitle>Beef Spotter Information</CardTitle>
+              <Card className="border shadow-sm">
+                <CardHeader className="pb-4">
+                  <div className="flex items-center gap-2.5">
+                    <div className="w-8 h-8 rounded-lg flex items-center justify-center" style={{ backgroundColor: selectedTypeInfo?.bg }}>
+                      <TypeIcon className="w-4 h-4" style={{ color: selectedTypeInfo?.color }} />
+                    </div>
+                    <CardTitle className="text-base">Beef Spotter Information</CardTitle>
+                  </div>
                 </CardHeader>
                 <CardContent className="space-y-4">
                   <div className="space-y-2">
@@ -635,16 +699,18 @@ export default function PostResource() {
           )}
 
           {/* Common fields for all types */}
-          <Card className="border-2 shadow-lg">
-            <CardHeader>
-              <div className="flex items-center gap-2">
-                <MapPin className="w-5 h-5" style={{ color: "#53ca97" }} />
-                <CardTitle>Location</CardTitle>
+          <Card className="border shadow-sm">
+            <CardHeader className="pb-4">
+              <div className="flex items-center gap-2.5">
+                <div className="w-8 h-8 rounded-lg flex items-center justify-center bg-blue-50">
+                  <MapPin className="w-4 h-4 text-blue-500" />
+                </div>
+                <CardTitle className="text-base">Location</CardTitle>
               </div>
             </CardHeader>
             <CardContent className="space-y-4">
               <div className="space-y-2">
-                <Label>Address</Label>
+                <Label className="text-xs font-medium text-gray-500">Search Address</Label>
                 <AddressSearch
                   value={addressSearchValue}
                   onChange={setAddressSearchValue}
@@ -659,152 +725,176 @@ export default function PostResource() {
                   }}
                 />
               </div>
-              <div className="grid grid-cols-2 gap-4">
-                <div className="space-y-2">
-                  <Label>City</Label>
+              <div className="grid grid-cols-3 gap-3">
+                <div className="space-y-1.5">
+                  <Label className="text-xs font-medium text-gray-500">City</Label>
                   <Input
                     value={formData.city || ''}
                     onChange={(e) => setFormData({ ...formData, city: e.target.value })}
+                    placeholder="City"
                   />
                 </div>
-                <div className="space-y-2">
-                  <Label>State</Label>
+                <div className="space-y-1.5">
+                  <Label className="text-xs font-medium text-gray-500">State</Label>
                   <Input
                     value={formData.state || ''}
                     onChange={(e) => setFormData({ ...formData, state: e.target.value })}
+                    placeholder="State"
                   />
                 </div>
-              </div>
-              <div className="space-y-2">
-                <Label>ZIP Code</Label>
-                <Input
-                  value={formData.zip_code || ''}
-                  onChange={(e) => setFormData({ ...formData, zip_code: e.target.value })}
-                />
+                <div className="space-y-1.5">
+                  <Label className="text-xs font-medium text-gray-500">ZIP Code</Label>
+                  <Input
+                    value={formData.zip_code || ''}
+                    onChange={(e) => setFormData({ ...formData, zip_code: e.target.value })}
+                    placeholder="ZIP"
+                  />
+                </div>
               </div>
             </CardContent>
           </Card>
 
-          <Card className="border-2 shadow-lg">
-            <CardHeader>
-              <div className="flex items-center gap-2">
-                <User className="w-5 h-5" style={{ color: "#53ca97" }} />
-                <CardTitle>Contact Details</CardTitle>
+          <Card className="border shadow-sm">
+            <CardHeader className="pb-4">
+              <div className="flex items-center gap-2.5">
+                <div className="w-8 h-8 rounded-lg flex items-center justify-center bg-green-50">
+                  <User className="w-4 h-4 text-green-600" />
+                </div>
+                <CardTitle className="text-base">Contact Details</CardTitle>
               </div>
             </CardHeader>
             <CardContent className="space-y-4">
-              <div className="space-y-2">
-                <Label>Contact Name</Label>
+              <div className="space-y-1.5">
+                <Label className="text-xs font-medium text-gray-500">Contact Name</Label>
                 <Input
                   value={formData.contact_name || formData.contactPerson || ''}
                   onChange={(e) => setFormData({ ...formData, contact_name: e.target.value, contactPerson: e.target.value })}
+                  placeholder="Full name"
                 />
               </div>
-              <div className="grid grid-cols-2 gap-4">
-                <div className="space-y-2">
-                  <Label>Phone *</Label>
-                  <Input
-                    value={formData.contact_phone || formData.phone || ''}
-                    onChange={(e) => setFormData({ ...formData, contact_phone: e.target.value, phone: e.target.value })}
-                    className={errors.contact_phone ? "border-red-500" : ""}
-                  />
-                  {errors.contact_phone && <p className="text-sm text-red-500">{errors.contact_phone}</p>}
+              <div className="grid grid-cols-2 gap-3">
+                <div className="space-y-1.5">
+                  <Label className="text-xs font-medium text-gray-500">Phone *</Label>
+                  <div className="relative">
+                    <Phone className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
+                    <Input
+                      value={formData.contact_phone || formData.phone || ''}
+                      onChange={(e) => setFormData({ ...formData, contact_phone: e.target.value, phone: e.target.value })}
+                      className={`pl-9 ${errors.contact_phone ? "border-red-500" : ""}`}
+                      placeholder="(555) 000-0000"
+                    />
+                  </div>
+                  {errors.contact_phone && <p className="text-xs text-red-500">{errors.contact_phone}</p>}
                 </div>
-                <div className="space-y-2">
-                  <Label>Email</Label>
-                  <Input
-                    type="email"
-                    value={formData.contact_email || formData.email || ''}
-                    onChange={(e) => setFormData({ ...formData, contact_email: e.target.value, email: e.target.value })}
-                    className={errors.email ? "border-red-500" : ""}
-                  />
-                  {errors.email && <p className="text-sm text-red-500">{errors.email}</p>}
+                <div className="space-y-1.5">
+                  <Label className="text-xs font-medium text-gray-500">Email</Label>
+                  <div className="relative">
+                    <Mail className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
+                    <Input
+                      type="email"
+                      value={formData.contact_email || formData.email || ''}
+                      onChange={(e) => setFormData({ ...formData, contact_email: e.target.value, email: e.target.value })}
+                      className={`pl-9 ${errors.email ? "border-red-500" : ""}`}
+                      placeholder="email@example.com"
+                    />
+                  </div>
+                  {errors.email && <p className="text-xs text-red-500">{errors.email}</p>}
                 </div>
               </div>
             </CardContent>
           </Card>
 
-          <Card className="border-2 shadow-lg">
-            <CardHeader>
-              <CardTitle>Description</CardTitle>
+          <Card className="border shadow-sm">
+            <CardHeader className="pb-4">
+              <div className="flex items-center gap-2.5">
+                <div className="w-8 h-8 rounded-lg flex items-center justify-center bg-purple-50">
+                  <FileText className="w-4 h-4 text-purple-500" />
+                </div>
+                <CardTitle className="text-base">Description</CardTitle>
+              </div>
             </CardHeader>
             <CardContent>
-              <div className="space-y-2">
-                <Label>Description</Label>
+              <div className="space-y-1.5">
+                <Label className="text-xs font-medium text-gray-500">Tell people about your resource</Label>
                 <Textarea
                   value={formData.description || ''}
                   onChange={(e) => setFormData({ ...formData, description: e.target.value })}
                   rows={4}
+                  placeholder="Describe your services, specialties, availability..."
                   className={errors.description ? "border-red-500" : ""}
                 />
-                {errors.description && <p className="text-sm text-red-500">{errors.description}</p>}
+                {errors.description && <p className="text-xs text-red-500">{errors.description}</p>}
               </div>
             </CardContent>
           </Card>
 
-          {/* Photo Upload Section */}
-          <Card className="border-2 shadow-lg">
-            <CardHeader>
-              <div className="flex items-center gap-2">
-                <Upload className="w-5 h-5" style={{ color: "#53ca97" }} />
-                <CardTitle>Photos</CardTitle>
+          <Card className="border shadow-sm">
+            <CardHeader className="pb-4">
+              <div className="flex items-center gap-2.5">
+                <div className="w-8 h-8 rounded-lg flex items-center justify-center bg-amber-50">
+                  <ImagePlus className="w-4 h-4 text-amber-500" />
+                </div>
+                <div>
+                  <CardTitle className="text-base">Photos</CardTitle>
+                  <CardDescription className="text-xs mt-0.5">Add up to 10 photos of your resource</CardDescription>
+                </div>
               </div>
-              <CardDescription>Upload photos (up to 10 photos)</CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
-              <div className="flex items-center justify-center w-full">
-                <label
-                  htmlFor="photo-upload"
-                  className="flex flex-col items-center justify-center w-full h-32 border-2 border-dashed border-gray-300 rounded-lg cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800"
-                >
-                  <div className="flex flex-col items-center justify-center pt-5 pb-6">
-                    <Upload className="w-8 h-8 mb-2 text-gray-400" />
-                    <p className="mb-2 text-sm text-gray-500">
-                      <span className="font-semibold">Click to upload</span> or drag and drop
-                    </p>
-                    <p className="text-xs text-gray-500">PNG, JPG, GIF up to 10MB</p>
-                  </div>
-                  <input
-                    id="photo-upload"
-                    type="file"
-                    className="hidden"
-                    multiple
-                    accept="image/*"
-                    onChange={handlePhotoUpload}
-                    disabled={photos.length >= 10}
-                  />
-                </label>
-              </div>
+              <label
+                htmlFor="photo-upload"
+                className="flex flex-col items-center justify-center w-full py-8 border-2 border-dashed border-gray-200 dark:border-gray-700 rounded-xl cursor-pointer hover:border-[#53ca97] hover:bg-green-50/30 transition-colors"
+              >
+                <div className="w-12 h-12 rounded-full bg-gray-100 dark:bg-gray-800 flex items-center justify-center mb-3">
+                  <Upload className="w-5 h-5 text-gray-400" />
+                </div>
+                <p className="text-sm font-medium text-gray-700 dark:text-gray-300">
+                  Click to upload photos
+                </p>
+                <p className="text-xs text-gray-400 mt-1">PNG, JPG up to 10MB each</p>
+                <input
+                  id="photo-upload"
+                  type="file"
+                  className="hidden"
+                  multiple
+                  accept="image/*"
+                  onChange={handlePhotoUpload}
+                  disabled={photos.length >= 10}
+                />
+              </label>
 
               {photoPreviews.length > 0 && (
-                <div className="grid grid-cols-4 gap-4">
+                <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-5 gap-3">
                   {photoPreviews.map((preview, index) => (
-                    <div key={index} className="relative group">
+                    <div key={index} className="relative group aspect-square rounded-lg overflow-hidden border border-gray-200">
                       <img
                         src={preview}
                         alt={`Preview ${index + 1}`}
-                        className="w-full h-32 object-cover rounded-lg"
+                        className="w-full h-full object-cover"
                       />
+                      <div className="absolute inset-0 bg-black/0 group-hover:bg-black/30 transition-colors" />
                       <button
                         type="button"
                         onClick={() => removePhoto(index)}
-                        className="absolute top-2 right-2 p-1 bg-red-500 text-white rounded-full opacity-0 group-hover:opacity-100 transition-opacity"
+                        className="absolute top-1.5 right-1.5 p-1 bg-red-500 text-white rounded-full opacity-0 group-hover:opacity-100 transition-opacity shadow-sm"
                       >
-                        <X className="w-4 h-4" />
+                        <X className="w-3 h-3" />
                       </button>
                     </div>
                   ))}
                 </div>
               )}
+              {photos.length > 0 && (
+                <p className="text-xs text-gray-400">{photos.length}/10 photos uploaded</p>
+              )}
             </CardContent>
           </Card>
 
-          {/* Submit Buttons */}
-          <div className="flex gap-4">
+          <div className="flex gap-3 pt-2 pb-8">
             <Button
               type="button"
               variant="outline"
-              className="flex-1"
+              className="px-8"
               onClick={() => {
                 setStep('selection');
                 setSelectedType('');
@@ -812,11 +902,12 @@ export default function PostResource() {
               }}
               disabled={loading}
             >
+              <ArrowLeft className="w-4 h-4 mr-2" />
               Back
             </Button>
             <Button
               type="submit"
-              className="flex-1"
+              className="flex-1 h-11"
               style={{ backgroundColor: "#53ca97", color: "white" }}
               disabled={loading}
             >

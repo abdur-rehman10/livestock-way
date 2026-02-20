@@ -106,6 +106,10 @@ export async function getLoads(req: Request, res: Response) {
         payment_mode,
         direct_payment_disclaimer_accepted_at,
         direct_payment_disclaimer_version,
+        pickup_lat,
+        pickup_lng,
+        dropoff_lat,
+        dropoff_lng,
         COALESCE(load_offer_counts.offer_count, 0) AS offer_count
       FROM loads
       LEFT JOIN load_offer_counts
