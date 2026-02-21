@@ -3,6 +3,7 @@ import { pool } from "../config/database";
 import { ensureShipperProfile } from "../utils/profileHelpers";
 import { createPaymentForTrip } from "../services/paymentsService";
 import { emitEvent, SOCKET_EVENTS } from "../socket";
+import { notifyNewLoadPosted } from "../services/notificationEmailService";
 
 const DEFAULT_SHIPPER_ID = "demo_shipper_1";
 const DEFAULT_SHIPPER_ROLE = "shipper";
@@ -349,6 +350,7 @@ export async function createLoad(req: Request, res: Response) {
 
     if (loadRow) {
       emitEvent(SOCKET_EVENTS.LOAD_POSTED, { load: loadRow });
+      notifyNewLoadPosted(loadRow, userId).catch(() => {});
     }
 
     return res.status(201).json({

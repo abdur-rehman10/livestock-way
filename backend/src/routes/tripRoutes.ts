@@ -13,6 +13,11 @@ import { auditRequest } from "../middlewares/auditLogger";
 import { upsertDirectPaymentReceipt, DirectPaymentMethod } from "../services/marketplaceService";
 import { logAuditEvent } from "../services/auditLogService";
 import { resolveDirectPaymentReceipt } from "../utils/directPaymentReceipt";
+import {
+  notifyTripCreated,
+  notifyPickupCompleted,
+  notifyDeliveryCompleted,
+} from "../services/notificationEmailService";
 
 const router = Router();
 router.use(authRequired);
@@ -596,6 +601,7 @@ router.post(
     });
 
     await client.query("COMMIT");
+    notifyTripCreated(trip, shipperUser.rows[0].user_id, haulerUser.rows[0].user_id).catch(() => {});
     return res.status(201).json({ trip, payment });
   } catch (err) {
     await client.query("ROLLBACK");
@@ -855,7 +861,22 @@ router.patch(
       return res.status(404).json({ message: "Trip not found" });
     }
 
-    return res.json(result.rows[0]);
+    const updatedTrip = result.rows[0];
+    if (normalizedStatus === "en_route" && updatedTrip.load_id) {
+      (async () => {
+        try {
+          const s = await pool.query(
+            "SELECT s.user_id FROM loads l JOIN shippers s ON s.id = l.shipper_id WHERE l.id = $1", [updatedTrip.load_id]
+          );
+          if (s.rows[0]?.user_id) {
+            const { notifyTripStarted: nts } = require("../services/notificationEmailService");
+            nts({ id: updatedTrip.id, load_id: updatedTrip.load_id }, s.rows[0].user_id);
+          }
+        } catch {}
+      })();
+    }
+
+    return res.json(updatedTrip);
   } catch (err) {
     console.error("Error in PATCH /api/trips/:id/status:", err);
     return res.status(500).json({ message: "Internal server error" });
@@ -1185,6 +1206,21 @@ router.post(
     }
 
     await client.query("COMMIT");
+
+    // Notify shipper that trip is completed (ePOD uploaded)
+    if (tripUpdate.rows[0]?.load_id) {
+      (async () => {
+        try {
+          const s = await pool.query(
+            "SELECT s.user_id FROM loads l JOIN shippers s ON s.id = l.shipper_id WHERE l.id = $1",
+            [tripUpdate.rows[0].load_id]
+          );
+          if (s.rows[0]?.user_id) {
+            notifyDeliveryCompleted({ tripId, loadId: tripUpdate.rows[0].load_id }, s.rows[0].user_id, "shipper");
+          }
+        } catch {}
+      })();
+    }
 
     return res.json({
       epod: epodResult.rows[0],
@@ -2013,6 +2049,18 @@ router.post(
       await client.query("COMMIT");
       client.release();
 
+      // Notify shipper about pickup
+      (async () => {
+        try {
+          const s = await pool.query(
+            "SELECT s.user_id FROM loads l JOIN shippers s ON s.id = l.shipper_id WHERE l.id = $1", [loadId]
+          );
+          if (s.rows[0]?.user_id) {
+            notifyPickupCompleted({ tripId: tripId!, loadId: loadId!, pickedAt }, s.rows[0].user_id);
+          }
+        } catch {}
+      })();
+
       return res.json({
         message: "Pickup marked successfully",
         load_id: loadId,
@@ -2122,6 +2170,18 @@ router.post(
 
       await client.query("COMMIT");
       client.release();
+
+      // Notify shipper about delivery
+      (async () => {
+        try {
+          const s = await pool.query(
+            "SELECT s.user_id FROM loads l JOIN shippers s ON s.id = l.shipper_id WHERE l.id = $1", [loadId]
+          );
+          if (s.rows[0]?.user_id) {
+            notifyDeliveryCompleted({ tripId: tripId!, loadId: loadId! }, s.rows[0].user_id, "shipper");
+          }
+        } catch {}
+      })();
 
       return res.json({
         message: "Delivery marked successfully",

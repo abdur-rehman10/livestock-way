@@ -539,4 +539,80 @@ router.post("/onboarding-complete", authRequired, async (req, res) => {
   }
 });
 
+// ── Notification Preferences ──
+
+router.get("/notification-preferences", authRequired, async (req, res) => {
+  const userId = (req as any).user?.id;
+  if (!userId) return res.status(401).json({ message: "Unauthorized" });
+
+  try {
+    const r = await pool.query("SELECT * FROM notification_preferences WHERE user_id = $1", [userId]);
+    if (r.rowCount && r.rows[0]) {
+      const p = r.rows[0];
+      return res.json({
+        email_notifications: p.email_notifications,
+        sms_notifications: p.sms_notifications,
+        new_load_posted: p.new_load_posted,
+        new_truck_posted: p.new_truck_posted,
+        offer_received: p.offer_received,
+        new_message: p.new_message,
+        contract_updates: p.contract_updates,
+        trip_updates: p.trip_updates,
+        payment_alerts: p.payment_alerts,
+        marketing_emails: p.marketing_emails,
+      });
+    }
+    // Return defaults if no row yet
+    return res.json({
+      email_notifications: true,
+      sms_notifications: true,
+      new_load_posted: true,
+      new_truck_posted: true,
+      offer_received: true,
+      new_message: true,
+      contract_updates: true,
+      trip_updates: true,
+      payment_alerts: true,
+      marketing_emails: false,
+    });
+  } catch (err: any) {
+    console.error("get notification prefs error:", err);
+    return res.status(500).json({ message: "Failed to load preferences" });
+  }
+});
+
+router.patch("/notification-preferences", authRequired, async (req, res) => {
+  const userId = (req as any).user?.id;
+  if (!userId) return res.status(401).json({ message: "Unauthorized" });
+
+  const fields = [
+    "email_notifications", "sms_notifications", "new_load_posted",
+    "new_truck_posted", "offer_received", "new_message",
+    "contract_updates", "trip_updates", "payment_alerts", "marketing_emails",
+  ];
+  const updates: Record<string, boolean> = {};
+  for (const f of fields) {
+    if (typeof req.body[f] === "boolean") updates[f] = req.body[f];
+  }
+  if (Object.keys(updates).length === 0) {
+    return res.status(400).json({ message: "No valid preferences provided" });
+  }
+
+  try {
+    // Upsert
+    const setClauses = Object.keys(updates).map((k, i) => `${k} = $${i + 2}`).join(", ");
+    const vals = Object.values(updates);
+    await pool.query(
+      `INSERT INTO notification_preferences (user_id, ${Object.keys(updates).join(", ")})
+       VALUES ($1, ${vals.map((_, i) => `$${i + 2}`).join(", ")})
+       ON CONFLICT (user_id) DO UPDATE SET ${setClauses}, updated_at = NOW()`,
+      [userId, ...vals]
+    );
+    return res.json({ message: "Preferences saved", ...updates });
+  } catch (err: any) {
+    console.error("save notification prefs error:", err);
+    return res.status(500).json({ message: "Failed to save preferences" });
+  }
+});
+
 export default router;

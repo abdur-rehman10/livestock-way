@@ -7,6 +7,7 @@ import {
   getTruckBookingThreadMessages,
   sendTruckBookingThreadMessage,
 } from "../services/truckBookingMessagesService";
+import { notifyNewMessage } from "../services/notificationEmailService";
 
 const router = Router();
 
@@ -134,6 +135,9 @@ router.post("/threads/:threadId/messages", authRequired, async (req: Request, re
         { threads: haulerThreads },
         [`user-${thread.hauler_user_id}`]
       );
+
+      const recipientId = userId === thread.shipper_user_id ? thread.hauler_user_id : thread.shipper_user_id;
+      notifyNewMessage({ recipientUserId: recipientId, threadType: "truck-booking", messagePreview: message }).catch(() => {});
     }
 
     res.status(201).json(sentMessage);

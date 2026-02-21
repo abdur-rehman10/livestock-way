@@ -1,5 +1,6 @@
 import { Request, Response } from "express";
 import { pool } from "../config/database";
+import { notifyNewMessage } from "../services/notificationEmailService";
 
 export const getTripMessagesByLoad = async (req: Request, res: Response) => {
   try {
@@ -60,6 +61,24 @@ export const createTripMessage = async (req: Request, res: Response) => {
     );
 
     res.status(201).json(rows[0]);
+
+    // Email notify the other party on the trip
+    (async () => {
+      try {
+        const trip = await pool.query(
+          "SELECT t.hauler_id, l.shipper_id FROM trips t JOIN loads l ON l.id = t.load_id WHERE t.id = $1",
+          [tripId]
+        );
+        if (!trip.rowCount) return;
+        const { hauler_id, shipper_id } = trip.rows[0];
+        const recipientProfileTable = sender === "shipper" ? "haulers" : "shippers";
+        const recipientProfileId = sender === "shipper" ? hauler_id : shipper_id;
+        const recipientUser = await pool.query(`SELECT user_id FROM ${recipientProfileTable} WHERE id = $1`, [recipientProfileId]);
+        if (recipientUser.rows[0]?.user_id) {
+          notifyNewMessage({ recipientUserId: recipientUser.rows[0].user_id, threadType: "trip", messagePreview: message });
+        }
+      } catch {}
+    })();
   } catch (error) {
     console.error("Error creating trip message:", error);
     res.status(500).json({ error: "Failed to create trip message" });

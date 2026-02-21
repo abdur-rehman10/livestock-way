@@ -96,12 +96,18 @@ export function ProfileSettings({ role = 'driver', onBack }: ProfileSettingsProp
   });
 
   const [notifications, setNotifications] = useState({
-    emailNotifications: true,
-    smsNotifications: true,
-    tripUpdates: true,
-    paymentAlerts: true,
-    marketingEmails: false,
+    email_notifications: true,
+    sms_notifications: true,
+    new_load_posted: true,
+    new_truck_posted: true,
+    offer_received: true,
+    new_message: true,
+    contract_updates: true,
+    trip_updates: true,
+    payment_alerts: true,
+    marketing_emails: false,
   });
+  const [savingNotifications, setSavingNotifications] = useState(false);
 
   const [security, setSecurity] = useState({
     currentPassword: '',
@@ -199,6 +205,19 @@ export function ProfileSettings({ role = 'driver', onBack }: ProfileSettingsProp
     } else {
       setLoading(false);
     }
+    // Load notification preferences for all roles
+    (async () => {
+      try {
+        const token = localStorage.getItem('token');
+        const res = await fetch(`${API_BASE_URL}/api/auth/notification-preferences`, {
+          headers: token ? { Authorization: `Bearer ${token}` } : {},
+        });
+        if (res.ok) {
+          const data = await res.json();
+          setNotifications(prev => ({ ...prev, ...data }));
+        }
+      } catch { /* use defaults */ }
+    })();
   }, [role]);
 
   const handlePhotoUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -314,7 +333,29 @@ export function ProfileSettings({ role = 'driver', onBack }: ProfileSettingsProp
     }
   };
 
-  const handleSaveNotifications = () => { toast.success('Notification preferences saved'); };
+  const handleSaveNotifications = async () => {
+    try {
+      setSavingNotifications(true);
+      const token = localStorage.getItem('token');
+      const res = await fetch(`${API_BASE_URL}/api/auth/notification-preferences`, {
+        method: 'PATCH',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+        body: JSON.stringify(notifications),
+      });
+      if (!res.ok) {
+        const data = await res.json();
+        throw new Error(data?.message || 'Failed to save preferences');
+      }
+      toast.success('Notification preferences saved');
+    } catch (err: any) {
+      toast.error(err?.message || 'Failed to save preferences');
+    } finally {
+      setSavingNotifications(false);
+    }
+  };
 
   const [changingPassword, setChangingPassword] = useState(false);
 
@@ -755,21 +796,54 @@ export function ProfileSettings({ role = 'driver', onBack }: ProfileSettingsProp
           <TabsContent value="preferences" className="space-y-4 mt-4">
             <Card>
               <CardHeader><CardTitle className="text-base flex items-center gap-2"><Bell className="w-5 h-5" /> Notification Preferences</CardTitle></CardHeader>
-              <CardContent className="space-y-4">
-                {[
-                  { key: 'emailNotifications', label: 'Email Notifications', desc: 'Receive updates via email' },
-                  { key: 'smsNotifications', label: 'SMS Notifications', desc: 'Receive text messages' },
-                  { key: 'tripUpdates', label: 'Trip Updates', desc: 'Status changes and alerts' },
-                  { key: 'paymentAlerts', label: 'Payment Alerts', desc: 'Payment confirmations' },
-                  { key: 'marketingEmails', label: 'Marketing Emails', desc: 'Tips and promotions' },
-                ].map(item => (
-                  <div key={item.key} className="flex items-center justify-between">
-                    <div><div className="text-sm text-gray-900">{item.label}</div><div className="text-xs text-gray-600">{item.desc}</div></div>
-                    <Switch checked={notifications[item.key as keyof typeof notifications]} onCheckedChange={(checked) => setNotifications({ ...notifications, [item.key]: checked })} />
+              <CardContent className="space-y-5">
+                {/* Master toggle */}
+                <div className="p-3 rounded-lg border-2 border-[#29CA8D]/30 bg-[#29CA8D]/5">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <div className="text-sm font-semibold text-gray-900">Email Notifications</div>
+                      <div className="text-xs text-gray-600">Master toggle — turn off to disable all email notifications</div>
+                    </div>
+                    <Switch checked={notifications.email_notifications} onCheckedChange={(v) => setNotifications({ ...notifications, email_notifications: v })} />
                   </div>
-                ))}
-                <Button onClick={handleSaveNotifications} className="w-full bg-[#29CA8D] hover:bg-[#24b67d]">
-                  <Save className="w-4 h-4 mr-2" /> Save Preferences
+                </div>
+
+                <div className={notifications.email_notifications ? '' : 'opacity-40 pointer-events-none'}>
+                  <p className="text-xs text-gray-500 uppercase tracking-wider mb-3">Notification Categories</p>
+                  {[
+                    { key: 'new_load_posted', label: 'New Load Alerts', desc: 'When a new load is posted on the board' },
+                    { key: 'new_truck_posted', label: 'New Truck Alerts', desc: 'When a new truck is listed on the board' },
+                    { key: 'offer_received', label: 'Offers & Bookings', desc: 'When you receive an offer or booking request' },
+                    { key: 'new_message', label: 'New Messages', desc: 'When someone sends you a message' },
+                    { key: 'contract_updates', label: 'Contract Updates', desc: 'When a contract is created or accepted' },
+                    { key: 'trip_updates', label: 'Trip Updates', desc: 'Trip started, pickup, delivery, and status changes' },
+                    { key: 'payment_alerts', label: 'Payment Alerts', desc: 'Payment confirmations and reminders' },
+                    { key: 'marketing_emails', label: 'Marketing & Tips', desc: 'Platform tips, news, and promotions' },
+                  ].map(item => (
+                    <div key={item.key} className="flex items-center justify-between py-2.5 border-b last:border-b-0">
+                      <div>
+                        <div className="text-sm text-gray-900">{item.label}</div>
+                        <div className="text-xs text-gray-500">{item.desc}</div>
+                      </div>
+                      <Switch
+                        checked={notifications[item.key as keyof typeof notifications]}
+                        onCheckedChange={(checked) => setNotifications({ ...notifications, [item.key]: checked })}
+                      />
+                    </div>
+                  ))}
+                </div>
+
+                <div className="flex items-center justify-between p-3 rounded-lg border">
+                  <div>
+                    <div className="text-sm text-gray-900">SMS Notifications</div>
+                    <div className="text-xs text-gray-500">Receive text messages (coming soon)</div>
+                  </div>
+                  <Switch checked={notifications.sms_notifications} onCheckedChange={(v) => setNotifications({ ...notifications, sms_notifications: v })} />
+                </div>
+
+                <Button onClick={handleSaveNotifications} disabled={savingNotifications} className="w-full bg-[#29CA8D] hover:bg-[#24b67d]">
+                  {savingNotifications ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Save className="w-4 h-4 mr-2" />}
+                  Save Preferences
                 </Button>
               </CardContent>
             </Card>

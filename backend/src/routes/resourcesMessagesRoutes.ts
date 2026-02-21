@@ -8,6 +8,7 @@ import {
   sendResourcesThreadMessage,
 } from "../services/resourcesMessagesService";
 import { emitEvent, SOCKET_EVENTS } from "../socket";
+import { notifyNewMessage } from "../services/notificationEmailService";
 
 const router = Router();
 
@@ -134,6 +135,9 @@ router.post("/threads/:threadId/messages", authRequired, async (req: Request, re
         { threads: updatedThreads[1] },
         [`user-${thread.applicant_user_id}`]
       );
+
+      const recipientId = userId === thread.listing_poster_user_id ? thread.applicant_user_id : thread.listing_poster_user_id;
+      notifyNewMessage({ recipientUserId: recipientId, threadType: "resources", messagePreview: message }).catch(() => {});
     }
 
     res.status(201).json({ message: sentMessage });

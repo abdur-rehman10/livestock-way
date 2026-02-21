@@ -98,6 +98,16 @@ import {
   escrowDisabledResponse,
 } from "../utils/escrowGuard";
 import { pool } from "../config/database";
+import {
+  notifyNewTruckPosted,
+  notifyNewOfferOnLoad,
+  notifyNewBookingOnTruck,
+  notifyContractCreated,
+  notifyContractAccepted,
+  notifyTripCreated,
+  notifyTripStarted,
+  notifyDeliveryCompleted,
+} from "../services/notificationEmailService";
 
 type AuthUser = {
   id?: string;
@@ -225,6 +235,7 @@ router.post(
         destinationLat: req.body?.destination_lat ?? null,
         destinationLng: req.body?.destination_lng ?? null,
       });
+      notifyNewTruckPosted(availability, authUser.id!).catch(() => {});
       res.status(201).json({ availability });
     } catch (err: any) {
       console.error("createTruckAvailability error", err);
@@ -445,6 +456,7 @@ router.post(
         truckId: req.body.truck_id ? String(req.body.truck_id) : null,
       });
       emitOfferCreatedEvent(offer);
+      notifyNewOfferOnLoad(offer, load.shipper_id).catch(() => {});
       res.status(201).json({ offer });
     } catch (err) {
       console.error("createLoadOffer error", err);
@@ -1504,6 +1516,20 @@ router.post(
         selectedRouteData: selected_route_data ?? null,
       });
 
+      // Notify shippers that a trip was created for their loads
+      (async () => {
+        try {
+          for (const tl of result.tripLoads || []) {
+            const s = await pool.query(
+              "SELECT s.user_id FROM loads l JOIN shippers s ON s.id = l.shipper_id WHERE l.id = $1", [tl.load_id]
+            );
+            if (s.rows[0]?.user_id) {
+              notifyTripCreated(result.trip, s.rows[0].user_id, userId);
+            }
+          }
+        } catch {}
+      })();
+
       return res.status(201).json({ trip: result.trip, trip_loads: result.tripLoads });
     } catch (err: any) {
       console.error("Error in POST /api/marketplace/trips/create-from-listing:", err);
@@ -1826,6 +1852,17 @@ router.post("/trips/:tripId/start", authRequired, async (req, res) => {
     const updatedLoad = await updateLoadStatus(context.load.id, LoadStatus.IN_TRANSIT);
     emitTripEvent(updatedTrip);
     emitLoadEvent(updatedLoad);
+
+    // Notify shipper that trip has started
+    (async () => {
+      try {
+        const s = await pool.query(
+          "SELECT s.user_id FROM shippers s WHERE s.id = $1", [context.load.shipper_id]
+        );
+        if (s.rows[0]?.user_id) notifyTripStarted({ id: context.trip.id, load_id: context.load.id }, s.rows[0].user_id);
+      } catch {}
+    })();
+
     return res.json({ trip: updatedTrip, load: updatedLoad });
   } catch (err) {
     console.error("startTrip error", err);
@@ -1861,6 +1898,15 @@ router.post("/trips/:tripId/mark-delivered", authRequired, async (req, res) => {
     const updatedLoad = await updateLoadStatus(context.load.id, LoadStatus.DELIVERED);
     emitTripEvent(updatedTrip);
     emitLoadEvent(updatedLoad);
+
+    // Notify shipper that delivery was completed by hauler
+    (async () => {
+      try {
+        const s = await pool.query("SELECT s.user_id FROM shippers s WHERE s.id = $1", [context.load.shipper_id]);
+        if (s.rows[0]?.user_id) notifyDeliveryCompleted({ tripId: context.trip.id, loadId: context.load.id }, s.rows[0].user_id, "shipper");
+      } catch {}
+    })();
+
     return res.json({ trip: updatedTrip, load: updatedLoad });
   } catch (err) {
     console.error("markDelivered error", err);
@@ -1906,6 +1952,15 @@ router.post("/trips/:tripId/confirm-delivery", authRequired, async (req, res) =>
     emitTripEvent(updatedTrip);
     emitPaymentEvent(updatedPayment);
     emitLoadEvent(updatedLoad);
+
+    // Notify hauler that shipper confirmed delivery
+    (async () => {
+      try {
+        const h = await pool.query("SELECT h.user_id FROM haulers h WHERE h.id = $1", [context.trip.hauler_id]);
+        if (h.rows[0]?.user_id) notifyDeliveryCompleted({ tripId: context.trip.id, loadId: context.load.id }, h.rows[0].user_id, "hauler");
+      } catch {}
+    })();
+
     return res.json({ trip: updatedTrip, payment: updatedPayment, load: updatedLoad });
   } catch (err) {
     console.error("confirmDelivery error", err);
@@ -2599,6 +2654,7 @@ router.post(
         offeredCurrency: req.body?.offered_currency,
         notes: req.body?.notes,
       });
+      notifyNewBookingOnTruck(booking, availability.hauler_id).catch(() => {});
       res.status(201).json({ booking });
     } catch (err: any) {
       console.error("createBookingForAvailability error", err);
@@ -2701,6 +2757,21 @@ router.post(
         attachments: req.body?.attachments,
       });
       emitEvent(SOCKET_EVENTS.TRUCK_CHAT_MESSAGE, { message });
+
+      // Email notify the other party
+      (async () => {
+        try {
+          const { notifyNewMessage } = require("../services/notificationEmailService");
+          const shipperUser = await pool.query("SELECT user_id FROM shippers WHERE id = $1", [context.chat.shipper_id]);
+          const haulerUser = await pool.query("SELECT user_id FROM haulers WHERE id = $1", [context.availability.hauler_id]);
+          const senderUid = String(authUser.id ?? "");
+          const shipperUid = shipperUser.rows[0]?.user_id ? String(shipperUser.rows[0].user_id) : null;
+          const haulerUid = haulerUser.rows[0]?.user_id ? String(haulerUser.rows[0].user_id) : null;
+          const recipientUid = senderUid === shipperUid ? haulerUid : shipperUid;
+          if (recipientUid) notifyNewMessage({ recipientUserId: recipientUid, threadType: "truck-chat", messagePreview: req.body?.message });
+        } catch {}
+      })();
+
       res.status(201).json({ message });
     } catch (err: any) {
       console.error("truck chat message error", err);
@@ -3031,6 +3102,7 @@ router.post(
         contractPayload: req.body?.contract_payload ?? {},
         createdByUserId: String(authUser.id ?? ""),
       });
+      notifyContractCreated(contract).catch(() => {});
       return res.status(201).json({ contract });
     } catch (err: any) {
       console.error("createContract error", err);
@@ -3137,6 +3209,19 @@ router.post(
         actingUserId: String(authUser.id ?? ""),
       });
       await emitBookingSideEffects(result);
+      notifyContractAccepted(contract).catch(() => {});
+      if (result.trip) {
+        const tripRef = result.trip;
+        (async () => {
+          try {
+            const sUid = await pool.query("SELECT user_id FROM shippers WHERE id = $1", [contract.shipper_id]);
+            const hUid = await pool.query("SELECT user_id FROM haulers WHERE id = $1", [contract.hauler_id]);
+            if (sUid.rows[0]?.user_id && hUid.rows[0]?.user_id) {
+              notifyTripCreated(tripRef, sUid.rows[0].user_id, hUid.rows[0].user_id);
+            }
+          } catch {}
+        })();
+      }
       res.json(result);
     } catch (err: any) {
       console.error("acceptContract error", err);
