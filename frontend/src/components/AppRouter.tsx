@@ -56,6 +56,7 @@ import PostResource from '../pages/PostResource';
 import ResourcesBoard from '../pages/ResourcesBoard';
 import ComingSoon from '../pages/ComingSoon';
 import { WeightCalculator } from '../pages/WeightCalculator';
+import { AdminBlogManagement } from '../pages/AdminBlogManagement';
 
 type UserRole = 'shipper' | 'driver' | 'hauler' | 'stakeholder' | 'super-admin' | null;
 type LandingRole = 'hauler' | 'shipper' | 'stakeholder';
@@ -427,6 +428,7 @@ export function AppRouter({ showKeyboardShortcuts, onKeyboardShortcutsToggle }: 
                   <Route path="analytics" element={<div>Analytics (Coming Soon)</div>} />
                   <Route path="marketplace" element={<MarketplaceTab userRole="super-admin" />} />
                   <Route path="support" element={<SupportTab />} />
+                  <Route path="blogs" element={<AdminBlogManagement />} />
                   <Route path="settings" element={<div>Admin settings coming soon</div>} />
                   <Route path="*" element={<Navigate to="/admin/dashboard" replace />} />
                 </Routes>

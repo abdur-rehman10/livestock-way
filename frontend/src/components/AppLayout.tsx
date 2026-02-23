@@ -194,6 +194,7 @@ export function AppLayout({ children, userRole, onLogout }: AppLayoutProps) {
           { path: '/admin/analytics', icon: BarChart3, label: 'Analytics' },
           { path: '/admin/marketplace', icon: ShoppingCart, label: 'Marketplace' },
           { path: '/admin/support', icon: HelpCircle, label: 'Support' },
+          { path: '/admin/blogs', icon: FileText, label: 'Blogs' },
           { path: '/admin/settings', icon: Settings, label: 'Settings' },
         ],
       ],
@@ -792,6 +793,7 @@ export function AppLayout({ children, userRole, onLogout }: AppLayoutProps) {
                     {userRole === 'shipper' && (
                       <>
                         <DropdownMenuItem onClick={() => navigate('/shipper/loadboard')}>
+                          
                           <Package className="w-4 h-4 mr-2" />
                           Load Board
                         </DropdownMenuItem>
