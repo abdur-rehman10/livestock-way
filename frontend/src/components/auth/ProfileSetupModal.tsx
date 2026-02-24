@@ -188,7 +188,6 @@ export function ProfileSetupModal({
           phone_number: phone || undefined,
           company_name: businessName || companyName || undefined,
           country: primaryLocation || hqLocation || undefined,
-          hauler_type: driverType || undefined,
           profile_photo_url: profilePhoto || undefined,
           years_in_business: yearsInBusiness || undefined,
           truck_count: truckCount || undefined,

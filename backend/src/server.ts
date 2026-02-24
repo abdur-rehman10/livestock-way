@@ -30,12 +30,21 @@ import resourcesMessagesRoutes from "./routes/resourcesMessagesRoutes";
 import loadOfferMessagesRoutes from "./routes/loadOfferMessagesRoutes";
 import truckBookingMessagesRoutes from "./routes/truckBookingMessagesRoutes";
 import blogRoutes from "./routes/blogRoutes";
+import stripeRoutes, { handleStripeWebhook } from "./routes/stripeRoutes";
 import { initSocket } from "./socket";
 
 dotenv.config();
 
 const app = express();
 app.use(cors());
+
+// Stripe webhook needs raw body — must be before express.json()
+app.post(
+  "/api/stripe/webhooks",
+  express.raw({ type: "application/json" }),
+  handleStripeWebhook
+);
+
 app.use(express.json());
 app.use(
   "/uploads",
@@ -96,6 +105,7 @@ app.use("/api/resources-messages", resourcesMessagesRoutes);
 app.use("/api/load-offer-messages", loadOfferMessagesRoutes);
 app.use("/api/truck-booking-messages", truckBookingMessagesRoutes);
 app.use("/api/blogs", blogRoutes);
+app.use("/api/stripe", stripeRoutes);
 
 async function bootstrapSuperAdmin() {
   const email = process.env.SUPER_ADMIN_EMAIL || "admin@test.com";

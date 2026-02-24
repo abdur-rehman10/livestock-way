@@ -8,6 +8,12 @@ import {
   validateIndividualPricingInput,
   validateIndividualPackageUpdateInput,
 } from "../utils/pricing";
+import {
+  stripe,
+  createStripeProduct,
+  createStripePrice,
+  archiveStripePrice,
+} from "../services/stripeService";
 
 export function isSuperAdminUser(user?: { user_type?: string | null }) {
   const role = (user?.user_type ?? "").toString().trim().toLowerCase();
@@ -475,18 +481,51 @@ router.put("/pricing/hauler-individual", async (req, res) => {
     );
 
     const existing = await pool.query(
-      `SELECT id FROM pricing_configs WHERE target_user_type = 'HAULER_INDIVIDUAL' AND is_active = TRUE LIMIT 1`
+      `SELECT id, monthly_price AS old_price, stripe_product_id, stripe_price_id_monthly, stripe_price_id_yearly
+       FROM pricing_configs WHERE target_user_type = 'HAULER_INDIVIDUAL' AND is_active = TRUE LIMIT 1`
     );
+
+    const priceChanged =
+      existing.rowCount &&
+      Number(existing.rows[0].old_price) !== Number(monthly_price);
+
+    let stripeProductId = existing.rows[0]?.stripe_product_id ?? null;
+    let stripePriceIdMonthly = existing.rows[0]?.stripe_price_id_monthly ?? null;
+    let stripePriceIdYearly = existing.rows[0]?.stripe_price_id_yearly ?? null;
+
+    // Sync to Stripe when price changes
+    if (priceChanged && stripeProductId) {
+      try {
+        const monthlyCents = Math.round(Number(monthly_price) * 100);
+        const yearlyCents = Math.round(Number(monthly_price) * 10 * 100);
+
+        // Archive old prices
+        if (stripePriceIdMonthly) await archiveStripePrice(stripePriceIdMonthly).catch(() => null);
+        if (stripePriceIdYearly) await archiveStripePrice(stripePriceIdYearly).catch(() => null);
+
+        // Create new prices
+        const newMonthly = await createStripePrice(stripeProductId, monthlyCents, "month");
+        const newYearly = await createStripePrice(stripeProductId, yearlyCents, "year");
+        stripePriceIdMonthly = newMonthly.id;
+        stripePriceIdYearly = newYearly.id;
+      } catch (stripeErr) {
+        console.error("Stripe price sync failed (continuing with DB update):", stripeErr);
+      }
+    }
 
     if (existing.rowCount) {
       const updated = await pool.query(
         `
           UPDATE pricing_configs
-          SET monthly_price = $1, updated_at = NOW(), is_active = TRUE
-          WHERE id = $2
+          SET monthly_price = $1,
+              stripe_price_id_monthly = COALESCE($2, stripe_price_id_monthly),
+              stripe_price_id_yearly = COALESCE($3, stripe_price_id_yearly),
+              updated_at = NOW(),
+              is_active = TRUE
+          WHERE id = $4
           RETURNING *
         `,
-        [monthly_price, existing.rows[0].id]
+        [monthly_price, stripePriceIdMonthly, stripePriceIdYearly, existing.rows[0].id]
       );
       return res.json(updated.rows[0]);
     }

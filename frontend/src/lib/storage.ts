@@ -93,6 +93,7 @@ export const STORAGE_KEYS = {
   WELCOME_DISMISSED: 'livestockway_welcome_dismissed',
   SHIPPER_OFFERS_UNREAD: 'livestockway_shipper_offers_unread',
   USER_PHOTO: 'livestockway_user_photo',
+  PENDING_PAYMENT_REDIRECT: 'livestockway_pending_payment_redirect',
 } as const;
 
 /**

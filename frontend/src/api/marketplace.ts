@@ -1130,3 +1130,62 @@ export async function updateStakeholderProfile(payload: Partial<StakeholderProfi
     body: JSON.stringify(payload),
   });
 }
+
+// ── Stripe API ──────────────────────────────────────────────────────
+
+const STRIPE_BASE = `${API_BASE_URL}/api/stripe`;
+
+async function stripeRequest<T>(
+  path: string,
+  options: RequestInit & { method?: HttpMethod } = {}
+): Promise<T> {
+  const method = options.method ?? "GET";
+  const hasJsonBody = !!options.body && typeof options.body === "string";
+  const response = await fetch(`${STRIPE_BASE}${path}`, {
+    ...options,
+    method,
+    headers: buildHeaders(method, options.headers, hasJsonBody),
+  });
+  if (!response.ok) {
+    const message = await response.text().catch(() => "");
+    throw new Error(message || `Stripe request failed (${response.status})`);
+  }
+  if (response.status === 204) return null as T;
+  return (await response.json()) as T;
+}
+
+export interface StripeConnectStatus {
+  connected: boolean;
+  onboardingComplete: boolean;
+  accountId: string | null;
+  chargesEnabled?: boolean;
+  payoutsEnabled?: boolean;
+  detailsSubmitted?: boolean;
+  requirementsCurrentlyDue?: string[];
+}
+
+export async function fetchStripeConnectStatus() {
+  return stripeRequest<StripeConnectStatus>("/connect/status");
+}
+
+export async function startStripeConnectOnboarding() {
+  return stripeRequest<{ url: string; accountId: string }>("/connect/onboard", {
+    method: "POST",
+  });
+}
+
+export interface StripeCheckoutResponse {
+  sessionId: string;
+  url: string;
+}
+
+export async function createStripeSubscriptionCheckout(billingCycle: "MONTHLY" | "YEARLY") {
+  return stripeRequest<StripeCheckoutResponse>("/subscription/checkout", {
+    method: "POST",
+    body: JSON.stringify({ billing_cycle: billingCycle }),
+  });
+}
+
+export async function fetchStripeConfig() {
+  return stripeRequest<{ publishableKey: string }>("/config");
+}

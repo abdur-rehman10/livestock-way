@@ -15,6 +15,10 @@ import { EnterpriseSelection } from './EnterpriseSelection';
 import { BookConsultation } from './BookConsultation';
 import { SocialSignUpRoleSelection } from './SocialSignUpRoleSelection';
 import { ProfileSetupModal } from './ProfileSetupModal';
+import IndividualPlanChooseView from '../IndividualPlanChooseView';
+import { storage, STORAGE_KEYS } from '../../lib/storage';
+import { createStripeSubscriptionCheckout } from '../../api/marketplace';
+import { toast } from '../../lib/swal';
 
 export type AuthScreen =
   | "sign-in"
@@ -24,6 +28,7 @@ export type AuthScreen =
   | "sign-up-form"
   | "email-confirmation"
   | "otp-verification"
+  | "plan-selection"
   | "profile-setup"
   | "forgot-password"
   | "reset-password"
@@ -128,8 +133,15 @@ export function AuthWrapper({ onAuthComplete }: AuthWrapperProps) {
     onAuthComplete(backendRole, token, userData);
   };
 
+  const [pendingAuthData, setPendingAuthData] = useState<{ token: string; userData: any } | null>(null);
+
   const handleSignUpSuccess = (token: string, userData: any) => {
     const backendRole = userData?.user_type as BackendRole;
+    if (backendRole === 'hauler' || selectedRole === 'hauler') {
+      setPendingAuthData({ token, userData });
+      setCurrentScreen("plan-selection");
+      return;
+    }
     onAuthComplete(backendRole, token, userData);
   };
 
@@ -214,6 +226,8 @@ export function AuthWrapper({ onAuthComplete }: AuthWrapperProps) {
           onContinue={() => {
             if (selectedRole === "enterprise" && paymentInfo.planName) {
               setCurrentScreen("payment");
+            } else if (selectedRole === "hauler") {
+              setCurrentScreen("plan-selection");
             } else {
               setShowProfileSetup(true);
               setCurrentScreen("profile-setup");
@@ -230,6 +244,8 @@ export function AuthWrapper({ onAuthComplete }: AuthWrapperProps) {
           onVerified={() => {
             if (selectedRole === "enterprise" && paymentInfo.planName) {
               setCurrentScreen("payment");
+            } else if (selectedRole === "hauler") {
+              setCurrentScreen("plan-selection");
             } else {
               setShowProfileSetup(true);
               setCurrentScreen("profile-setup");
@@ -238,11 +254,44 @@ export function AuthWrapper({ onAuthComplete }: AuthWrapperProps) {
         />
       )}
 
+      {currentScreen === "plan-selection" && selectedRole === "hauler" && (
+        <IndividualPlanChooseView
+          variant="auth"
+          defaultSelected="FREE"
+          onContinue={(plan) => {
+            storage.set(STORAGE_KEYS.INDIVIDUAL_PLAN_CODE, plan);
+            if (pendingAuthData) {
+              const backendRole = (pendingAuthData.userData?.user_type ?? 'hauler') as BackendRole;
+              onAuthComplete(backendRole, pendingAuthData.token, pendingAuthData.userData);
+              setPendingAuthData(null);
+            } else {
+              setShowProfileSetup(true);
+              setCurrentScreen("profile-setup");
+            }
+          }}
+          onPaidCheckout={async (billingCycle) => {
+            storage.set(STORAGE_KEYS.INDIVIDUAL_PLAN_CODE, 'PAID');
+            storage.set(STORAGE_KEYS.USER_ROLE, 'hauler');
+            updatePreferences({ showOnboarding: false });
+            const result = await createStripeSubscriptionCheckout(billingCycle);
+            if (result.url) {
+              window.location.href = result.url;
+            } else {
+              toast.error('Could not start checkout. Please try again.');
+            }
+          }}
+          onBack={() => setCurrentScreen("sign-up-form")}
+        />
+      )}
+
       {currentScreen === "profile-setup" && (
         <div className="flex flex-col items-center justify-center min-h-screen bg-gray-50 p-4">
           <ProfileSetupModal
             isOpen={showProfileSetup}
-            onClose={() => setShowProfileSetup(false)}
+            onClose={() => {
+              setShowProfileSetup(false);
+              handleProfileComplete({});
+            }}
             userRole={selectedRole}
             verifiedEmail={signupEmail}
             verifiedPhone={signupMobile}

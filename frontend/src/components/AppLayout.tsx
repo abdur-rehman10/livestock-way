@@ -48,6 +48,7 @@ import logo from "../assets/livestockway-logo.svg";
 import { storage, STORAGE_KEYS } from "../lib/storage";
 import { SubscriptionCTA } from "./SubscriptionCTA";
 import { useHaulerSubscription } from "../hooks/useHaulerSubscription";
+import { fetchStripeConnectStatus, type StripeConnectStatus } from "../api/marketplace";
 import {
   fetchBookings,
   fetchContracts,
@@ -90,6 +91,20 @@ export function AppLayout({ children, userRole, onLogout }: AppLayoutProps) {
     needsPayment,
   } =
     useHaulerSubscription();
+
+  const [stripeConnectStatus, setStripeConnectStatus] = useState<StripeConnectStatus | null>(null);
+
+  useEffect(() => {
+    if (userRole !== 'hauler') return;
+    fetchStripeConnectStatus()
+      .then(setStripeConnectStatus)
+      .catch(() => null);
+  }, [userRole]);
+
+  const showStripeConnectBanner =
+    userRole === 'hauler' &&
+    stripeConnectStatus !== null &&
+    !stripeConnectStatus.onboardingComplete;
 
   type SidebarRoute = { path: string; icon: typeof LayoutDashboard; label: string };
   type SidebarSection = SidebarRoute[];
@@ -906,8 +921,25 @@ export function AppLayout({ children, userRole, onLogout }: AppLayoutProps) {
         {/* Page Content */}
         <main className="flex-1 overflow-y-auto">
           <div className="container mx-auto p-6 space-y-4">
+            {showStripeConnectBanner && (
+              <div className="bg-amber-50 border border-amber-200 rounded-lg p-3 flex items-center justify-between gap-3">
+                <div className="flex items-center gap-2 min-w-0">
+                  <Shield className="w-5 h-5 text-amber-600 flex-shrink-0" />
+                  <p className="text-sm text-amber-800">
+                    <span className="font-medium">Stripe setup required:</span> Complete your Stripe Connect account to receive payments and create trips.
+                  </p>
+                </div>
+                <Button
+                  size="sm"
+                  className="bg-[#635bff] hover:bg-[#4b44e0] text-white flex-shrink-0"
+                  onClick={() => navigate('/hauler/stripe-setup')}
+                >
+                  Complete Setup
+                </Button>
+              </div>
+            )}
             {userRole === 'hauler' &&
-              isIndividualHauler &&
+              (isIndividualHauler || accountMode?.toUpperCase() === 'INDIVIDUAL') &&
               (subscriptionStatus ?? '').toUpperCase() !== 'ACTIVE' && (
                 <SubscriptionCTA
                   variant={freeTripUsed || needsPayment ? 'BLOCKED_UPGRADE' : 'INFO_FREE_TRIP'}

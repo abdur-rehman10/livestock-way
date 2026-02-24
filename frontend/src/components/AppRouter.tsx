@@ -57,6 +57,7 @@ import ResourcesBoard from '../pages/ResourcesBoard';
 import ComingSoon from '../pages/ComingSoon';
 import { WeightCalculator } from '../pages/WeightCalculator';
 import { AdminBlogManagement } from '../pages/AdminBlogManagement';
+import StripeConnectSetup from '../pages/StripeConnectSetup';
 
 type UserRole = 'shipper' | 'driver' | 'hauler' | 'stakeholder' | 'super-admin' | null;
 type LandingRole = 'hauler' | 'shipper' | 'stakeholder';
@@ -101,7 +102,7 @@ export function AppRouter({ showKeyboardShortcuts, onKeyboardShortcutsToggle }: 
     storage.set(STORAGE_KEYS.USER_ROLE, role);
     setSelectedLandingRole(null);
     storage.remove(STORAGE_KEYS.LANDING_ROLE);
-    
+
     // Check if needs onboarding
     const hasOnboardingWizard = role === 'hauler' || role === 'shipper' || role === 'stakeholder';
     const prefs = getPreferences();
@@ -111,7 +112,6 @@ export function AppRouter({ showKeyboardShortcuts, onKeyboardShortcutsToggle }: 
       navigate('/onboarding');
     } else {
       setNeedsOnboarding(false);
-      // Navigate to dashboard
       const dashboardPath = role === 'super-admin' ? '/admin/dashboard' : `/${role}/dashboard`;
       navigate(dashboardPath);
     }
@@ -129,6 +129,7 @@ export function AppRouter({ showKeyboardShortcuts, onKeyboardShortcutsToggle }: 
     if (userData?.profile_photo_url) {
       storage.set(STORAGE_KEYS.USER_PHOTO, userData.profile_photo_url);
     }
+
     handleLogin(backendRole as UserRole);
   };
 
@@ -297,6 +298,9 @@ export function AppRouter({ showKeyboardShortcuts, onKeyboardShortcutsToggle }: 
                   <Route path="earnings" element={<WalletTab />} />
                   <Route path="subscription" element={<HaulerSubscription />} />
                   <Route path="payment" element={<HaulerPayment />} />
+                  <Route path="stripe-setup" element={<StripeConnectSetup />} />
+                  <Route path="stripe-return" element={<StripeConnectSetup />} />
+                  <Route path="stripe-refresh" element={<StripeConnectSetup />} />
                   <Route path="team" element={<TeamManagement />} />
                   <Route path="truck-board" element={<TruckBoard />} />
                   <Route path="marketplace" element={<MarketplaceTab userRole="hauler" />} />

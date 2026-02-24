@@ -493,6 +493,18 @@ router.post(
       });
     }
 
+    // Block trip creation if hauler hasn't completed Stripe Connect onboarding
+    const stripeCheck = await pool.query(
+      `SELECT stripe_onboarding_complete FROM haulers WHERE id = $1`,
+      [hauler_id]
+    );
+    if (stripeCheck.rowCount && stripeCheck.rows[0].stripe_onboarding_complete === false) {
+      return res.status(403).json({
+        message: "Hauler must complete Stripe Connect setup before creating trips. Go to Settings → Stripe to complete onboarding.",
+        code: "STRIPE_ONBOARDING_REQUIRED",
+      });
+    }
+
     const priceNumber = Number(agreed_price);
     if (!priceNumber || Number.isNaN(priceNumber) || priceNumber <= 0) {
       return res
@@ -1787,9 +1799,15 @@ router.post(
         return res.status(401).json({ error: "Unauthorized" });
       }
       const userId = String(authUser.id);
-      const haulerId = await pool.query(`SELECT id::text FROM haulers WHERE user_id = $1`, [userId]);
+      const haulerId = await pool.query(`SELECT id::text, stripe_onboarding_complete FROM haulers WHERE user_id = $1`, [userId]);
       if (!haulerId.rows[0]?.id) {
         return res.status(400).json({ error: "Hauler profile not found" });
+      }
+      if (haulerId.rows[0].stripe_onboarding_complete === false) {
+        return res.status(403).json({
+          error: "Complete Stripe Connect setup before creating trips.",
+          code: "STRIPE_ONBOARDING_REQUIRED",
+        });
       }
       const haulerIdStr = haulerId.rows[0].id;
 
